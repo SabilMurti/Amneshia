@@ -12,11 +12,9 @@ class AmneshiaDB:
             db_dir = os.path.expanduser("~/.amneshia")
         os.makedirs(db_dir, exist_ok=True)
         
-        # SQLite untuk Exact Match dan Relational Data
         self.sqlite_path = os.path.join(db_dir, "memory.db")
         self._init_sqlite()
         
-        # ChromaDB untuk RAG / Semantic Search
         self.chroma_client = chromadb.PersistentClient(path=os.path.join(db_dir, "chroma"))
         self.collection = self.chroma_client.get_or_create_collection(name="memories")
 
@@ -37,7 +35,6 @@ class AmneshiaDB:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_type ON memories(type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON memories(scope)")
             
-            # Tabel untuk menyimpan target export markdown
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS export_targets (
                     id TEXT PRIMARY KEY,
@@ -46,12 +43,24 @@ class AmneshiaDB:
                 )
             """)
             
-            # Insert default Hermes target if empty
             cursor = conn.execute("SELECT COUNT(*) FROM export_targets")
             if cursor.fetchone()[0] == 0:
                 default_path = os.path.expanduser("~/.hermes/memories")
                 conn.execute("INSERT INTO export_targets (id, name, path) VALUES (?, ?, ?)", 
                              (str(uuid.uuid4()), "Hermes Agent", default_path))
+
+    def _format_row(self, row: sqlite3.Row) -> Dict[str, Any]:
+        d = dict(row)
+        try:
+            d['tags'] = json.loads(d['tags']) if d['tags'] else []
+        except Exception:
+            d['tags'] = []
+            
+        try:
+            d['metadata'] = json.loads(d['metadata']) if d['metadata'] else {}
+        except Exception:
+            d['metadata'] = {}
+        return d
 
     def add_memory(self, mem_type: str, scope: str, content: str, tags: List[str] = None, metadata: Dict[str, Any] = None) -> str:
         mem_id = str(uuid.uuid4())
@@ -77,7 +86,7 @@ class AmneshiaDB:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM memories WHERE id = ?", (mem_id,)).fetchone()
             if row:
-                return dict(row)
+                return self._format_row(row)
         return None
 
     def search_exact(self, query: str = "", scope: str = None, mem_type: str = None) -> List[Dict[str, Any]]:
@@ -98,7 +107,7 @@ class AmneshiaDB:
         with sqlite3.connect(self.sqlite_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql, params).fetchall()
-            return [dict(row) for row in rows]
+            return [self._format_row(row) for row in rows]
 
     def search_semantic(self, query: str, n_results: int = 5, where_filter: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         results = self.collection.query(
