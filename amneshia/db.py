@@ -36,20 +36,34 @@ class AmneshiaDB:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_type ON memories(type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON memories(scope)")
+            
+            # Tabel untuk menyimpan target export markdown
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS export_targets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL
+                )
+            """)
+            
+            # Insert default Hermes target if empty
+            cursor = conn.execute("SELECT COUNT(*) FROM export_targets")
+            if cursor.fetchone()[0] == 0:
+                default_path = os.path.expanduser("~/.hermes/memories")
+                conn.execute("INSERT INTO export_targets (id, name, path) VALUES (?, ?, ?)", 
+                             (str(uuid.uuid4()), "Hermes Agent", default_path))
 
     def add_memory(self, mem_type: str, scope: str, content: str, tags: List[str] = None, metadata: Dict[str, Any] = None) -> str:
         mem_id = str(uuid.uuid4())
         tags_json = json.dumps(tags or [])
         meta_json = json.dumps(metadata or {})
         
-        # Simpan ke SQLite
         with sqlite3.connect(self.sqlite_path) as conn:
             conn.execute(
                 "INSERT INTO memories (id, type, scope, content, tags, metadata) VALUES (?, ?, ?, ?, ?, ?)",
                 (mem_id, mem_type, scope, content, tags_json, meta_json)
             )
         
-        # Simpan ke ChromaDB untuk Semantic Search
         combined_text = f"Type: {mem_type}, Scope: {scope}. {content}"
         self.collection.add(
             documents=[combined_text],
@@ -87,14 +101,11 @@ class AmneshiaDB:
             return [dict(row) for row in rows]
 
     def search_semantic(self, query: str, n_results: int = 5, where_filter: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """Mencari memori berdasarkan makna kalimat (RAG)."""
         results = self.collection.query(
             query_texts=[query],
             n_results=n_results,
             where=where_filter
         )
-        
-        # Ambil detail dari SQLite
         memories = []
         if results and results['ids'] and len(results['ids'][0]) > 0:
             for mem_id in results['ids'][0]:
@@ -110,3 +121,20 @@ class AmneshiaDB:
                 self.collection.delete(ids=[mem_id])
                 return True
         return False
+        
+    def get_export_targets(self) -> List[Dict[str, str]]:
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM export_targets").fetchall()
+            return [dict(row) for row in rows]
+            
+    def add_export_target(self, name: str, path: str) -> str:
+        target_id = str(uuid.uuid4())
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.execute("INSERT INTO export_targets (id, name, path) VALUES (?, ?, ?)", (target_id, name, path))
+        return target_id
+        
+    def remove_export_target(self, target_id: str) -> bool:
+        with sqlite3.connect(self.sqlite_path) as conn:
+            cursor = conn.execute("DELETE FROM export_targets WHERE id = ?", (target_id,))
+            return cursor.rowcount > 0
