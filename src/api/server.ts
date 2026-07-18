@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { join } from 'path';
 import { addMemory, searchMemories, updateMemory, deleteMemory, getMemory } from '../db/index.js';
 import { triggerExport } from './exporter.js';
 
@@ -7,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Get all memories or search
+// API Endpoints
 app.get('/api/memories', (req, res) => {
   const { query, scope, type } = req.query;
   const results = searchMemories(
@@ -18,7 +19,6 @@ app.get('/api/memories', (req, res) => {
   res.json(results);
 });
 
-// Add a memory
 app.post('/api/memories', async (req, res) => {
   const { type, scope, content, tags, metadata } = req.body;
   if (!type || !scope || !content) {
@@ -30,7 +30,6 @@ app.post('/api/memories', async (req, res) => {
   res.json(mem);
 });
 
-// Update a memory
 app.put('/api/memories/:id', async (req, res) => {
   const { content } = req.body;
   const mem = updateMemory(req.params.id, content);
@@ -40,7 +39,6 @@ app.put('/api/memories/:id', async (req, res) => {
   res.json(mem);
 });
 
-// Delete a memory
 app.delete('/api/memories/:id', async (req, res) => {
   const success = deleteMemory(req.params.id);
   if (!success) return res.status(404).json({ error: 'Memory not found' });
@@ -49,7 +47,6 @@ app.delete('/api/memories/:id', async (req, res) => {
   res.json({ success: true });
 });
 
-// Trigger manual export
 app.post('/api/export', async (req, res) => {
   try {
     await triggerExport();
@@ -59,8 +56,17 @@ app.post('/api/export', async (req, res) => {
   }
 });
 
+// Melayani Dashboard statis dari Vite build (dist-dashboard)
+const dashboardPath = join(process.cwd(), 'dist-dashboard');
+app.use(express.static(dashboardPath));
+
+// Fallback untuk SPA routing
+app.get('*', (req, res) => {
+  res.sendFile(join(dashboardPath, 'index.html'));
+});
+
 export function runApiServer(port = 3456) {
   app.listen(port, () => {
-    console.error(`Omni Memory API & Dashboard Backend running on http://localhost:${port}`);
+    console.error(`\n🚀 Omni Memory API & Dashboard running at: http://localhost:${port}\n`);
   });
 }

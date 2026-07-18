@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "name": "omni-memory-dashboard",
+      "script": "dist/index.js",
+      "args": "api",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "watch": false
+    }
+  ]
+}

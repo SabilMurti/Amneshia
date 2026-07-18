@@ -4,10 +4,13 @@ import { runApiServer } from './api/server.js';
 const mode = process.argv[2] || 'mcp';
 
 if (mode === 'api') {
-  runApiServer();
+  // Hanya jalan sebagai API & Dashboard server (Daemon)
+  runApiServer(3456);
+} else if (mode === 'mcp') {
+  // Hanya jalan sebagai MCP Server (via Stdio untuk Hermes/IDE)
+  runMcpServer().catch(console.error);
 } else {
-  // Default: jalan sebagai MCP Server via stdio
-  // Kita spawn API server di background agar dashboard tetap jalan
+  // Fallback hybrid (kalau dipanggil manual tanpa arg)
   runApiServer(3456);
   runMcpServer().catch(console.error);
 }
