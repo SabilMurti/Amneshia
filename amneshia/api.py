@@ -8,6 +8,12 @@ import os
 from .db import AmneshiaDB
 from .exporter import export_to_markdowns
 
+# Try to import our new MCP Client Bridge
+try:
+    from .mcp_client import codebase_mcp, MCP_CLIENT_AVAILABLE
+except ImportError:
+    MCP_CLIENT_AVAILABLE = False
+
 app = FastAPI(title="Amneshia API", description="Single Source of Truth Memory Hub")
 app.add_middleware(
     CORSMiddleware,
@@ -71,9 +77,32 @@ def api_export_manual():
     export_to_markdowns()
     return {"status": "success"}
 
+# ==========================================
+# 🚀 INTEGRATION: External MCP Connectors
+# ==========================================
+@app.get("/api/integrations/codebase/projects")
+async def get_codebase_projects():
+    if not MCP_CLIENT_AVAILABLE:
+        raise HTTPException(status_code=501, detail="MCP Client SDK not configured properly")
+    try:
+        data = await codebase_mcp.list_projects()
+        return {"status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/integrations/codebase/search")
+async def search_codebase_memory(project: str, query: str = "", limit: int = 10):
+    if not MCP_CLIENT_AVAILABLE:
+        raise HTTPException(status_code=501, detail="MCP Client SDK not configured properly")
+    try:
+        data = await codebase_mcp.search_graph(project=project, query=query, limit=limit)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
 # Serve Frontend static build
-# We assume the UI is built into a 'ui/dist' folder in the project root
-# When installed via pip, we might need a more robust path resolution, but for now we look relative to cwd or module
+# ==========================================
 module_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(module_dir)
 ui_path = os.path.join(project_root, "ui", "dist")
@@ -85,7 +114,7 @@ else:
     def index():
         return {"message": "Amneshia API is running. Build the React UI in 'ui/dist' to see the dashboard here."}
 
-def run_api_server():
+def run_api_server(port=3457):
     import uvicorn
-    print("\n🚀 Amneshia API & Dashboard running at: http://localhost:3456\n")
-    uvicorn.run(app, host="0.0.0.0", port=3456, log_level="error")
+    print(f"\n🚀 Amneshia API & Dashboard running at: http://localhost:{port}\n")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="error")

@@ -18,15 +18,23 @@ function App() {
       if (mode === 'exact') url += `?query=${encodeURIComponent(query)}`;
       else url = `${API_URL}/memories/semantic?query=${encodeURIComponent(query)}`;
     }
-    const res = await fetch(url);
-    const data = await res.json();
-    setMemories(data);
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      setMemories(data);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const fetchExports = async () => {
-    const res = await fetch(`${API_URL}/exports`);
-    const data = await res.json();
-    setExports(data);
+    try {
+      const res = await fetch(`${API_URL}/exports`);
+      const data = await res.json();
+      setExports(data);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => {
@@ -176,7 +184,7 @@ function App() {
                       </span>
                       <span className="text-slate-400 text-sm font-medium">#{mem.scope}</span>
                       
-                      {mem.tags && mem.tags.length > 0 && mem.tags.map((tag: string, i: number) => (
+                      {Array.isArray(mem.tags) && mem.tags.length > 0 && mem.tags.map((tag: string, i: number) => (
                         <span key={i} className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded text-xs">{tag}</span>
                       ))}
 
@@ -210,17 +218,18 @@ function App() {
             <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 h-fit shadow-lg">
               <h2 className="text-lg font-bold text-white mb-5">Add Target Path</h2>
               <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Add an absolute path to a directory where Amneshia will automatically write <code className="text-blue-400">USER.md</code> and <code className="text-blue-400">MEMORY.md</code> whenever memory changes.
+                Provide an absolute directory path to split into <code className="text-blue-400">USER.md</code> & <code className="text-blue-400">MEMORY.md</code>, <br/>
+                <b>OR</b> provide a specific Markdown file path (e.g. <code className="text-blue-400">/home/murtix/project/GEMINI.md</code>) to bundle everything into that single file!
               </p>
               <form onSubmit={addExport} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Target Name</label>
-                  <input type="text" placeholder="e.g. Codebase Memory MCP" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                  <input type="text" placeholder="e.g. Antigravity IDE (Gemini)" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
                     value={exportForm.name} onChange={e => setExportForm({...exportForm, name: e.target.value})} required/>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Absolute Directory Path</label>
-                  <input type="text" placeholder="e.g. /home/user/projects/my-agent/context" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Absolute File / Directory Path</label>
+                  <input type="text" placeholder="e.g. /home/murtix/project/GEMINI.md" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
                     value={exportForm.path} onChange={e => setExportForm({...exportForm, path: e.target.value})} required/>
                 </div>
                 <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-500 transition-colors py-2.5 rounded-lg font-bold text-white shadow-lg shadow-cyan-500/20 mt-2">
