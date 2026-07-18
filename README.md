@@ -1,52 +1,12 @@
-# Omni Memory MCP
+# Amneshia
 
-A unified "Single Source of Truth" memory system for AI Agents (Hermes, Oh My Pi, Antigravity IDE, Claude Desktop, etc.).
+A unified "Single Source of Truth" memory system with RAG for AI Agents (Hermes, Oh My Pi, Antigravity IDE, Claude Desktop, etc.).
 
-## Features
-- **Centralized Database**: Uses `better-sqlite3` for fast, local, and structured storage.
-- **MCP Server**: Provides `add_memory` and `search_memories` tools via `stdio`.
-- **API Server**: REST API for external integrations.
-- **Web Dashboard**: Clean local UI (built with Vite + TS) to manage your memories.
-- **Auto-Exporter**: Automatically exports structured Markdown (`USER.md` and `MEMORY.md`) to `~/.hermes/memories/` every time a memory is added or modified.
+## Architecture
+- **Language**: Python (FastAPI + MCP SDK)
+- **Database**: SQLite (built-in, zero native dependencies) + Vector Embeddings for RAG
+- **Dashboard**: React TS (Vite) embedded and served by FastAPI
+- **Auto-Exporter**: Syncs to Hermes `USER.md` and `MEMORY.md` automatically
 
-## Installation
-
-```bash
-git clone https://github.com/SabilMurti/omni-memory-mcp.git
-cd omni-memory-mcp
-npm install
-npm run build
-```
-
-## Usage
-
-### 1. Run MCP and API Server
-```bash
-npm start
-```
-This will start the stdio MCP server AND run the Express API backend on port `3456`.
-
-### 2. Run the Dashboard
-In a separate terminal:
-```bash
-npm run dev:dashboard
-```
-Open `http://localhost:5173` to view the UI.
-
-### 3. Connect to Hermes Agent
-Add this to your `~/.hermes/config.yaml`:
-```yaml
-mcp_servers:
-  omni_memory:
-    command: "node"
-    args: ["/path/to/omni-memory-mcp/dist/index.js"]
-```
-
-## Structure
-- `src/db/` - SQLite database and schema.
-- `src/mcp/` - Model Context Protocol tool definitions.
-- `src/api/` - Express REST server and Markdown Exporter.
-- `src/dashboard/` - Vite frontend logic.
-
----
-Built by Sabil Murti (Murtix) / AI Integrator
+## Vision
+Amneshia acts as the central brain for all your AI agents and tools. It provides both exact-match memory (structured SQLite) and semantic search (Vector DB for RAG). The built-in MCP server allows *any* MCP-compatible tool (like `codebase-memory-mcp` or Claude Desktop) to connect and utilize the unified memory.
