@@ -43,6 +43,16 @@ class AmneshiaDB:
                 )
             """)
             
+            # Tabel untuk pendaftaran Universal MCP Servers
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS mcp_servers (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    args TEXT NOT NULL
+                )
+            """)
+            
             cursor = conn.execute("SELECT COUNT(*) FROM export_targets")
             if cursor.fetchone()[0] == 0:
                 default_path = os.path.expanduser("~/.hermes/memories")
@@ -146,4 +156,23 @@ class AmneshiaDB:
     def remove_export_target(self, target_id: str) -> bool:
         with sqlite3.connect(self.sqlite_path) as conn:
             cursor = conn.execute("DELETE FROM export_targets WHERE id = ?", (target_id,))
+            return cursor.rowcount > 0
+
+    # === DYNAMIC MCP SERVER REGISTRY ===
+    def get_mcp_servers(self) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM mcp_servers").fetchall()
+            return [{"id": r["id"], "name": r["name"], "command": r["command"], "args": json.loads(r["args"])} for r in rows]
+
+    def add_mcp_server(self, name: str, command: str, args: List[str]) -> str:
+        server_id = str(uuid.uuid4())
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.execute("INSERT INTO mcp_servers (id, name, command, args) VALUES (?, ?, ?, ?)", 
+                         (server_id, name, command, json.dumps(args)))
+        return server_id
+
+    def delete_mcp_server(self, server_id: str) -> bool:
+        with sqlite3.connect(self.sqlite_path) as conn:
+            cursor = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
             return cursor.rowcount > 0

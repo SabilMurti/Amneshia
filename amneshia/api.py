@@ -4,13 +4,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
+import json
 
 from .db import AmneshiaDB
 from .exporter import export_to_markdowns
 
-# Try to import our new MCP Client Bridge
 try:
-    from .mcp_client import codebase_mcp, MCP_CLIENT_AVAILABLE
+    from .mcp_client import dynamic_mcp, MCP_CLIENT_AVAILABLE
 except ImportError:
     MCP_CLIENT_AVAILABLE = False
 
@@ -34,6 +34,11 @@ class MemoryInput(BaseModel):
 class ExportTargetInput(BaseModel):
     name: str
     path: str
+
+class MCPServerInput(BaseModel):
+    name: str
+    command: str
+    args: List[str]
 
 @app.post("/api/memories")
 def api_add_memory(mem: MemoryInput):
@@ -78,31 +83,61 @@ def api_export_manual():
     return {"status": "success"}
 
 # ==========================================
-# 🚀 INTEGRATION: External MCP Connectors
+# 🚀 INTEGRATION: Dynamic Universal MCP Bridge
 # ==========================================
-@app.get("/api/integrations/codebase/projects")
-async def get_codebase_projects():
+@app.get("/api/mcp/servers")
+def get_mcp_servers():
+    return db.get_mcp_servers()
+
+@app.post("/api/mcp/servers")
+def add_mcp_server(srv: MCPServerInput):
+    server_id = db.add_mcp_server(srv.name, srv.command, srv.args)
+    return {"id": server_id, "status": "success"}
+
+@app.delete("/api/mcp/servers/{server_id}")
+async def delete_mcp_server(server_id: str):
+    if db.delete_mcp_server(server_id):
+        await dynamic_mcp.disconnect(server_id)
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Server not found")
+
+@app.get("/api/mcp/servers/{server_id}/tools")
+async def get_mcp_tools(server_id: str):
     if not MCP_CLIENT_AVAILABLE:
-        raise HTTPException(status_code=501, detail="MCP Client SDK not configured properly")
+        raise HTTPException(status_code=501, detail="MCP Client SDK not available")
+        
+    servers = db.get_mcp_servers()
+    target = next((s for s in servers if s["id"] == server_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Server not registered")
+        
     try:
-        data = await codebase_mcp.list_projects()
-        return {"status": "success", "data": data}
+        if server_id not in dynamic_mcp.sessions:
+            await dynamic_mcp.connect_server(server_id, target["command"], target["args"])
+        data = await dynamic_mcp.list_tools(server_id)
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/integrations/codebase/search")
-async def search_codebase_memory(project: str, query: str = "", limit: int = 10):
+@app.post("/api/mcp/servers/{server_id}/call/{tool_name}")
+async def call_mcp_tool(server_id: str, tool_name: str, payload: Dict[str, Any]):
     if not MCP_CLIENT_AVAILABLE:
-        raise HTTPException(status_code=501, detail="MCP Client SDK not configured properly")
+        raise HTTPException(status_code=501, detail="MCP Client SDK not available")
+        
+    servers = db.get_mcp_servers()
+    target = next((s for s in servers if s["id"] == server_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Server not registered")
+        
     try:
-        data = await codebase_mcp.search_graph(project=project, query=query, limit=limit)
-        return {"status": "success", "data": data}
+        if server_id not in dynamic_mcp.sessions:
+            await dynamic_mcp.connect_server(server_id, target["command"], target["args"])
+        data = await dynamic_mcp.call_tool(server_id, tool_name, payload.get("arguments", {}))
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==========================================
 # Serve Frontend static build
-# ==========================================
 module_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(module_dir)
 ui_path = os.path.join(project_root, "ui", "dist")

@@ -8,62 +8,60 @@ try:
 except ImportError:
     MCP_CLIENT_AVAILABLE = False
 
-class CodebaseMemoryClient:
-    def __init__(self, command: str = "uvx", args: List[str] = ["codebase-memory-mcp"]):
-        self.server_params = StdioServerParameters(command=command, args=args)
-        self.session = None
-        self._exit_stack = None
+class DynamicMCPClient:
+    def __init__(self):
+        self.sessions: Dict[str, ClientSession] = {}
+        self.exit_stacks: Dict[str, Any] = {}
         
-    async def connect(self):
+    async def connect_server(self, server_id: str, command: str, args: List[str]):
         if not MCP_CLIENT_AVAILABLE:
             raise RuntimeError("MCP client SDK is not installed or configured correctly.")
             
         import contextlib
-        self._exit_stack = contextlib.AsyncExitStack()
+        stack = contextlib.AsyncExitStack()
+        self.exit_stacks[server_id] = stack
         
-        read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(self.server_params))
-        self.session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-        await self.session.initialize()
-
-    async def search_graph(self, project: str, query: str = "", limit: int = 10) -> Dict[str, Any]:
-        """Queries the codebase-memory-mcp's search_graph tool."""
-        if not self.session:
-            await self.connect()
+        server_params = StdioServerParameters(command=command, args=args)
+        read_stream, write_stream = await stack.enter_async_context(stdio_client(server_params))
+        session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+        await session.initialize()
+        self.sessions[server_id] = session
+        
+    async def list_tools(self, server_id: str) -> Dict[str, Any]:
+        if server_id not in self.sessions:
+            return {"error": "Server not connected"}
+        
+        result = await self.sessions[server_id].list_tools()
+        tools = []
+        # Parse MCP ListToolsResult object safely
+        if result and hasattr(result, 'tools'):
+            for t in result.tools:
+                tools.append({
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.inputSchema
+                })
+        return {"status": "success", "tools": tools}
+        
+    async def call_tool(self, server_id: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        if server_id not in self.sessions:
+            return {"error": "Server not connected"}
             
-        result = await self.session.call_tool(
-            "mcp__search_graph", 
-            arguments={"project": project, "query": query, "limit": limit}
-        )
-        # Parse the text response (which usually contains the JSON from codebase-memory)
+        result = await self.sessions[server_id].call_tool(tool_name, arguments=arguments)
+        
         if result and hasattr(result, 'content') and len(result.content) > 0:
+            text_data = result.content[0].text
             try:
-                # The text inside the result content block is typically a JSON string
-                return json.loads(result.content[0].text)
+                return {"status": "success", "data": json.loads(text_data)}
             except Exception:
-                return {"raw": result.content[0].text}
-        return {"error": "No data returned"}
+                return {"status": "success", "data": text_data}
+        return {"error": "No data returned or tool execution failed"}
 
-    async def list_projects(self) -> Dict[str, Any]:
-        """Lists projects indexed by codebase-memory-mcp."""
-        if not self.session:
-            await self.connect()
-            
-        result = await self.session.call_tool(
-            "mcp__list_projects", 
-            arguments={"reason": "Amneshia Hub cross-reference"}
-        )
-        if result and hasattr(result, 'content') and len(result.content) > 0:
-            try:
-                return json.loads(result.content[0].text)
-            except Exception:
-                return {"raw": result.content[0].text}
-        return {"error": "No data returned"}
-
-    async def disconnect(self):
-        if self._exit_stack:
-            await self._exit_stack.aclose()
-            self.session = None
-            self._exit_stack = None
+    async def disconnect(self, server_id: str):
+        if server_id in self.exit_stacks:
+            await self.exit_stacks[server_id].aclose()
+            del self.sessions[server_id]
+            del self.exit_stacks[server_id]
 
 # Global instance for API
-codebase_mcp = CodebaseMemoryClient()
+dynamic_mcp = DynamicMCPClient()
