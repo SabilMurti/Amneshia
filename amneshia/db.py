@@ -1,3 +1,5 @@
+/usr/bin/bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8): No such file or directory
+/usr/bin/bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8): No such file or directory
 import os
 import json
 import uuid
@@ -72,12 +74,34 @@ class AmneshiaDB:
             d['metadata'] = {}
         return d
 
-    def add_memory(self, mem_type: str, scope: str, content: str, tags: List[str] = None, metadata: Dict[str, Any] = None) -> str:
+    def add_memory(self, mem_type: str, scope: str, content: str, tags: List[str] = None, metadata: Dict[str, Any] = None, synthesize: bool = True) -> str:
         mem_id = str(uuid.uuid4())
-        tags_json = json.dumps(tags or [])
-        meta_json = json.dumps(metadata or {})
         
-        with sqlite3.connect(self.sqlite_path) as conn:
+        # If synthesis is enabled, pass through brain
+        if synthesize and content:
+            try:
+                from .brain import get_brain
+                brain = get_brain()
+                if brain.ready:
+                    semantic_context = self.search_semantic(content, n_results=3)
+                    result = brain.synthesize_memory(content, semantic_context)
+                    content = result.get("content", content)
+                    existing_tags = tags or []
+                    new_tags = result.get("tags", [])
+                    existing_tags.extend(new_tags)
+                    tags = list(set(existing_tags))
+            except Exception:
+                                existing_tags = tags or []
+                                new_tags = result.get("tags", [])
+                                existing_tags.extend(new_tags)
+                                tags = list(set(existing_tags))
+                        except Exception:
+                            pass
+
+                    tags_json = json.dumps(tags or [])
+                    meta_json = json.dumps(metadata or {})
+
+                    # Simpan ke SQLite
             conn.execute(
                 "INSERT INTO memories (id, type, scope, content, tags, metadata) VALUES (?, ?, ?, ?, ?, ?)",
                 (mem_id, mem_type, scope, content, tags_json, meta_json)
