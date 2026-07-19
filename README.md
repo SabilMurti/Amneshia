@@ -85,8 +85,11 @@ flowchart TB
 You can run Amneshia instantly from GitHub without installing anything:
 
 ```bash
-# Run HTTP Web Dashboard & REST API
-npx -y github:SabilMurti/Amneshia --http --port 3457
+# Run HTTP Web Dashboard & REST API in background daemon mode
+amneshia --http --port 3457 --daemon
+
+# Or via npx directly from GitHub:
+npx -y github:SabilMurti/Amneshia --http --port 3457 --daemon
 ```
 
 Or install globally via GitHub:
@@ -94,8 +97,8 @@ Or install globally via GitHub:
 ```bash
 npm install -g github:SabilMurti/Amneshia
 
-# Then run anywhere:
-amneshia --http --port 3457
+# Run in background daemon mode anywhere:
+amneshia --http --daemon
 ```
 
 ### 2. Stdio Mode (Standard IDE Integration)

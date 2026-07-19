@@ -3,6 +3,8 @@
 // src/index.ts
 import os2 from "os";
 import path4 from "path";
+import fs3 from "fs";
+import { spawn } from "child_process";
 import { Command } from "commander";
 
 // src/server.ts
@@ -1907,9 +1909,26 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Unified memory hub for AI agents").version("2.0.0").option("--data-dir <path>", "Custom data directory", path4.join(os2.homedir(), ".amneshia")).option("--http", "Enable HTTP/SSE server mode", false).option("-p, --port <number>", "Port number", parseInt, 3457);
+program.name("amneshia").description("\u{1F9E0} Unified memory hub for AI agents").version("2.0.0").option("--data-dir <path>", "Custom data directory", path4.join(os2.homedir(), ".amneshia")).option("--http", "Enable HTTP/SSE server mode", false).option("-p, --port <number>", "Port number", parseInt, 3457).option("-d, --daemon", "Run server in background daemon mode", false);
 async function main() {
   const options = program.parse(process.argv).opts();
+  if (options.daemon) {
+    const logDir = path4.join(os2.homedir(), ".amneshia");
+    fs3.mkdirSync(logDir, { recursive: true });
+    const logFile = path4.join(logDir, "server.log");
+    const out = fs3.openSync(logFile, "a");
+    const err = fs3.openSync(logFile, "a");
+    const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d");
+    const child = spawn(process.argv[0], [process.argv[1], ...args], {
+      detached: true,
+      stdio: ["ignore", out, err]
+    });
+    child.unref();
+    console.log(`[Amneshia] Server launched in background daemon mode (PID: ${child.pid}).`);
+    console.log(`[Amneshia] Web Dashboard: http://localhost:${options.port}`);
+    console.log(`[Amneshia] Server logs: ${logFile}`);
+    process.exit(0);
+  }
   await startServer({ dataDir: options.dataDir, http: options.http, port: options.port });
 }
 void main();
