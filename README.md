@@ -30,7 +30,7 @@ Amneshia coordinates Stdio and SSE/HTTP transports, managing underlying storage,
 
 ## Quick Start
 
-### 1. Direct Run via GitHub (Zero NPM publish needed)
+### 1. Direct Run via GitHub
 
 You can run Amneshia instantly from GitHub without installing anything:
 
@@ -101,7 +101,11 @@ Amneshia serves a web client on `http://localhost:3457` when running in HTTP mod
 3. **Settings Controls** to switch LLM Providers (Ollama, OpenAI, or None) and manage auto-export markdown logs.
 
 ### Codebase Memory MCP Bridge Sync
-When `codebase-memory-mcp` is configured as a bridge server and enabled, the system supports synchronization via the `/api/bridge/sync` REST endpoint (or `call_bridge_tool`). This triggers a scan of the bridged server's active codebase indices, importing:
+
+[**codebase-memory-mcp**](https://github.com/DeusData/codebase-memory-mcp) is an advanced MCP server by DeusData that creates structural codebase knowledge graphs (AST analysis, function signatures, dependency trees, and git metadata) for AI agents.
+
+When `codebase-memory-mcp` is configured as a bridge server in Amneshia and enabled, the system supports 1-click cross-graph synchronization via the `/api/bridge/sync` REST endpoint (or `call_bridge_tool`). This triggers an automated scan of the bridged server's active codebase indices, importing:
+
 - Workspace root paths.
 - Codebase nodes and edges metrics.
 - Active git branches and commit SHAs.
