@@ -1,4 +1,25 @@
+# Dependencies
 node_modules/
+dashboard/node_modules/
+
+# Build outputs
 dist/
-dist-dashboard/
+dashboard/dist/
+*.js.map
+
+# Environment & OS
 .env
+.env.local
+.DS_Store
+*.log
+
+# Databases & Local Memory Exports
+*.db
+*.db-wal
+*.db-shm
+.amneshia/
+.ua/
+
+# Scratch & Temporary
+scratch/
+MEMORY.md
