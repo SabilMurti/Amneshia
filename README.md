@@ -114,6 +114,24 @@ These synchronized details are stored directly under the project entity's observ
 
 ---
 
+## Recommended Agent Directives / System Rules
+
+To give your AI Agent (Cursor, Antigravity IDE, Claude Code, Windsurf, etc.) optimal long-term memory behavior, copy and paste the following prompt rules into your agent's custom instructions file (e.g. `GEMINI.md`, `CLAUDE.md`, `.cursorrules`, `AGENTS.md`):
+
+```markdown
+### Long-Term Memory & Knowledge Graph Directives (Amneshia)
+You are equipped with **Amneshia** (`amneshia`), a zero-external-database SQLite FTS5 long-term memory hub and Knowledge Graph.
+
+1. **Session-Start Memory Retrieval**:
+   - At the beginning of a conversation or session, call `search_memory` or `read_graph` to recall user context, active project preferences, entity relationships, and architectural decisions.
+2. **Proactive Fact & Preference Persistence**:
+   - Whenever the user shares a new preference, personal detail, workflow choice, or project update, proactively invoke `add_observations` or `create_entities` to store it permanently in Amneshia.
+3. **Conflict Resolution & Consolidation**:
+   - When user preferences change or old statements are updated, append the revision via `add_observations`, or call `consolidate_memory` ("Sleep Cycle") to track update histories and supersede outdated memories automatically.
+```
+
+---
+
 ## License
 
 MIT © Sabil Murti (Murtix)
