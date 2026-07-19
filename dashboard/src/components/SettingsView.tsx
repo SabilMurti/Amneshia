@@ -14,7 +14,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   refreshStats,
   onConsolidate,
 }) => {
-  const [provider, setProvider] = useState<'openai' | 'ollama' | 'none'>('none');
+  const [provider, setProvider] = useState<'openai' | 'ollama' | '9router' | 'none'>('none');
   const [isUpdatingProvider, setIsUpdatingProvider] = useState(false);
   const [providerSuccess, setProviderSuccess] = useState(false);
 
@@ -24,7 +24,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Read current configuration
   // For Amneshia, we can hit GET /health or /api/stats. AI Provider is set via POST /api/config/ai.
   // We can let the user pick and toggle the provider.
-  const handleUpdateProvider = async (p: 'openai' | 'ollama' | 'none') => {
+  const handleUpdateProvider = async (p: 'openai' | 'ollama' | '9router' | 'none') => {
     setIsUpdatingProvider(true);
     setProviderSuccess(false);
     try {
@@ -77,8 +77,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             Choose the back-end AI Provider for processing entity visibility, extracting semantic connections, scoring importance, and summarizing raw logs.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 font-mono text-xs select-none">
-            {(['none', 'openai', 'ollama'] as const).map((p) => {
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 font-mono text-xs select-none">
+            {(['none', '9router', 'openai', 'ollama'] as const).map((p) => {
               const isActive = provider === p;
               return (
                 <button
@@ -91,9 +91,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       : 'bg-[#09090b] border-[#27272a] hover:border-zinc-500 text-zinc-400'
                   }`}
                 >
-                  <span className="font-bold uppercase">{p}</span>
+                  <span className="font-bold uppercase">{p === '9router' ? '9router AG' : p}</span>
                   <span className="text-[10px] text-zinc-500 leading-normal">
                     {p === 'none' && 'Deterministic mode. Disable active inferences.'}
+                    {p === '9router' && 'Local/Cloud 9router AG free gateway model.'}
                     {p === 'openai' && 'Enterprise API cloud model execution.'}
                     {p === 'ollama' && 'Locally hosted models via Ollama server endpoint.'}
                   </span>

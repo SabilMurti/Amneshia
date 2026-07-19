@@ -136,7 +136,7 @@ Amneshia exposes 18 specialized tools to client agents for managing the memory c
 | | `get_stats` | *None* | Returns storage metrics, entity domain breakdowns, and recent activity logs. |
 | **Exporter** | `export_memory` | *None* | Exports current graph snapshot to active Markdown targets. |
 | | `manage_export_targets`| `action`, `name`?, `path`?, `format`?, `id`?, `autoExport`? | Registers, removes, or toggles auto-export Markdown paths. |
-| | `configure_ai` | `provider` (string) | Changes default AI synthesis provider (`none`, `ollama`, `openai`). |
+| | `configure_ai` | `provider` (string) | Changes default AI synthesis provider (`none`, `9router`, `ollama`, `openai`). |
 | **Universal Bridge**| `manage_bridge_servers`| `action` (string), `name`?, `command`?, `args`?, `id`? | Adds, lists, or removes downstream bridged MCP servers in SQLite. |
 | | `list_bridge_tools` | `serverId` (string), `command`?, `args`? | Queries a bridged server to retrieve its exposed tools. |
 | | `call_bridge_tool` | `serverId` (string), `toolName` (string), `arguments`? | Executes a tool on a bridged server and returns the result. |
@@ -148,7 +148,7 @@ Amneshia exposes 18 specialized tools to client agents for managing the memory c
 Amneshia serves a web client on `http://localhost:3457` when running in HTTP mode. The client provides:
 1. **Interactive Graph Visualizer** for looking at entity links and node clusters.
 2. **Bridge Manager** to register downstream MCP servers (e.g. `codebase-memory-mcp`) and configure commands/args.
-3. **Settings Controls** to switch LLM Providers (Ollama, OpenAI, or None) and manage auto-export markdown logs.
+3. **Settings Controls** to switch LLM Providers (9router AG, Ollama, OpenAI, or None) and manage auto-export markdown logs.
 
 ### Codebase Memory MCP Bridge Sync
 

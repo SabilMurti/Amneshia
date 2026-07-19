@@ -2,11 +2,6 @@
 node_modules/
 dashboard/node_modules/
 
-# Build outputs
-dist/
-dashboard/dist/
-*.js.map
-
 # Environment & OS
 .env
 .env.local

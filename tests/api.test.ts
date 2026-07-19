@@ -256,4 +256,9 @@ describe('Amneshia REST API Integration Tests', () => {
     const consolidateData = await consolidateRes.json() as { ok: boolean; result: { purgedCount: number } };
     expect(consolidateData.ok).toBe(true);
   });
+
+  it('should support switching to 9router AI provider', () => {
+    const provider = setAIProvider('9router');
+    expect(provider.name).toBe('9router');
+  });
 });
