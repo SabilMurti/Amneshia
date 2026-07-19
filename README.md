@@ -5,7 +5,7 @@
 [![CI Status](https://github.com/SabilMurti/Amneshia/actions/workflows/ci.yml/badge.svg)](https://github.com/SabilMurti/Amneshia/actions)
 [![Tests](https://badgen.net/badge/tests/12%20passed/green)](https://github.com/SabilMurti/Amneshia/actions)
 
-Unified, zero-external-database, multi-agent long-term memory hub. Built on top of **SQLite FTS5 + BM25 Search**, incorporating a **Universal MCP Bridge Manager**, a local **Sleep Cycle Memory Consolidation Engine**, and an interactive **TasteSkill Web Dashboard**.
+Unified, zero-external-database, multi-agent long-term memory hub. Built on top of **SQLite FTS5 + BM25 Search**, incorporating a **Universal MCP Bridge Manager**, a local **Sleep Cycle Memory Consolidation Engine**, and an interactive **Amneshia Web Dashboard**.
 
 ---
 
@@ -24,7 +24,7 @@ flowchart TB
 
     subgraph Clients ["1. Clients & Agent IDEs"]
         Agent["🤖 AI Agents (Antigravity IDE / Cursor / Windsurf / Claude Code)"]:::client
-        Browser["🌐 TasteSkill Web Dashboard (React 18 + Vite)"]:::client
+        Browser["🌐 Amneshia Web Dashboard (React 18 + Vite)"]:::client
     end
 
     subgraph Transport ["2. Transport & Communication Layer"]
@@ -74,7 +74,7 @@ flowchart TB
 - **Universal MCP Bridge** — Interoperability with external MCP servers (such as `codebase-memory-mcp`) allowing synchronization of external facts and tools dynamically.
 - **Sleep Cycle Memory Consolidation** — Evaluates similarity metrics (Jaccard Similarity $\ge 0.8$) and LLM context analysis during sleep/idle states to deduplicate memories, resolve conflicts, track update histories, and purge expired ephemeral data.
 - **Access Control Whitelisting** — Visibility properties (`public`, `restricted`, `private`) and whitelisting arrays (`allowedAgents`) prevent unauthorized agent access.
-- **TasteSkill Web Dashboard** — Rich visual interface for exploring graphs, managing target exports, controlling bridge servers, and viewing memory statistics.
+- **Amneshia Web Dashboard** — Rich visual interface built with TasteSkill anti-slop guidelines for exploring graphs, managing target exports, controlling bridge servers, and viewing memory statistics.
 
 ---
 
