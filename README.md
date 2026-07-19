@@ -13,7 +13,57 @@ Unified, zero-external-database, multi-agent long-term memory hub. Built on top 
 
 Amneshia coordinates Stdio and SSE/HTTP transports, managing underlying storage, background consolidation tasks, and MCP integrations:
 
-![Amneshia v2 Architecture Diagram](docs/architecture.svg)
+```mermaid
+flowchart TB
+    %% Class Definitions for Styling
+    classDef client fill:#1e1e2e,stroke:#a855f7,stroke-width:2px,color:#fff;
+    classDef transport fill:#1e1e2e,stroke:#06b6d4,stroke-width:2px,color:#fff;
+    classDef core fill:#181825,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef bridge fill:#1e1e2e,stroke:#f59e0b,stroke-width:2px,color:#fff;
+    classDef db fill:#11111b,stroke:#10b981,stroke-width:2px,color:#fff;
+
+    subgraph Clients ["1. Clients & Agent IDEs"]
+        Agent["🤖 AI Agents (Antigravity IDE / Cursor / Windsurf / Claude Code)"]:::client
+        Browser["🌐 TasteSkill Web Dashboard (React 18 + Vite)"]:::client
+    end
+
+    subgraph Transport ["2. Transport & Communication Layer"]
+        Stdio["⚡ Stdio Transport (JSON-RPC 2.0)"]:::transport
+        SSE["🌐 HTTP / SSE Server (Port 3457)"]:::transport
+        REST["🔗 REST API Endpoints"]:::transport
+    end
+
+    subgraph Amneshia ["3. Amneshia v2 Core Knowledge Engine"]
+        MCP["🛠️ 18 MCP Tools Surface"]:::core
+        Graph["🧠 Knowledge Graph Engine"]:::core
+        Sleep["🌙 Sleep Cycle Consolidation Engine"]:::core
+        Exporter["📄 Markdown Auto-Exporter"]:::core
+        DB[("💾 SQLite FTS5 Storage (~/.amneshia/memory.db)")]:::db
+    end
+
+    subgraph Bridges ["4. Universal MCP Bridge System"]
+        Bridge["🔌 Bridge Client Manager"]:::bridge
+        CM["💻 codebase-memory-mcp (Port 9749)"]:::bridge
+        Other["🌐 External Custom MCP Servers"]:::bridge
+    end
+
+    %% Flow Connections
+    Agent <-->|Stdio Stream / SSE| Transport
+    Browser <-->|HTTP REST API| REST
+
+    Stdio <-->|JSON-RPC| MCP
+    SSE <-->|HTTP Events| REST
+    REST <-->|API Handler| Graph
+
+    MCP <-->|CRUD & FTS Queries| Graph
+    Graph <-->|BM25 Search & SQL Triggers| DB
+    Sleep <-->|Jaccard Pruning & Conflict Supersession| DB
+    Graph -->|Sync Markdown Mirror| Exporter
+
+    Graph <-->|Bridge Proxy Tools| Bridge
+    Bridge <-->|Auto-Sync Projects| CM
+    Bridge <-->|Proxy Tool Call| Other
+```
 
 ---
 
