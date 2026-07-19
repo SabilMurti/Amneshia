@@ -1,9 +1,9 @@
 # 🧠 Amneshia
 
-[![Release](https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square)](https://github.com/SabilMurti/Amneshia/releases)
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![CI Status](https://img.shields.io/badge/CI-passing-brightgreen?style=flat-square)](https://github.com/SabilMurti/Amneshia/actions)
-[![Tests](https://img.shields.io/badge/tests-12_passed-brightgreen?style=flat-square)](https://github.com/SabilMurti/Amneshia/actions)
+[![Release](https://badgen.net/badge/version/v2.0.0/blue)](https://github.com/SabilMurti/Amneshia/releases)
+[![License](https://badgen.net/badge/license/MIT/green)](LICENSE)
+[![CI Status](https://github.com/SabilMurti/Amneshia/actions/workflows/ci.yml/badge.svg)](https://github.com/SabilMurti/Amneshia/actions)
+[![Tests](https://badgen.net/badge/tests/12%20passed/green)](https://github.com/SabilMurti/Amneshia/actions)
 
 Unified, zero-external-database, multi-agent long-term memory hub. Built on top of **SQLite FTS5 + BM25 Search**, incorporating a **Universal MCP Bridge Manager**, a local **Sleep Cycle Memory Consolidation Engine**, and an interactive **TasteSkill Web Dashboard**.
 
