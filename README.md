@@ -13,54 +13,7 @@ Unified, zero-external-database, multi-agent long-term memory hub. Built on top 
 
 Amneshia coordinates Stdio and SSE/HTTP transports, managing underlying storage, background consolidation tasks, and MCP integrations:
 
-```mermaid
-flowchart TB
-    subgraph Clients ["Clients & IDEs"]
-        Agent[Claude / Cursor / Windsurf / Cline]
-        Browser[Web Browser / Dashboard]
-    end
-
-    subgraph Transport ["Transport Layers"]
-        Stdio[Stdio Transport]
-        SSE[SSE / HTTP REST Transport]
-    end
-
-    subgraph Amneshia ["Amneshia Core Server"]
-        MCP[MCP Server Host]
-        REST[REST API Endpoints]
-        Graph[Knowledge Graph Engine]
-        Bridge[Bridge Client Manager]
-        Sleep[Sleep Cycle Engine]
-        DB[(SQLite & FTS5 Database)]
-    end
-
-    subgraph Bridges ["Universal MCP Bridge Servers"]
-        CM[codebase-memory-mcp]
-        Other[Other External MCP Servers]
-    end
-
-    %% Client Connections
-    Agent <-->|Stdio / SSE| Transport
-    Browser <-->|HTTP REST| REST
-
-    %% Transport mapping
-    Stdio <--> MCP
-    SSE <--> REST
-
-    %% Core interactions
-    MCP <--> Graph
-    REST <--> Graph
-    REST <--> Bridge
-
-    Graph <--> DB
-    Bridge <--> DB
-    Sleep <--> Graph
-    Sleep <--> DB
-
-    %% Bridge Server connections
-    Bridge <-->|Stdio Client| CM
-    Bridge <-->|Stdio Client| Other
-```
+![Amneshia v2 Architecture Diagram](docs/architecture.svg)
 
 ---
 

@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="100%" height="100%" style="background: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b"/>
+      <stop offset="50%" stop-color="#121217"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+
+    <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+
+    <linearGradient id="cyanGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <linearGradient id="emeraldGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+
+    <linearGradient id="amberGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+
+    <linearGradient id="roseGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#e11d48"/>
+    </linearGradient>
+
+    <!-- Filters for subtle glow and drop shadows -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+
+    <filter id="purpleGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1000" height="640" fill="url(#bgGrad)"/>
+  <rect width="1000" height="640" fill="none" stroke="#27272a" stroke-width="1"/>
+
+  <!-- Title Banner -->
+  <g transform="translate(40, 40)">
+    <text x="0" y="0" fill="#f4f4f5" font-size="22" font-weight="700" letter-spacing="-0.5px">🧠 Amneshia v2 Architecture</text>
+    <text x="0" y="22" fill="#a1a1aa" font-size="13">Multi-Agent Unified Memory Hub • Universal MCP Bridge • Sleep Cycle Consolidation</text>
+  </g>
+
+  <!-- SECTION 1: Clients & AI Agents -->
+  <g transform="translate(40, 90)">
+    <rect width="920" height="90" rx="12" fill="#18181b" stroke="#27272a" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="20" y="28" fill="#71717a" font-size="11" font-weight="700" letter-spacing="1px">1. CLIENTS &amp; AGENT IDEs</text>
+    
+    <!-- Agent Cards -->
+    <g transform="translate(20, 40)">
+      <!-- Antigravity / Cursor -->
+      <rect x="0" y="0" width="200" height="36" rx="8" fill="#27272a" stroke="#3f3f46"/>
+      <circle cx="18" cy="18" r="6" fill="#a855f7"/>
+      <text x="32" y="22" fill="#f4f4f5" font-size="13" font-weight="600">Antigravity IDE / Cursor</text>
+
+      <!-- Claude Code / Windsurf -->
+      <rect x="220" y="0" width="210" height="36" rx="8" fill="#27272a" stroke="#3f3f46"/>
+      <circle cx="18" cy="18" r="6" fill="#06b6d4"/>
+      <text x="32" y="22" fill="#f4f4f5" font-size="13" font-weight="600">Claude Code / Windsurf</text>
+
+      <!-- Web Dashboard -->
+      <rect x="450" y="0" width="220" height="36" rx="8" fill="#27272a" stroke="#3f3f46"/>
+      <circle cx="18" cy="18" r="6" fill="#f43f5e"/>
+      <text x="32" y="22" fill="#f4f4f5" font-size="13" font-weight="600">TasteSkill Dashboard UI</text>
+
+      <!-- External MCP Clients -->
+      <rect x="690" y="0" width="190" height="36" rx="8" fill="#27272a" stroke="#3f3f46"/>
+      <circle cx="18" cy="18" r="6" fill="#10b981"/>
+      <text x="32" y="22" fill="#f4f4f5" font-size="13" font-weight="600">Custom MCP Clients</text>
+    </g>
+  </g>
+
+  <!-- Connection Arrows Downwards -->
+  <path d="M 140 180 L 140 220" stroke="#a855f7" stroke-width="2" stroke-dasharray="4,4"/>
+  <path d="M 325 180 L 325 220" stroke="#06b6d4" stroke-width="2" stroke-dasharray="4,4"/>
+  <path d="M 560 180 L 560 220" stroke="#f43f5e" stroke-width="2" stroke-dasharray="4,4"/>
+  <path d="M 785 180 L 785 220" stroke="#10b981" stroke-width="2" stroke-dasharray="4,4"/>
+
+  <!-- SECTION 2: Transport & API Server -->
+  <g transform="translate(40, 220)">
+    <rect width="920" height="80" rx="12" fill="#18181b" stroke="#3f3f46" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="20" y="26" fill="#71717a" font-size="11" font-weight="700" letter-spacing="1px">2. TRANSPORT &amp; API PROTOCOLS</text>
+
+    <g transform="translate(20, 36)">
+      <!-- Stdio Transport -->
+      <rect x="0" y="0" width="270" height="32" rx="6" fill="#27272a" stroke="#a855f7" stroke-width="1"/>
+      <text x="15" y="20" fill="#c084fc" font-size="12" font-weight="600">⚡ Stdio Transport (JSON-RPC 2.0)</text>
+
+      <!-- HTTP / SSE Transport -->
+      <rect x="290" y="0" width="300" height="32" rx="6" fill="#27272a" stroke="#06b6d4" stroke-width="1"/>
+      <text x="15" y="20" fill="#38bdf8" font-size="12" font-weight="600">🌐 HTTP / SSE Server (Port 3457)</text>
+
+      <!-- REST API Endpoints -->
+      <rect x="610" y="0" width="270" height="32" rx="6" fill="#27272a" stroke="#f43f5e" stroke-width="1"/>
+      <text x="15" y="20" fill="#fb7185" font-size="12" font-weight="600">🔗 REST API (/api/stats, /api/search)</text>
+    </g>
+  </g>
+
+  <!-- SECTION 3: Amneshia Core Engine -->
+  <g transform="translate(40, 330)">
+    <rect width="600" height="270" rx="14" fill="#121217" stroke="#a855f7" stroke-width="1.5" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="600" height="36" rx="14" fill="url(#purpleGradient)" opacity="0.15"/>
+    <text x="20" y="24" fill="#c084fc" font-size="12" font-weight="700" letter-spacing="1px">3. AMNESHIA v2 CORE KNOWLEDGE ENGINE</text>
+
+    <!-- Sub-components inside Core -->
+    <g transform="translate(20, 48)">
+      <!-- 18 MCP Tools Host -->
+      <rect x="0" y="0" width="270" height="85" rx="8" fill="#18181b" stroke="#27272a"/>
+      <text x="14" y="22" fill="#f4f4f5" font-size="13" font-weight="700">🛠️ 18 MCP Tools Surface</text>
+      <text x="14" y="42" fill="#a1a1aa" font-size="11">• Entity &amp; Relation CRUD</text>
+      <text x="14" y="58" fill="#a1a1aa" font-size="11">• FTS5 Memory Search &amp; Graph Inspection</text>
+      <text x="14" y="74" fill="#a1a1aa" font-size="11">• Lifecycle &amp; Consolidation Tools</text>
+
+      <!-- Sleep Cycle Engine -->
+      <rect x="290" y="0" width="270" height="85" rx="8" fill="#18181b" stroke="#10b981" stroke-width="1"/>
+      <text x="14" y="22" fill="#34d399" font-size="13" font-weight="700">🌙 Sleep Cycle Consolidation</text>
+      <text x="14" y="42" fill="#a1a1aa" font-size="11">• Jaccard Deduplication (&ge; 0.8)</text>
+      <text x="14" y="58" fill="#a1a1aa" font-size="11">• Conflict Supersession Tracking</text>
+      <text x="14" y="74" fill="#a1a1aa" font-size="11">• Ephemeral Memory Purge Engine</text>
+
+      <!-- SQLite FTS5 Storage -->
+      <rect x="0" y="100" width="270" height="100" rx="8" fill="#18181b" stroke="#3b82f6" stroke-width="1"/>
+      <text x="14" y="24" fill="#60a5fa" font-size="13" font-weight="700">💾 SQLite FTS5 Storage Engine</text>
+      <text x="14" y="44" fill="#a1a1aa" font-size="11">• ~/.amneshia/memory.db (WAL Mode)</text>
+      <text x="14" y="60" fill="#a1a1aa" font-size="11">• BM25 Full-Text Search Index Triggers</text>
+      <text x="14" y="76" fill="#a1a1aa" font-size="11">• Entity-Relation-Observation Schema</text>
+      <text x="14" y="92" fill="#a1a1aa" font-size="11">• Supersedes Foreign Key Lineage</text>
+
+      <!-- Auto Exporter Engine -->
+      <rect x="290" y="100" width="270" height="100" rx="8" fill="#18181b" stroke="#f59e0b" stroke-width="1"/>
+      <text x="14" y="24" fill="#fbbf24" font-size="13" font-weight="700">📄 Markdown Auto-Exporter</text>
+      <text x="14" y="44" fill="#a1a1aa" font-size="11">• Auto-exports to MEMORY.md on write</text>
+      <text x="14" y="60" fill="#a1a1aa" font-size="11">• Configurable Export Targets Manager</text>
+      <text x="14" y="76" fill="#a1a1aa" font-size="11">• Structured Knowledge Serialization</text>
+      <text x="14" y="92" fill="#a1a1aa" font-size="11">• Human-readable Markdown Mirror</text>
+    </g>
+  </g>
+
+  <!-- SECTION 4: Universal MCP Bridge Manager -->
+  <g transform="translate(660, 330)">
+    <rect width="300" height="270" rx="14" fill="#121217" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="300" height="36" rx="14" fill="url(#amberGradient)" opacity="0.15"/>
+    <text x="20" y="24" fill="#fbbf24" font-size="12" font-weight="700" letter-spacing="1px">4. UNIVERSAL MCP BRIDGE</text>
+
+    <g transform="translate(15, 48)">
+      <!-- Bridge Server Registry -->
+      <rect x="0" y="0" width="270" height="60" rx="8" fill="#18181b" stroke="#27272a"/>
+      <text x="12" y="20" fill="#f4f4f5" font-size="12" font-weight="700">🔌 Bridge Client Registry</text>
+      <text x="12" y="38" fill="#a1a1aa" font-size="10">• Dynamically connects external MCPs</text>
+      <text x="12" y="50" fill="#a1a1aa" font-size="10">• Proxy tool calls &amp; list tools</text>
+
+      <!-- Target 1: Codebase Memory MCP -->
+      <rect x="0" y="72" width="270" height="65" rx="8" fill="#18181b" stroke="#3b82f6" stroke-width="1"/>
+      <text x="12" y="20" fill="#60a5fa" font-size="12" font-weight="700">💻 codebase-memory-mcp</text>
+      <text x="12" y="38" fill="#a1a1aa" font-size="10">• Port 9749 Visualizer UI</text>
+      <text x="12" y="50" fill="#a1a1aa" font-size="10">• Auto-syncs Project Repositories</text>
+      <text x="12" y="60" fill="#a1a1aa" font-size="10">• Codebase Graph (MitraXNine, Amneshia)</text>
+
+      <!-- Target 2: External Custom MCPs -->
+      <rect x="0" y="147" width="270" height="53" rx="8" fill="#18181b" stroke="#27272a"/>
+      <text x="12" y="20" fill="#f4f4f5" font-size="12" font-weight="700">🌐 Other External MCP Servers</text>
+      <text x="12" y="38" fill="#a1a1aa" font-size="10">• Personal-memory-mcp / Context7</text>
+      <text x="12" y="48" fill="#a1a1aa" font-size="10">• Custom Stdio / SSE Bridge Nodes</text>
+    </g>
+  </g>
+
+  <!-- Connecting Lines Between Components -->
+  <path d="M 640 450 L 660 450" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4,4"/>
+
+  <!-- Footer Version Note -->
+  <text x="40" y="625" fill="#52525b" font-size="11">Amneshia v2.0.0 Architecture • Built with TypeScript, SQLite FTS5, Express 5 &amp; React 18</text>
+</svg>
