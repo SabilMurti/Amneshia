@@ -15,6 +15,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onConsolidate,
 }) => {
   const [provider, setProvider] = useState<'openai' | 'ollama' | '9router' | 'none'>('none');
+  const [nineRouterModel, setNineRouterModel] = useState<string>('9router/ag/gemini-3-flash');
+  const [customModel, setCustomModel] = useState<string>('');
   const [isUpdatingProvider, setIsUpdatingProvider] = useState(false);
   const [providerSuccess, setProviderSuccess] = useState(false);
 
@@ -24,11 +26,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Read current configuration
   // For Amneshia, we can hit GET /health or /api/stats. AI Provider is set via POST /api/config/ai.
   // We can let the user pick and toggle the provider.
-  const handleUpdateProvider = async (p: 'openai' | 'ollama' | '9router' | 'none') => {
+  const handleUpdateProvider = async (p: 'openai' | 'ollama' | '9router' | 'none', selectedModelOverride?: string) => {
     setIsUpdatingProvider(true);
     setProviderSuccess(false);
     try {
-      await api.setAIProvider(p);
+      const modelToSend = p === '9router' ? (selectedModelOverride || nineRouterModel) : undefined;
+      await api.setAIProvider(p, modelToSend);
       setProvider(p);
       setProviderSuccess(true);
       setTimeout(() => setProviderSuccess(false), 3000);
@@ -102,6 +105,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               );
             })}
           </div>
+
+          {provider === '9router' && (
+            <div className="pt-4 border-t border-[#27272a] space-y-3 font-mono text-xs select-none">
+              <label className="block text-zinc-300 font-bold">9router Target Model Selection:</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {[
+                  { label: 'Gemini 3 Flash (Free AG)', value: '9router/ag/gemini-3-flash' },
+                  { label: 'Gemini 3.1 Flash Lite', value: 'google-antigravity/gemini-3.1-flash-lite' },
+                  { label: 'Claude Sonnet 4.6 (AG)', value: '9router/ag/claude-sonnet-4-6' }
+                ].map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => {
+                      setNineRouterModel(m.value);
+                      handleUpdateProvider('9router', m.value);
+                    }}
+                    className={`p-2.5 rounded border text-left font-mono text-[11px] transition-all ${
+                      nineRouterModel === m.value
+                        ? 'bg-zinc-800 border-[#f59e0b] text-[#f59e0b] font-bold'
+                        : 'bg-[#09090b] border-[#27272a] hover:border-zinc-500 text-zinc-400'
+                    }`}
+                  >
+                    <div>{m.label}</div>
+                    <div className="text-[9px] text-zinc-500 truncate">{m.value}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 select-text">
+                <input
+                  type="text"
+                  placeholder="Or enter custom 9router model ID (e.g. 9router/ag/...)"
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  className="flex-1 bg-[#09090b] border border-[#27272a] focus:border-[#f59e0b] rounded px-3 py-1.5 text-zinc-200 text-xs font-mono outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customModel.trim()) {
+                      setNineRouterModel(customModel.trim());
+                      handleUpdateProvider('9router', customModel.trim());
+                    }
+                  }}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded text-xs font-mono border border-[#27272a] transition-all active:scale-[0.98]"
+                >
+                  Apply Model
+                </button>
+              </div>
+            </div>
+          )}
 
           {providerSuccess && (
             <div className="flex items-center gap-1.5 text-xs text-green-400 font-mono select-none">

@@ -4,7 +4,11 @@ export class NineRouterProvider implements AIProvider {
   name = '9router';
   private baseUrl = (process.env.AMNESHIA_NINEROUTER_BASE_URL || process.env.NINEROUTER_BASE_URL || 'http://localhost:20128/v1').replace(/\/$/, '');
   private apiKey = process.env.AMNESHIA_NINEROUTER_API_KEY || process.env.NINEROUTER_API_KEY || 'sk-9router';
-  private model = process.env.AMNESHIA_NINEROUTER_MODEL || process.env.NINEROUTER_MODEL || '9router/ag/gemini-3-flash';
+  public model: string;
+
+  constructor(model?: string) {
+    this.model = model || process.env.AMNESHIA_NINEROUTER_MODEL || process.env.NINEROUTER_MODEL || '9router/ag/gemini-3-flash';
+  }
 
   private async call(messages: { role: string; content: string }[]): Promise<string> {
     try {

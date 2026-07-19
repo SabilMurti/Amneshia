@@ -137,7 +137,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       db.updateExportTarget(req.params.id, newAutoExport);
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
-    app.post('/api/config/ai', (req, res) => res.json(setAIProvider(req.body.provider)));
+    app.post('/api/config/ai', (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post('/api/cleanup', (req, res) => res.json(graph.cleanupExpired()));
     app.post('/api/consolidate', async (req, res, next) => {
       try {

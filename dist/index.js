@@ -827,7 +827,10 @@ var NineRouterProvider = class {
   name = "9router";
   baseUrl = (process.env.AMNESHIA_NINEROUTER_BASE_URL || process.env.NINEROUTER_BASE_URL || "http://localhost:20128/v1").replace(/\/$/, "");
   apiKey = process.env.AMNESHIA_NINEROUTER_API_KEY || process.env.NINEROUTER_API_KEY || "sk-9router";
-  model = process.env.AMNESHIA_NINEROUTER_MODEL || process.env.NINEROUTER_MODEL || "9router/ag/gemini-3-flash";
+  model;
+  constructor(model) {
+    this.model = model || process.env.AMNESHIA_NINEROUTER_MODEL || process.env.NINEROUTER_MODEL || "9router/ag/gemini-3-flash";
+  }
   async call(messages) {
     try {
       const url = `${this.baseUrl}/chat/completions`;
@@ -876,11 +879,11 @@ ${observations.join("\n")}` }]);
 
 // src/ai/index.ts
 var activeProvider = new NoOpProvider();
-function setAIProvider(providerName) {
+function setAIProvider(providerName, modelName) {
   switch (providerName.toLowerCase()) {
     case "9router":
     case "ninerouter":
-      activeProvider = new NineRouterProvider();
+      activeProvider = new NineRouterProvider(modelName);
       break;
     case "ollama":
       activeProvider = new OllamaProvider();
@@ -1884,7 +1887,7 @@ async function startServer(options = {}) {
       db.updateExportTarget(req.params.id, newAutoExport);
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
-    app.post("/api/config/ai", (req, res) => res.json(setAIProvider(req.body.provider)));
+    app.post("/api/config/ai", (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post("/api/cleanup", (req, res) => res.json(graph.cleanupExpired()));
     app.post("/api/consolidate", async (req, res, next) => {
       try {

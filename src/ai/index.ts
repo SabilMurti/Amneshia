@@ -6,11 +6,11 @@ import { NineRouterProvider } from './9router.js';
 
 let activeProvider: AIProvider = new NoOpProvider();
 
-export function setAIProvider(providerName: string): AIProvider {
+export function setAIProvider(providerName: string, modelName?: string): AIProvider {
   switch (providerName.toLowerCase()) {
     case '9router':
     case 'ninerouter':
-      activeProvider = new NineRouterProvider();
+      activeProvider = new NineRouterProvider(modelName);
       break;
     case 'ollama':
       activeProvider = new OllamaProvider();
