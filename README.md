@@ -77,34 +77,37 @@ flowchart TB
 
 ## Quick Start
 
-### 1. Stdio Mode (Standard IDE Integration)
+### 1. Direct Run via GitHub (Zero NPM publish needed)
 
-To connect Amneshia to your editor/agent environment (e.g. Claude Desktop, Cursor, or Windsurf), add the server directly using `npx`:
+You can run Amneshia instantly from GitHub without installing anything:
+
+```bash
+# Run HTTP Web Dashboard & REST API
+npx -y github:SabilMurti/Amneshia --http --port 3457
+```
+
+Or install globally via GitHub:
+
+```bash
+npm install -g github:SabilMurti/Amneshia
+
+# Then run anywhere:
+amneshia --http --port 3457
+```
+
+### 2. Stdio Mode (Standard IDE Integration)
+
+To connect Amneshia to your editor/agent environment (e.g., Cursor, Antigravity IDE, Claude Code), add the server entry in your MCP config (`mcp_config.json`):
 
 ```json
 {
   "mcpServers": {
     "amneshia": {
       "command": "npx",
-      "args": ["-y", "amneshia"]
+      "args": ["-y", "github:SabilMurti/Amneshia"]
     }
   }
 }
-```
-
-### 2. HTTP REST & Web Dashboard Mode
-
-Run Amneshia as a persistent daemon serving the **Web Dashboard** and standard **SSE/HTTP REST APIs**:
-
-```bash
-# Run Amneshia on HTTP port 3457 (Dashboard serves at http://localhost:3457)
-amneshia --http --port 3457
-```
-
-If you are using `npx`:
-
-```bash
-npx amneshia --http --port 3457
 ```
 
 ---
