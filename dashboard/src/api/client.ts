@@ -152,11 +152,11 @@ export const api = {
     });
   },
 
-  setAIProvider: (provider: 'openai' | 'ollama' | '9router' | 'none' | string): Promise<unknown> => {
+  setAIProvider: (provider: 'openai' | 'ollama' | '9router' | 'none' | string, model?: string): Promise<unknown> => {
     return fetchJson('/api/config/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider }),
+      body: JSON.stringify({ provider, model }),
     });
   },
 
