@@ -155,9 +155,22 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.sendFile(path.join(uiPath, 'index.html'));
     });
 
-    app.listen(options.port || 3457);
-  } else {
+    const httpListener = app.listen(options.port || 3457, () => {
+      console.error(`[Amneshia] HTTP Dashboard running on http://localhost:${options.port || 3457}`);
+    });
+
+    httpListener.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[Amneshia] Port ${options.port || 3457} is already in use by another active instance.`);
+      } else {
+        console.error(`[Amneshia] Express server error: ${err.message}`);
+      }
+    });
+  }
+
+  if (!process.argv.includes('--daemon')) {
     const transport = new StdioServerTransport();
     await server.connect(transport);
+    console.error("[Amneshia] MCP Server running on stdio");
   }
 }

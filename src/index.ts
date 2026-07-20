@@ -13,14 +13,20 @@ program
   .description('🧠 Unified memory hub for AI agents')
   .version('2.0.0')
   .option('--data-dir <path>', 'Custom data directory', path.join(os.homedir(), '.amneshia'))
-  .option('--http', 'Enable HTTP/SSE server mode', false)
+  .option('--http', 'Enable HTTP/SSE server mode', true)
+  .option('--no-dashboard', 'Disable HTTP Web Dashboard server')
   .option('-p, --port <number>', 'Port number', parseInt, 3457)
   .option('-d, --daemon', 'Run server in background daemon mode', false);
 
 async function main(): Promise<void> {
-  const options = program.parse(process.argv).opts<{ dataDir: string; http: boolean; port: number; daemon: boolean }>();
+  const options = program.parse(process.argv).opts<{ dataDir: string; http: boolean; dashboard?: boolean; port: number; daemon: boolean }>();
+  const isHttpEnabled = options.dashboard !== false && options.http !== false;
 
   if (options.daemon) {
+    if (!isHttpEnabled) {
+      console.error('[Amneshia] Error: Daemon mode requires dashboard to be enabled.');
+      process.exit(1);
+    }
     const logDir = path.join(os.homedir(), '.amneshia');
     fs.mkdirSync(logDir, { recursive: true });
     const logFile = path.join(logDir, 'server.log');
@@ -40,7 +46,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  await startServer({ dataDir: options.dataDir, http: options.http, port: options.port });
+  await startServer({ dataDir: options.dataDir, http: isHttpEnabled, port: options.port });
 }
 
 void main();
