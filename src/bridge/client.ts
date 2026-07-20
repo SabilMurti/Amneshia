@@ -52,8 +52,16 @@ export class BridgeClientManager {
       const result = await client.callTool({ name: toolName, arguments: toolArguments });
       return result.content;
     } catch (error) {
-      console.error(`Failed to call tool ${toolName} on server ${serverId}:`, error);
-      throw error;
+      console.error(`Failed to call tool ${toolName} on server ${serverId}, attempting reconnect...`, error);
+      await this.disconnectServer(serverId);
+      try {
+        const reconnectedClient = await this.connectServer(serverId, command, args);
+        const result = await reconnectedClient.callTool({ name: toolName, arguments: toolArguments });
+        return result.content;
+      } catch (retryError) {
+        console.error(`Retry tool execution failed for ${toolName} on server ${serverId}:`, retryError);
+        throw retryError;
+      }
     }
   }
 

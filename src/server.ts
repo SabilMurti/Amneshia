@@ -34,8 +34,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
   if (options.http) {
     const app = express();
+    app.disable("x-powered-by");
     app.use(express.json());
-
+    app.use((req, res, next) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("X-XSS-Protection", "1; mode=block");
+      next();
+    });
     let transport: SSEServerTransport;
 
     app.get('/sse', (req, res) => {

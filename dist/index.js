@@ -486,34 +486,40 @@ var DatabaseLayer = class {
     return result.changes > 0;
   }
   searchFTS(query, limit = 20) {
-    const sanitized = sanitizeFtsQuery(query);
-    const rows = this.statements.searchFts.all(sanitized, limit);
-    const matches = /* @__PURE__ */ new Map();
-    for (const row of rows) {
-      const entityRow = this.getEntityRowById(row.entity_id);
-      if (!entityRow) continue;
-      const entity = toEntity(entityRow);
-      const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id) : [];
-      const existing = matches.get(entity.id);
-      if (existing) {
-        if (row.observation_content && !existing.observations.some((obs) => obs.id === row.observation_id)) {
-          existing.observations.push(...observations);
+    try {
+      const sanitized = sanitizeFtsQuery(query);
+      if (sanitized === '""') return [];
+      const rows = this.statements.searchFts.all(sanitized, limit);
+      const matches = /* @__PURE__ */ new Map();
+      for (const row of rows) {
+        const entityRow = this.getEntityRowById(row.entity_id);
+        if (!entityRow) continue;
+        const entity = toEntity(entityRow);
+        const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id) : [];
+        const existing = matches.get(entity.id);
+        if (existing) {
+          if (row.observation_content && !existing.observations.some((obs) => obs.id === row.observation_id)) {
+            existing.observations.push(...observations);
+          }
+          continue;
         }
-        continue;
+        matches.set(entity.id, {
+          entity,
+          observations,
+          matchedContent: row.observation_content,
+          rank: row.rank
+        });
       }
-      matches.set(entity.id, {
-        entity,
-        observations,
-        matchedContent: row.observation_content,
-        rank: row.rank
-      });
+      return [...matches.values()].map((match) => ({
+        entity: match.entity,
+        observations: match.observations,
+        matchedContent: match.matchedContent,
+        rank: match.rank
+      }));
+    } catch (err) {
+      console.warn("FTS5 search query error:", err);
+      return [];
     }
-    return [...matches.values()].map((match) => ({
-      entity: match.entity,
-      observations: match.observations,
-      matchedContent: match.matchedContent,
-      rank: match.rank
-    }));
   }
   readGraph(domain, entityType) {
     const rows = this.statements.readGraphEntities.all(domain ?? null, domain ?? null, entityType ?? null, entityType ?? null);
@@ -652,9 +658,12 @@ function groupTitle(entityType) {
   if (normalized === "skill") return "Skills";
   return "Concepts";
 }
-function relationSummary(relations) {
+function relationSummary(entityName, relations) {
   if (relations.length === 0) return "";
-  return relations.map((relation) => `${relation.relationType} \u2192 ${relation.fromEntityName === relation.toEntityName ? relation.toEntityName : relation.toEntityName}`).join(", ");
+  return relations.map((relation) => {
+    const other = relation.fromEntityName === entityName ? relation.toEntityName : relation.fromEntityName;
+    return `${relation.relationType} \u2192 ${other}`;
+  }).join(", ");
 }
 function renderMarkdown(snapshot) {
   const lines = [];
@@ -680,7 +689,7 @@ function renderMarkdown(snapshot) {
         }
       }
       if (entity.relations.length > 0) {
-        const relationText = relationSummary(entity.relations);
+        const relationText = relationSummary(entity.name, entity.relations);
         lines.push(`**Relations:** ${relationText}`);
       }
       lines.push("");
@@ -1126,8 +1135,16 @@ var BridgeClientManager = class {
       const result = await client.callTool({ name: toolName, arguments: toolArguments });
       return result.content;
     } catch (error) {
-      console.error(`Failed to call tool ${toolName} on server ${serverId}:`, error);
-      throw error;
+      console.error(`Failed to call tool ${toolName} on server ${serverId}, attempting reconnect...`, error);
+      await this.disconnectServer(serverId);
+      try {
+        const reconnectedClient = await this.connectServer(serverId, command, args);
+        const result = await reconnectedClient.callTool({ name: toolName, arguments: toolArguments });
+        return result.content;
+      } catch (retryError) {
+        console.error(`Retry tool execution failed for ${toolName} on server ${serverId}:`, retryError);
+        throw retryError;
+      }
     }
   }
   async disconnectServer(serverId) {
@@ -1789,7 +1806,14 @@ async function startServer(options = {}) {
   process.on("SIGTERM", cleanup);
   if (options.http) {
     const app = express();
+    app.disable("x-powered-by");
     app.use(express.json());
+    app.use((req, res, next) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("X-XSS-Protection", "1; mode=block");
+      next();
+    });
     let transport;
     app.get("/sse", (req, res) => {
       transport = new SSEServerTransport("/messages", res);

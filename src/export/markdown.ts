@@ -13,10 +13,13 @@ function groupTitle(entityType: string): string {
   return 'Concepts';
 }
 
-function relationSummary(relations: RelationWithNames[]): string {
+function relationSummary(entityName: string, relations: RelationWithNames[]): string {
   if (relations.length === 0) return '';
   return relations
-    .map((relation) => `${relation.relationType} → ${relation.fromEntityName === relation.toEntityName ? relation.toEntityName : relation.toEntityName}`)
+    .map((relation) => {
+      const other = relation.fromEntityName === entityName ? relation.toEntityName : relation.fromEntityName;
+      return `${relation.relationType} → ${other}`;
+    })
     .join(', ');
 }
 
@@ -46,7 +49,7 @@ function renderMarkdown(snapshot: GraphSnapshot): string {
         }
       }
       if (entity.relations.length > 0) {
-        const relationText = relationSummary(entity.relations);
+        const relationText = relationSummary(entity.name, entity.relations);
         lines.push(`**Relations:** ${relationText}`);
       }
       lines.push('');

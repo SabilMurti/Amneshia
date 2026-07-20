@@ -681,36 +681,42 @@ export class DatabaseLayer {
   }
 
   searchFTS(query: string, limit = 20): SearchResult[] {
-    const sanitized = sanitizeFtsQuery(query);
-    const rows = this.statements.searchFts.all(sanitized, limit) as FtsSearchRow[];
-    const matches = new Map<string, SearchMatch>();
+    try {
+      const sanitized = sanitizeFtsQuery(query);
+      if (sanitized === '""') return [];
+      const rows = this.statements.searchFts.all(sanitized, limit) as FtsSearchRow[];
+      const matches = new Map<string, SearchMatch>();
 
-    for (const row of rows) {
-      const entityRow = this.getEntityRowById(row.entity_id);
-      if (!entityRow) continue;
-      const entity = toEntity(entityRow);
-      const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id) : [];
-      const existing = matches.get(entity.id);
-      if (existing) {
-        if (row.observation_content && !existing.observations.some((obs) => obs.id === row.observation_id)) {
-          existing.observations.push(...observations);
+      for (const row of rows) {
+        const entityRow = this.getEntityRowById(row.entity_id);
+        if (!entityRow) continue;
+        const entity = toEntity(entityRow);
+        const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id) : [];
+        const existing = matches.get(entity.id);
+        if (existing) {
+          if (row.observation_content && !existing.observations.some((obs) => obs.id === row.observation_id)) {
+            existing.observations.push(...observations);
+          }
+          continue;
         }
-        continue;
+        matches.set(entity.id, {
+          entity,
+          observations,
+          matchedContent: row.observation_content,
+          rank: row.rank,
+        });
       }
-      matches.set(entity.id, {
-        entity,
-        observations,
-        matchedContent: row.observation_content,
-        rank: row.rank,
-      });
-    }
 
-    return [...matches.values()].map((match) => ({
-      entity: match.entity,
-      observations: match.observations,
-      matchedContent: match.matchedContent,
-      rank: match.rank,
-    }));
+      return [...matches.values()].map((match) => ({
+        entity: match.entity,
+        observations: match.observations,
+        matchedContent: match.matchedContent,
+        rank: match.rank,
+      }));
+    } catch (err) {
+      console.warn('FTS5 search query error:', err);
+      return [];
+    }
   }
 
   readGraph(domain?: string, entityType?: string): GraphSnapshot {
