@@ -109,10 +109,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const nodesMap = new Map<string, GraphNode>();
     const links: GraphLink[] = [];
 
-    // 1. Create Node references
+    // 1. Create Entity Node references
     snapshot.entities.forEach((entity) => {
-      nodesMap.set(entity.id, {
-        id: entity.id,
+      const entityId = entity.id || entity.name;
+      nodesMap.set(entityId, {
+        id: entityId,
         name: entity.name,
         entityType: entity.entityType,
         domain: entity.domain,
@@ -122,22 +123,76 @@ export const GraphView: React.FC<GraphViewProps> = ({
         updatedAt: entity.updatedAt,
         observations: entity.observations || [],
         relations: entity.relations || [],
-        val: 8 + (entity.observations?.length || 0) * 2, // size matches complexity/observations count
+        val: 8 + (entity.observations?.length || 0) * 1.5, // size matches complexity/observations count
       });
+
+      // 1.2. Create Observation Nodes
+      if (entity.observations) {
+        entity.observations.forEach((obs) => {
+          const obsId = `obs-${obs.id}`;
+          const cleanContent = obs.content.replace(/\s+/g, ' ');
+          const truncatedName = cleanContent.length > 25 ? cleanContent.substring(0, 25) + '...' : cleanContent;
+          
+          nodesMap.set(obsId, {
+            id: obsId,
+            name: truncatedName,
+            entityType: 'observation',
+            domain: entity.domain,
+            visibility: entity.visibility,
+            allowedAgents: entity.allowedAgents,
+            createdAt: obs.createdAt || entity.createdAt,
+            updatedAt: obs.createdAt || entity.updatedAt,
+            observations: [obs],
+            relations: [],
+            val: 4,
+            parentEntityId: entityId,
+            fullText: obs.content,
+          } as any);
+
+          // 1.3. Connect Entity Node to Observation Node
+          links.push({
+            source: entityId,
+            target: obsId,
+            relationType: 'observation',
+            id: `link-obs-${obs.id}`,
+          });
+        });
+      }
     });
 
-    // 2. Resolve relationships
+    // 2. Resolve relationships (Entity-to-Entity)
     snapshot.entities.forEach((entity) => {
       if (!entity.relations) return;
       entity.relations.forEach((rel) => {
-        // Only wire relation links where both endpoints exist in filtered graph slice
-        if (nodesMap.has(rel.fromEntityId) && nodesMap.has(rel.toEntityId)) {
-          // Prevent duplicates
-          const linkId = `${rel.fromEntityId}-${rel.toEntityId}-${rel.relationType}`;
+        const fromId = rel.fromEntityId || rel.fromEntityName || (rel as any).source;
+        const toId = rel.toEntityId || rel.toEntityName || (rel as any).target;
+        
+        let resolvedFromId = nodesMap.has(fromId) ? fromId : null;
+        let resolvedToId = nodesMap.has(toId) ? toId : null;
+
+        if (!resolvedFromId) {
+          for (const node of nodesMap.values()) {
+            if (node.name === fromId) {
+              resolvedFromId = node.id;
+              break;
+            }
+          }
+        }
+        if (!resolvedToId) {
+          for (const node of nodesMap.values()) {
+            if (node.name === toId) {
+              resolvedToId = node.id;
+              break;
+            }
+          }
+        }
+
+        if (resolvedFromId && resolvedToId) {
+          const linkId = `${resolvedFromId}-${resolvedToId}-${rel.relationType}`;
           if (!links.some(l => l.id === linkId)) {
             links.push({
-              source: rel.fromEntityId,
-              target: rel.toEntityId,
+              source: resolvedFromId,
+              target: resolvedToId,
               relationType: rel.relationType,
               id: rel.id || linkId,
             });
@@ -184,12 +239,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
   // Color mapping based on entity type for aesthetic consistency
   const getNodeColor = (type: string) => {
     const cleanType = type.toLowerCase();
+    if (cleanType === 'observation') return '#38bdf8'; // neon cyan
     if (cleanType.includes('person') || cleanType.includes('user')) return '#f59e0b'; // amber accent
     if (cleanType.includes('server') || cleanType.includes('service') || cleanType.includes('host')) return '#3b82f6'; // blue
     if (cleanType.includes('project') || cleanType.includes('repo') || cleanType.includes('code')) return '#10b981'; // green
     if (cleanType.includes('config') || cleanType.includes('setting')) return '#8b5cf6'; // purple
     if (cleanType.includes('credential') || cleanType.includes('token') || cleanType.includes('auth')) return '#ef4444'; // red
     return '#a1a1aa'; // zinc
+  };
+
+  const getRelationColor = (relType: string) => {
+    const cleanRel = relType.toLowerCase();
+    if (cleanRel.includes('work') || cleanRel.includes('dev')) return '#10b981'; // emerald green
+    if (cleanRel.includes('use') || cleanRel.includes('run')) return '#3b82f6'; // blue
+    if (cleanRel.includes('own') || cleanRel.includes('create')) return '#f59e0b'; // amber
+    if (cleanRel.includes('member') || cleanRel.includes('live')) return '#8b5cf6'; // purple
+    if (cleanRel.includes('auth') || cleanRel.includes('pass') || cleanRel.includes('key')) return '#ef4444'; // red
+    return '#a1a1aa'; // default zinc
   };
 
   const handleNodeClick = (node: any) => {
@@ -285,7 +351,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
         </div>
 
         {/* Color Legend */}
-        <div className="absolute bottom-4 left-4 z-10 bg-[#121215]/90 border border-[#27272a] p-3 rounded-lg shadow-lg font-mono text-[10px] text-zinc-400 space-y-2 backdrop-blur-md select-none w-40">
+        <div className="absolute bottom-4 left-4 z-10 bg-[#121215]/90 border border-[#27272a] p-3 rounded-lg shadow-lg font-mono text-[10px] text-zinc-400 space-y-2 backdrop-blur-md select-none w-44">
           <div className="font-bold text-zinc-300 border-b border-zinc-800 pb-1 mb-1">ENTITY TYPES</div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]"></span>
@@ -306,6 +372,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span>
             <span>Credential / Token</span>
+          </div>
+          <div className="flex items-center gap-2 border-t border-zinc-800 pt-1.5 mt-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8]"></span>
+            <span>Observation (Fakta)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#a1a1aa]"></span>
@@ -355,12 +425,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 width={dimensions.width}
                 height={dimensions.height}
                 backgroundColor="#09090b"
-                linkWidth={(link: any) => (hoveredNode && highlightLinks.has(link.id) ? 2.5 : 1.5)}
+                linkWidth={(link: any) => {
+                  const isHighlighted = hoveredNode ? highlightLinks.has(link.id) : false;
+                  return isHighlighted ? 3.0 : 1.5;
+                }}
                 linkColor={(link: any) => {
-                  if (hoveredNode) {
-                    return highlightLinks.has(link.id) ? '#f59e0b' : 'rgba(39, 39, 42, 0.1)';
+                  if (link.relationType === 'observation') {
+                    return hoveredNode ? (highlightLinks.has(link.id) ? '#38bdf8' : 'rgba(56, 189, 248, 0.05)') : 'rgba(56, 189, 248, 0.2)';
                   }
-                  return '#27272a';
+                  const baseColor = getRelationColor(link.relationType);
+                  if (hoveredNode) {
+                    return highlightLinks.has(link.id) ? baseColor : 'rgba(39, 39, 42, 0.08)';
+                  }
+                  return baseColor + 'cc';
                 }}
                 linkDirectionalArrowLength={3.5}
                 linkDirectionalArrowRelPos={1}
@@ -369,7 +446,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   return isHighlighted ? getNodeColor(node.entityType) : 'rgba(161, 161, 170, 0.15)';
                 }}
                 nodeVal={(node: any) => node.val || 8}
-                nodeLabel={(node: any) => `${node.name} (${node.entityType})`}
+                nodeLabel={(node: any) => node.entityType === 'observation' ? node.fullText : `${node.name} (${node.entityType})`}
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
@@ -381,14 +458,22 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 width={dimensions.width}
                 height={dimensions.height}
                 backgroundColor="#09090b"
-                linkWidth={(link: any) => (hoveredNode && highlightLinks.has(link.id) ? 2.5 : 1.5)}
-                linkColor={(link: any) => {
-                  if (hoveredNode) {
-                    return highlightLinks.has(link.id) ? '#f59e0b' : 'rgba(39, 39, 42, 0.15)';
-                  }
-                  return '#27272a';
+                linkWidth={(link: any) => {
+                  const isHighlighted = hoveredNode ? highlightLinks.has(link.id) : false;
+                  return isHighlighted ? 3.0 : 1.5;
                 }}
-                linkDirectionalArrowLength={3.5}
+                linkColor={(link: any) => {
+                  if (link.relationType === 'observation') {
+                    return hoveredNode ? (highlightLinks.has(link.id) ? '#38bdf8' : 'rgba(56, 189, 248, 0.05)') : 'rgba(56, 189, 248, 0.3)';
+                  }
+                  const baseColor = getRelationColor(link.relationType);
+                  if (hoveredNode) {
+                    return highlightLinks.has(link.id) ? baseColor : 'rgba(39, 39, 42, 0.15)';
+                  }
+                  return baseColor + 'cc';
+                }}
+                linkLineDash={(link: any) => link.relationType === 'observation' ? [2, 2] : null}
+                linkDirectionalArrowLength={(link: any) => link.relationType === 'observation' ? 0 : 3.5}
                 linkDirectionalArrowRelPos={1}
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
@@ -414,7 +499,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   }
 
                   ctx.beginPath();
-                  ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
+                  if (node.entityType === 'observation') {
+                    ctx.arc(node.x, node.y, size * 0.8, 0, 2 * Math.PI, false); // slightly smaller circle
+                  } else {
+                    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
+                  }
                   ctx.fillStyle = isDimmed ? 'rgba(161, 161, 170, 0.15)' : getNodeColor(node.entityType);
                   ctx.fill();
 
