@@ -573,7 +573,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   <span>Access Control (Allowed Agents)</span>
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedNode.allowedAgents.length === 0 ? (
+                  {(!selectedNode.allowedAgents || selectedNode.allowedAgents.length === 0) ? (
                     <span className="text-zinc-600 text-xs font-mono">Any agent can access</span>
                   ) : (
                     selectedNode.allowedAgents.map(agent => (
@@ -591,14 +591,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   <span>Registered:</span>
                   <span className="text-zinc-400 flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
-                    {new Date(selectedNode.createdAt).toLocaleString()}
+                    {selectedNode.createdAt ? new Date(selectedNode.createdAt).toLocaleString() : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Last Updated:</span>
                   <span className="text-zinc-400 flex items-center gap-1">
                     <Key className="w-3 h-3" />
-                    {new Date(selectedNode.updatedAt).toLocaleString()}
+                    {selectedNode.updatedAt ? new Date(selectedNode.updatedAt).toLocaleString() : 'N/A'}
                   </span>
                 </div>
               </div>
@@ -606,9 +606,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
               {/* List of Observations */}
               <div className="space-y-3 pt-2">
                 <h3 className="font-mono text-sm font-semibold text-zinc-300">
-                  Observations ({selectedNode.observations.length})
+                  Observations ({(selectedNode.observations || []).length})
                 </h3>
-                {selectedNode.observations.length === 0 ? (
+                {(!selectedNode.observations || selectedNode.observations.length === 0) ? (
                   <p className="text-xs font-mono text-zinc-600 italic">No factual observation statements recorded.</p>
                 ) : (
                   <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
@@ -617,9 +617,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
                         <p className="font-sans text-zinc-300 leading-relaxed mb-2 break-words">{obs.content}</p>
                         <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500">
                           <span className="px-1 py-0.5 bg-zinc-900 border border-[#27272a] rounded select-none text-[9px] text-[#f59e0b]">
-                            Imp: {obs.importance}
+                            Imp: {obs.importance || 'normal'}
                           </span>
-                          <span>Conf: {obs.confidence}</span>
+                          <span>Conf: {obs.confidence !== undefined ? obs.confidence : 1}</span>
                         </div>
                       </div>
                     ))}
@@ -630,9 +630,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
               {/* Node Relationships list */}
               <div className="space-y-3 border-t border-zinc-800/50 pt-4">
                 <h3 className="font-mono text-sm font-semibold text-zinc-300">
-                  Relations ({selectedNode.relations.length})
+                  Relations ({(selectedNode.relations || []).length})
                 </h3>
-                {selectedNode.relations.length === 0 ? (
+                {(!selectedNode.relations || selectedNode.relations.length === 0) ? (
                   <p className="text-xs font-mono text-zinc-600 italic">No semantic connections established.</p>
                 ) : (
                   <div className="space-y-2">
