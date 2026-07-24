@@ -26,6 +26,24 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
   );
 
   server.tool(
+    'search_relevant_memory',
+    'Search the memory graph with stop words (e.g. yang, di, ke, the, of, in) filtered out to optimize token efficiency and retrieval precision. Use this when querying user profiles or project preferences using a natural language prompt.',
+    {
+      query: z.string().min(1).describe('Search text prompt to filter and match against memory'),
+      limit: z.number().int().positive().max(100).optional().describe('Maximum number of ranked results to return'),
+      domain: z.string().optional().describe('Optional domain filter such as personal or project:<name>'),
+    },
+    async ({ query, limit, domain }) => {
+      try {
+        const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
+        return textContent({ ok: true, ...result });
+      } catch (error) {
+        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to search memory' });
+      }
+    }
+  );
+
+  server.tool(
     'read_graph',
     'Read the complete knowledge graph or a filtered slice of it. Use this when you need structured entities, their observations, and their relations rather than a ranked search result.',
     {

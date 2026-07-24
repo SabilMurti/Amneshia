@@ -88,6 +88,138 @@ function toExportTarget(row) {
     autoExport: row.auto_export === 1
   };
 }
+var STOP_WORDS = /* @__PURE__ */ new Set([
+  // English stop words
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "else",
+  "when",
+  "where",
+  "why",
+  "how",
+  "who",
+  "what",
+  "which",
+  "this",
+  "that",
+  "these",
+  "those",
+  "to",
+  "of",
+  "in",
+  "on",
+  "at",
+  "by",
+  "for",
+  "with",
+  "about",
+  "from",
+  "up",
+  "down",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "shall",
+  "should",
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "just",
+  "only",
+  "also",
+  "some",
+  "any",
+  "no",
+  "not",
+  "other",
+  "than",
+  // Indonesian stop words
+  "yang",
+  "di",
+  "ke",
+  "dari",
+  "ini",
+  "itu",
+  "untuk",
+  "dengan",
+  "pada",
+  "adalah",
+  "dan",
+  "atau",
+  "tapi",
+  "tetapi",
+  "jika",
+  "maka",
+  "kapan",
+  "dimana",
+  "mengapa",
+  "bagaimana",
+  "siapa",
+  "apa",
+  "secara",
+  "oleh",
+  "tentang",
+  "ada",
+  "adapun",
+  "bagi",
+  "sebagai",
+  "ia",
+  "mereka",
+  "kita",
+  "kami",
+  "saya",
+  "anda",
+  "kamu",
+  "dia",
+  "yaitu",
+  "yakni",
+  "seperti",
+  "serta",
+  "bisa",
+  "dapat",
+  "harus",
+  "akan",
+  "telah",
+  "sudah",
+  "belum",
+  "sedang",
+  "boleh",
+  "hanya",
+  "saja",
+  "juga",
+  "pun",
+  "lah",
+  "kah",
+  "deh",
+  "sih",
+  "dong",
+  "kok",
+  "tuh"
+]);
+function stripStopWords(query) {
+  const cleaned = query.split(/\s+/).filter((word) => !STOP_WORDS.has(word.toLowerCase().replace(/[^a-zA-Z0-9]/g, ""))).join(" ");
+  return cleaned.trim().length > 0 ? cleaned : query;
+}
 function sanitizeFtsQuery(query) {
   const tokens = query.trim().split(/\s+/).map((token) => token.replace(/["'`]/g, " ").replace(/[\-+<>~*():]/g, " ")).flatMap((token) => token.split(/\s+/)).map((token) => token.trim()).filter((token) => token.length > 0);
   if (tokens.length === 0) {
@@ -520,6 +652,10 @@ var DatabaseLayer = class {
       console.warn("FTS5 search query error:", err);
       return [];
     }
+  }
+  searchFTSRelevant(query, limit = 20) {
+    const cleaned = stripStopWords(query);
+    return this.searchFTS(cleaned, limit);
   }
   readGraph(domain, entityType) {
     const rows = this.statements.readGraphEntities.all(domain ?? null, domain ?? null, entityType ?? null, entityType ?? null);
@@ -1033,6 +1169,14 @@ var KnowledgeGraph = class {
       results: filtered.slice(0, limit)
     };
   }
+  searchRelevantMemory(query, limit = 20, domain) {
+    const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => domain ? result.entity.domain === domain : true);
+    return {
+      query,
+      limit,
+      results: filtered.slice(0, limit)
+    };
+  }
   readGraph(domain, entityType) {
     return this.database.readGraph(domain, entityType);
   }
@@ -1338,6 +1482,23 @@ function registerSearchTools(server, graph) {
     async ({ query, limit, domain }) => {
       try {
         const result = graph.searchMemory(query, limit ?? 20, domain);
+        return textContent4({ ok: true, ...result });
+      } catch (error) {
+        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });
+      }
+    }
+  );
+  server.tool(
+    "search_relevant_memory",
+    "Search the memory graph with stop words (e.g. yang, di, ke, the, of, in) filtered out to optimize token efficiency and retrieval precision. Use this when querying user profiles or project preferences using a natural language prompt.",
+    {
+      query: z4.string().min(1).describe("Search text prompt to filter and match against memory"),
+      limit: z4.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
+      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>")
+    },
+    async ({ query, limit, domain }) => {
+      try {
+        const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
         return textContent4({ ok: true, ...result });
       } catch (error) {
         return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });

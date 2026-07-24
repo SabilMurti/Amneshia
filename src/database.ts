@@ -199,6 +199,30 @@ function toExportTarget(row: ExportTargetRow): ExportTarget {
   };
 }
 
+const STOP_WORDS = new Set([
+  // English stop words
+  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'why', 'how', 
+  'who', 'what', 'which', 'this', 'that', 'these', 'those', 'to', 'of', 'in', 'on', 'at', 'by', 
+  'for', 'with', 'about', 'from', 'up', 'down', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'shall', 'should', 'can', 'could',
+  'may', 'might', 'must', 'just', 'only', 'also', 'some', 'any', 'no', 'not', 'other', 'than',
+  // Indonesian stop words
+  'yang', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'dengan', 'pada', 'adalah', 'dan', 'atau', 
+  'tapi', 'tetapi', 'jika', 'maka', 'kapan', 'dimana', 'mengapa', 'bagaimana', 'siapa', 'apa', 
+  'secara', 'oleh', 'tentang', 'ada', 'adapun', 'bagi', 'sebagai', 'ia', 'mereka', 'kita', 
+  'kami', 'saya', 'anda', 'kamu', 'dia', 'yaitu', 'yakni', 'seperti', 'serta', 'bisa', 
+  'dapat', 'harus', 'akan', 'telah', 'sudah', 'belum', 'sedang', 'boleh', 'hanya', 'saja', 
+  'juga', 'pun', 'lah', 'kah', 'deh', 'sih', 'dong', 'kok', 'tuh'
+]);
+
+function stripStopWords(query: string): string {
+  const cleaned = query
+    .split(/\s+/)
+    .filter((word) => !STOP_WORDS.has(word.toLowerCase().replace(/[^a-zA-Z0-9]/g, '')))
+    .join(' ');
+  return cleaned.trim().length > 0 ? cleaned : query;
+}
+
 function sanitizeFtsQuery(query: string): string {
   const tokens = query
     .trim()
@@ -717,6 +741,11 @@ export class DatabaseLayer {
       console.warn('FTS5 search query error:', err);
       return [];
     }
+  }
+
+  searchFTSRelevant(query: string, limit = 20): SearchResult[] {
+    const cleaned = stripStopWords(query);
+    return this.searchFTS(cleaned, limit);
   }
 
   readGraph(domain?: string, entityType?: string): GraphSnapshot {

@@ -143,6 +143,15 @@ export class KnowledgeGraph {
     };
   }
 
+  searchRelevantMemory(query: string, limit = 20, domain?: string): SearchMemoryResult {
+    const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => (domain ? result.entity.domain === domain : true));
+    return {
+      query,
+      limit,
+      results: filtered.slice(0, limit),
+    };
+  }
+
   readGraph(domain?: string, entityType?: string): GraphSnapshot {
     return this.database.readGraph(domain, entityType);
   }
