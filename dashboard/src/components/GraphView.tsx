@@ -44,10 +44,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Interactive Physics Controls
+  const [chargeStrength, setChargeStrength] = useState(-120);
+  const [linkDistance, setLinkDistance] = useState(30);
+  const [showLabels, setShowLabels] = useState(true);
+  
+  // Connection Highlighting states
+  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+
   // Selected Node context inspector
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const fgRef = useRef<any>(null);
 
   // Resize listener
   useEffect(() => {
@@ -143,6 +152,35 @@ export const GraphView: React.FC<GraphViewProps> = ({
     };
   }, [snapshot]);
 
+  // Dynamic D3 Force modification via refs
+  useEffect(() => {
+    if (!fgRef.current) return;
+    fgRef.current.d3Force('charge')?.strength(chargeStrength);
+    fgRef.current.d3Force('link')?.distance(linkDistance);
+    fgRef.current.d3ReheatSimulation();
+  }, [chargeStrength, linkDistance, graphData]);
+
+  // Highlighting neighborhood calculation
+  const { highlightNodes, highlightLinks } = useMemo(() => {
+    const nodes = new Set<string>();
+    const links = new Set<string>();
+    if (hoveredNode) {
+      nodes.add(hoveredNode.id);
+      graphData.links.forEach((link) => {
+        const sourceId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        const targetId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        if (sourceId === hoveredNode.id) {
+          nodes.add(targetId);
+          links.add(link.id);
+        } else if (targetId === hoveredNode.id) {
+          nodes.add(sourceId);
+          links.add(link.id);
+        }
+      });
+    }
+    return { highlightNodes: nodes, highlightLinks: links };
+  }, [hoveredNode, graphData]);
+
   // Color mapping based on entity type for aesthetic consistency
   const getNodeColor = (type: string) => {
     const cleanType = type.toLowerCase();
@@ -155,9 +193,26 @@ export const GraphView: React.FC<GraphViewProps> = ({
   };
 
   const handleNodeClick = (node: any) => {
-    // Cast to GraphNode safely
     const nodeObj = node as GraphNode;
     setSelectedNode(nodeObj);
+
+    if (!fgRef.current) return;
+    if (is3D) {
+      const distance = 60;
+      const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+      fgRef.current.cameraPosition(
+        { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+        node,
+        800
+      );
+    } else {
+      fgRef.current.centerAt(node.x, node.y, 800);
+      fgRef.current.zoom(3.5, 800);
+    }
+  };
+
+  const handleNodeHover = (node: any) => {
+    setHoveredNode(node as GraphNode | null);
   };
 
   return (
@@ -165,22 +220,97 @@ export const GraphView: React.FC<GraphViewProps> = ({
       {/* Visual Canvas Container */}
       <div ref={containerRef} className="flex-1 h-full relative">
         {/* Toggle Mode and Details Bar */}
-        <div className="absolute top-4 left-4 z-10 flex items-center gap-3">
-          <button
-            onClick={() => setIs3D(!is3D)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215] border border-[#27272a] text-xs font-mono text-zinc-300 hover:text-white hover:border-zinc-500 transition-all select-none"
-          >
-            {is3D ? <Eye className="w-3.5 h-3.5 text-[#f59e0b]" /> : <EyeOff className="w-3.5 h-3.5 text-zinc-500" />}
-            <span>{is3D ? 'Toggle 2D Graph' : 'Toggle 3D Graph'}</span>
-          </button>
-          
-          {searchQuery && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215] border border-amber-900/30 text-xs font-mono text-amber-500">
-              <Compass className="w-3.5 h-3.5" />
-              <span>Query: "{searchQuery}"</span>
-              <button onClick={onClearSearch} className="hover:text-amber-300 ml-1">×</button>
+        <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIs3D(!is3D)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215]/95 border border-[#27272a] text-xs font-mono text-zinc-300 hover:text-white hover:border-zinc-500 transition-all select-none shadow-lg"
+            >
+              {is3D ? <Eye className="w-3.5 h-3.5 text-[#f59e0b]" /> : <EyeOff className="w-3.5 h-3.5 text-zinc-500" />}
+              <span>{is3D ? 'Toggle 2D Graph' : 'Toggle 3D Graph'}</span>
+            </button>
+            
+            {searchQuery && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215]/95 border border-amber-900/30 text-xs font-mono text-amber-500 shadow-lg">
+                <Compass className="w-3.5 h-3.5" />
+                <span>Query: "{searchQuery}"</span>
+                <button onClick={onClearSearch} className="hover:text-amber-300 ml-1">×</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Floating Controls Panel */}
+        <div className="absolute top-4 right-4 z-10 bg-[#121215]/90 border border-[#27272a] p-4 rounded-lg shadow-xl backdrop-blur-md w-60 font-mono text-[11px] text-zinc-300 space-y-3">
+          <div className="flex items-center justify-between border-b border-[#27272a] pb-2 mb-1">
+            <span className="font-bold text-white tracking-wider">GRAPH CONTROLS</span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between">
+              <span>Charge Force:</span>
+              <span className="text-amber-500 font-bold">{chargeStrength}</span>
             </div>
-          )}
+            <input
+              type="range"
+              min="-400"
+              max="0"
+              value={chargeStrength}
+              onChange={(e) => setChargeStrength(Number(e.target.value))}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between">
+              <span>Link Distance:</span>
+              <span className="text-amber-500 font-bold">{linkDistance}px</span>
+            </div>
+            <input
+              type="range"
+              min="15"
+              max="150"
+              value={linkDistance}
+              onChange={(e) => setLinkDistance(Number(e.target.value))}
+              className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded"
+            />
+          </div>
+          <div className="flex items-center justify-between pt-1 border-t border-zinc-800">
+            <span>Always Show Labels:</span>
+            <input
+              type="checkbox"
+              checked={showLabels}
+              onChange={(e) => setShowLabels(e.target.checked)}
+              className="accent-amber-500 rounded bg-zinc-800 border-[#27272a] w-3.5 h-3.5 cursor-pointer"
+            />
+          </div>
+        </div>
+
+        {/* Color Legend */}
+        <div className="absolute bottom-4 left-4 z-10 bg-[#121215]/90 border border-[#27272a] p-3 rounded-lg shadow-lg font-mono text-[10px] text-zinc-400 space-y-2 backdrop-blur-md select-none w-40">
+          <div className="font-bold text-zinc-300 border-b border-zinc-800 pb-1 mb-1">ENTITY TYPES</div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]"></span>
+            <span>Person / User</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#3b82f6]"></span>
+            <span>Server / Service</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]"></span>
+            <span>Project / Repo</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#8b5cf6]"></span>
+            <span>Config / Setting</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span>
+            <span>Credential / Token</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#a1a1aa]"></span>
+            <span>Other</span>
+          </div>
         </div>
 
         {/* Loading Overlay */}
@@ -220,30 +350,48 @@ export const GraphView: React.FC<GraphViewProps> = ({
           <div className="w-full h-full force-graph-container">
             {is3D ? (
               <ForceGraph3D
+                ref={fgRef}
                 graphData={graphData}
                 width={dimensions.width}
                 height={dimensions.height}
                 backgroundColor="#09090b"
-                linkColor={() => '#27272a'}
-                linkWidth={1.5}
-                nodeColor={(node: any) => getNodeColor(node.entityType)}
+                linkWidth={(link: any) => (hoveredNode && highlightLinks.has(link.id) ? 2.5 : 1.5)}
+                linkColor={(link: any) => {
+                  if (hoveredNode) {
+                    return highlightLinks.has(link.id) ? '#f59e0b' : 'rgba(39, 39, 42, 0.1)';
+                  }
+                  return '#27272a';
+                }}
+                linkDirectionalArrowLength={3.5}
+                linkDirectionalArrowRelPos={1}
+                nodeColor={(node: any) => {
+                  const isHighlighted = hoveredNode ? highlightNodes.has(node.id) : true;
+                  return isHighlighted ? getNodeColor(node.entityType) : 'rgba(161, 161, 170, 0.15)';
+                }}
                 nodeVal={(node: any) => node.val || 8}
                 nodeLabel={(node: any) => `${node.name} (${node.entityType})`}
                 onNodeClick={handleNodeClick}
+                onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
               />
             ) : (
               <ForceGraph2D
+                ref={fgRef}
                 graphData={graphData}
                 width={dimensions.width}
                 height={dimensions.height}
                 backgroundColor="#09090b"
-                linkColor={() => '#27272a'}
-                linkWidth={1.5}
-                nodeColor={(node: any) => getNodeColor(node.entityType)}
-                nodeVal={(node: any) => node.val || 8}
-                nodeLabel={(node: any) => `${node.name} (${node.entityType})`}
+                linkWidth={(link: any) => (hoveredNode && highlightLinks.has(link.id) ? 2.5 : 1.5)}
+                linkColor={(link: any) => {
+                  if (hoveredNode) {
+                    return highlightLinks.has(link.id) ? '#f59e0b' : 'rgba(39, 39, 42, 0.15)';
+                  }
+                  return '#27272a';
+                }}
+                linkDirectionalArrowLength={3.5}
+                linkDirectionalArrowRelPos={1}
                 onNodeClick={handleNodeClick}
+                onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
                 nodeCanvasObject={(node: any, ctx, globalScale) => {
                   const label = node.name;
@@ -252,27 +400,40 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   const textWidth = ctx.measureText(label).width;
                   const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.4);
 
-                  // Draw Node circle backing
+                  const isHighlighted = hoveredNode ? highlightNodes.has(node.id) : false;
+                  const isDimmed = hoveredNode && !isHighlighted;
+                  const isSelected = selectedNode?.id === node.id;
+
+                  // Draw Node circle backing (draw halo first)
                   const size = Math.sqrt(node.val || 8) * 1.8;
+                  if (isSelected || isHighlighted) {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, size + 3, 0, 2 * Math.PI, false);
+                    ctx.fillStyle = isSelected ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.15)';
+                    ctx.fill();
+                  }
+
                   ctx.beginPath();
                   ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
-                  ctx.fillStyle = getNodeColor(node.entityType);
+                  ctx.fillStyle = isDimmed ? 'rgba(161, 161, 170, 0.15)' : getNodeColor(node.entityType);
                   ctx.fill();
 
-                  // Draw Node label text if zoomed in enough
-                  if (globalScale > 0.8) {
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-                    ctx.fillRect(
-                      node.x - bckgDimensions[0] / 2,
-                      node.y - size - bckgDimensions[1] - 2,
-                      bckgDimensions[0],
-                      bckgDimensions[1]
-                    );
+                  // Draw Node label text if always showLabels is checked OR if currently highlighted
+                  if (showLabels || isHighlighted) {
+                    if (globalScale > 0.8 || isHighlighted) {
+                      ctx.fillStyle = isDimmed ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.75)';
+                      ctx.fillRect(
+                        node.x - bckgDimensions[0] / 2,
+                        node.y - size - bckgDimensions[1] - 2,
+                        bckgDimensions[0],
+                        bckgDimensions[1]
+                      );
 
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillStyle = '#f4f4f5';
-                    ctx.fillText(label, node.x, node.y - size - bckgDimensions[1] / 2 - 2);
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'middle';
+                      ctx.fillStyle = isDimmed ? 'rgba(244, 244, 245, 0.2)' : '#f4f4f5';
+                      ctx.fillText(label, node.x, node.y - size - bckgDimensions[1] / 2 - 2);
+                    }
                   }
                 }}
               />
