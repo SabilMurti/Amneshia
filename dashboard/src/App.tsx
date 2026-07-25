@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar, type TabId } from './components/Sidebar';
 import { Header } from './components/Header';
 import { GraphView } from './components/GraphView';
+import { ConsolidationReviewModal } from './components/ConsolidationReviewModal';
 import { MemoryTable } from './components/MemoryTable';
 import { BridgeManager } from './components/BridgeManager';
 import { ExportTargets } from './components/ExportTargets';
@@ -18,6 +19,9 @@ export const App: React.FC = () => {
   const [domains, setDomains] = useState<string[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [proposals, setProposals] = useState<{ superseded: any[]; synthesized: any[] }>({ superseded: [], synthesized: [] });
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -50,18 +54,38 @@ export const App: React.FC = () => {
   };
 
   const handleConsolidate = async () => {
-    showToast('Starting Sleep Cycle consolidation...', 'info');
+    showToast('Generating Sleep Cycle proposals...', 'info');
     try {
-      const response = await api.consolidateMemory(selectedDomain || undefined);
+      const response = await api.consolidateMemory(selectedDomain || undefined, true);
       if (response.ok) {
         const res = response.result;
-        showToast(
-          `🌙 Sleep Cycle Complete: purged ${res.purgedCount}, superseded ${res.supersededCount}, consolidated ${res.consolidatedCount} observations.`,
-          'success'
-        );
+        const superseded = res.details?.superseded || [];
+        const synthesized = res.details?.synthesized || [];
+
+        if (superseded.length === 0 && synthesized.length === 0) {
+          showToast('🌙 Sleep Cycle: Memory is already consolidated. No proposals generated.', 'info');
+          return;
+        }
+
+        setProposals({ superseded, synthesized });
+        setIsReviewOpen(true);
+      } else {
+        showToast('Failed to generate proposals: ' + JSON.stringify(response), 'error');
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  };
+
+  const handleApproveConsolidation = async (approvedSup: any[], approvedSyn: any[]) => {
+    showToast('Executing Sleep Cycle consolidation...', 'info');
+    try {
+      const response = await api.approveConsolidation(approvedSup, approvedSyn);
+      if (response.ok) {
+        showToast('🌙 Sleep Cycle Consolidation completed successfully!', 'success');
         triggerRefresh();
       } else {
-        showToast('Consolidation failed: ' + JSON.stringify(response), 'error');
+        showToast('Execution failed: ' + JSON.stringify(response), 'error');
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'error');
@@ -170,6 +194,13 @@ export const App: React.FC = () => {
           <button onClick={() => setToast(null)} className="ml-2 text-zinc-500 hover:text-zinc-300">×</button>
         </div>
       )}
+      <ConsolidationReviewModal
+        isOpen={isReviewOpen}
+        onClose={() => setIsReviewOpen(false)}
+        superseded={proposals.superseded}
+        synthesized={proposals.synthesized}
+        onApprove={handleApproveConsolidation}
+      />
     </div>
   );
 };

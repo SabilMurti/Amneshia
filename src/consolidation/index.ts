@@ -26,9 +26,10 @@ function getJaccardSimilarity(s1: string, s2: string): number {
 export async function consolidateMemories(
   graph: KnowledgeGraph,
   db: DatabaseLayer,
-  domain?: string
+  domain?: string,
+  dryRun = false
 ): Promise<ConsolidationResult> {
-  const purgedCount = graph.cleanupExpired();
+  const purgedCount = dryRun ? 0 : graph.cleanupExpired();
 
   // Retrieve entities matching domain
   const snapshot = graph.readGraph(domain);
@@ -37,13 +38,12 @@ export async function consolidateMemories(
   let supersededCount = 0;
   let consolidatedCount = 0;
 
-  const supersededList: Array<{ oldId: string; newId: string; reason: string }> = [];
-  const synthesizedList: Array<{ entityId: string; newObservationId: string; oldObservationIds: string[] }> = [];
+  const supersededList: Array<{ oldId: string; newId: string; reason: string; oldContent?: string; newContent?: string }> = [];
+  const synthesizedList: Array<{ entityId: string; entityName: string; proposedContent: string; oldObservationIds: string[]; oldContents: string[] }> = [];
 
   const provider = getAIProvider();
 
   for (const entity of entities) {
-    // Get all observations for this entity that are not superseded and not expired
     const allObs = db.getObservationsByEntity(entity.id);
     const activeObs = allObs.filter((o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now()));
 
@@ -51,7 +51,6 @@ export async function consolidateMemories(
       continue;
     }
 
-    // 1. Conflict Resolution & Supersession via LLM or basic similarity
     let supersededIds = new Set<string>();
 
     if (provider.name !== 'none') {
@@ -79,13 +78,20 @@ If no observations conflict or update each other, return an empty array: []`;
           const jsonString = responseText.substring(jsonStart, jsonEnd + 1);
           const conflicts = JSON.parse(jsonString) as Array<{ olderId: string; newerId: string; reason: string }>;
           for (const conf of conflicts) {
-            // Verify IDs exist in activeObs
             const older = activeObs.find((o) => o.id === conf.olderId);
             const newer = activeObs.find((o) => o.id === conf.newerId);
             if (older && newer && !supersededIds.has(older.id)) {
-              db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+              if (!dryRun) {
+                db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+              }
               supersededIds.add(older.id);
-              supersededList.push({ oldId: older.id, newId: newer.id, reason: conf.reason });
+              supersededList.push({
+                oldId: older.id,
+                newId: newer.id,
+                reason: conf.reason,
+                oldContent: older.content,
+                newContent: newer.content
+              });
               supersededCount++;
             }
           }
@@ -95,7 +101,6 @@ If no observations conflict or update each other, return an empty array: []`;
       }
     }
 
-    // Heuristic/Rules-based deduplication and conflict detection for remaining active observations
     const remainingObs = activeObs.filter((o) => !supersededIds.has(o.id));
     for (let i = 0; i < remainingObs.length; i++) {
       for (let j = i + 1; j < remainingObs.length; j++) {
@@ -104,21 +109,26 @@ If no observations conflict or update each other, return an empty array: []`;
 
         if (supersededIds.has(obs1.id) || supersededIds.has(obs2.id)) continue;
 
-        // Check similarity
         const sim = getJaccardSimilarity(obs1.content, obs2.content);
         if (sim >= 0.8 || obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim()) {
-          // Identical or near-duplicate. Supersede the older one.
           const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
           const newer = older === obs1 ? obs2 : obs1;
-          db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+          if (!dryRun) {
+            db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+          }
           supersededIds.add(older.id);
-          supersededList.push({ oldId: older.id, newId: newer.id, reason: 'Duplicate or near-duplicate content' });
+          supersededList.push({
+            oldId: older.id,
+            newId: newer.id,
+            reason: 'Duplicate or near-duplicate content',
+            oldContent: older.content,
+            newContent: newer.content
+          });
           supersededCount++;
         }
       }
     }
 
-    // 2. AI-Assisted Synthesis (if AI provider is active)
     if (provider.name !== 'none') {
       const finalActiveObs = activeObs.filter((o) => !supersededIds.has(o.id));
       if (finalActiveObs.length >= 2) {
@@ -127,25 +137,26 @@ If no observations conflict or update each other, return an empty array: []`;
           const synthesizedSummary = await synthesizeObservations(contents);
 
           if (synthesizedSummary && synthesizedSummary.trim() !== '' && synthesizedSummary !== contents.join('\n')) {
-            // Create a new synthesized observation
-            const newObs = db.addObservation(
-              entity.id,
-              synthesizedSummary.trim(),
-              'synthesis',
-              'high',
-              1
-            );
-
-            // Mark the synthesized ones as superseded by the new consolidated observation
-            for (const oldObs of finalActiveObs) {
-              db.setSupersedes(oldObs.id, newObs.id, 'sleep_cycle');
-              supersededCount++;
+            if (!dryRun) {
+              const newObs = db.addObservation(
+                entity.id,
+                synthesizedSummary.trim(),
+                'synthesis',
+                'high',
+                1
+              );
+              for (const oldObs of finalActiveObs) {
+                db.setSupersedes(oldObs.id, newObs.id, 'sleep_cycle');
+                supersededCount++;
+              }
             }
 
             synthesizedList.push({
               entityId: entity.id,
-              newObservationId: newObs.id,
+              entityName: entity.name,
+              proposedContent: synthesizedSummary.trim(),
               oldObservationIds: finalActiveObs.map((o) => o.id),
+              oldContents: contents,
             });
             consolidatedCount++;
           }
@@ -162,8 +173,8 @@ If no observations conflict or update each other, return an empty array: []`;
     consolidatedCount,
     details: {
       purged: [],
-      superseded: supersededList,
-      synthesized: synthesizedList,
+      superseded: supersededList as any,
+      synthesized: synthesizedList as any,
     },
   };
 }

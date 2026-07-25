@@ -147,8 +147,35 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     app.post('/api/cleanup', (req, res) => res.json(graph.cleanupExpired()));
     app.post('/api/consolidate', async (req, res, next) => {
       try {
-        const result = await consolidateMemories(graph, db, req.body?.domain);
+        const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);
         res.json({ ok: true, result });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    app.post('/api/consolidate/approve', async (req, res, next) => {
+      try {
+        const { superseded, synthesized } = req.body;
+
+        if (Array.isArray(superseded)) {
+          for (const sup of superseded) {
+            db.setSupersedes(sup.oldId, sup.newId, 'sleep_cycle');
+          }
+        }
+
+        if (Array.isArray(synthesized)) {
+          for (const syn of synthesized) {
+            const newObs = db.addObservation(syn.entityId, syn.proposedContent, 'synthesis', 'high', 1);
+            if (Array.isArray(syn.oldObservationIds)) {
+              for (const oldId of syn.oldObservationIds) {
+                db.setSupersedes(oldId, newObs.id, 'sleep_cycle');
+              }
+            }
+          }
+        }
+
+        res.json({ ok: true });
       } catch (error) {
         next(error);
       }

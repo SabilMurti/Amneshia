@@ -258,6 +258,37 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return '#a1a1aa'; // default zinc
   };
 
+  const handleCreateRelation = async (source: any, target: any) => {
+    if (source.entityType === 'observation' || target.entityType === 'observation') {
+      alert("Relations can only be created between Entity nodes (not Observations).");
+      return;
+    }
+
+    const relType = prompt(`Create Relation: ${source.name} ➔ ${target.name}\n\nEnter relationship type (e.g., uses, works_on, owns):`);
+    if (!relType || !relType.trim()) return;
+
+    setIsLoading(true);
+    try {
+      const response = await api.createRelations([
+        {
+          fromEntityName: source.name,
+          toEntityName: target.name,
+          relationType: relType.trim().toLowerCase()
+        }
+      ]) as any;
+
+      if (response) {
+        fetchData();
+      } else {
+        alert("Failed to create relation.");
+      }
+    } catch (err) {
+      alert("Error creating relation: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleNodeClick = (node: any) => {
     const nodeObj = node as GraphNode;
     setSelectedNode(nodeObj);
@@ -295,6 +326,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
               {is3D ? <Eye className="w-3.5 h-3.5 text-[#f59e0b]" /> : <EyeOff className="w-3.5 h-3.5 text-zinc-500" />}
               <span>{is3D ? 'Toggle 2D Graph' : 'Toggle 3D Graph'}</span>
             </button>
+
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215]/95 border border-zinc-800 text-xs font-mono text-zinc-400 shadow-lg">
+              <span>💡 Drag & drop nodes to create a Relation</span>
+            </div>
             
             {searchQuery && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#121215]/95 border border-amber-900/30 text-xs font-mono text-amber-500 shadow-lg">
@@ -450,6 +485,20 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
+                onNodeDragEnd={(node: any) => {
+                  const dropRadius = 22;
+                  const target = graphData.nodes.find((n: any) => {
+                    if (n.id === node.id) return false;
+                    const dx = n.x - node.x;
+                    const dy = n.y - node.y;
+                    const dz = n.z - node.z;
+                    const dist = Math.hypot(dx, dy, dz);
+                    return dist < dropRadius;
+                  });
+                  if (target) {
+                    handleCreateRelation(node, target);
+                  }
+                }}
               />
             ) : (
               <ForceGraph2D
@@ -478,6 +527,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
+                onNodeDragEnd={(node: any) => {
+                  const dropRadius = 22;
+                  const target = graphData.nodes.find((n: any) => {
+                    if (n.id === node.id) return false;
+                    const dx = n.x - node.x;
+                    const dy = n.y - node.y;
+                    const dist = Math.hypot(dx, dy);
+                    return dist < dropRadius;
+                  });
+                  if (target) {
+                    handleCreateRelation(node, target);
+                  }
+                }}
                 nodeCanvasObject={(node: any, ctx, globalScale) => {
                   const label = node.name;
                   const fontSize = 11 / globalScale;

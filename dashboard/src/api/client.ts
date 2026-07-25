@@ -166,11 +166,19 @@ export const api = {
     });
   },
 
-  consolidateMemory: (domain?: string): Promise<{ ok: boolean; result: { purgedCount: number; supersededCount: number; consolidatedCount: number } }> => {
+  consolidateMemory: (domain?: string, dryRun = false): Promise<{ ok: boolean; result: { purgedCount: number; supersededCount: number; consolidatedCount: number; details?: { superseded: any[]; synthesized: any[] } } }> => {
     return fetchJson('/api/consolidate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain })
+      body: JSON.stringify({ domain, dryRun })
+    });
+  },
+
+  approveConsolidation: (superseded: any[], synthesized: any[]): Promise<{ ok: boolean }> => {
+    return fetchJson('/api/consolidate/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ superseded, synthesized })
     });
   }
 };
