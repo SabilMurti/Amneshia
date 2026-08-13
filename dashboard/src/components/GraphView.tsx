@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import ForceGraph3D from 'react-force-graph-3d';
+import * as THREE from 'three';
 import { Eye, EyeOff, Tag, Compass, Calendar, Key, UserCheck, AlertTriangle } from 'lucide-react';
 import { api } from '../api/client';
 import type { GraphSnapshot, Observation, RelationWithNames } from '../types';
@@ -463,6 +464,45 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 linkWidth={(link: any) => {
                   const isHighlighted = hoveredNode ? highlightLinks.has(link.id) : false;
                   return isHighlighted ? 3.0 : 1.5;
+                }}
+                nodeThreeObject={(node: unknown) => {
+                  const n = node as GraphNode & { x: number, y: number, z: number };
+                  const color = n.entityType === 'observation' ? '#38bdf8' : getNodeColor(n.entityType);
+                  const isHighlighted = hoveredNode ? highlightNodes.has(n.id) : true;
+                  const opacity = isHighlighted ? 0.95 : 0.15;
+                  
+                  if (n.entityType === 'observation') {
+                    const geometry = new THREE.SphereGeometry(Math.sqrt(n.val || 4), 16, 16);
+                    const material = new THREE.MeshPhongMaterial({ 
+                      color, 
+                      transparent: true, 
+                      opacity,
+                      emissive: color,
+                      emissiveIntensity: isHighlighted ? 0.8 : 0.1
+                    });
+                    return new THREE.Mesh(geometry, material);
+                  } else {
+                    const size = Math.sqrt(n.val || 8) * 1.5;
+                    const geometry = new THREE.IcosahedronGeometry(size, 1);
+                    const material = new THREE.MeshStandardMaterial({ 
+                      color, 
+                      transparent: true, 
+                      opacity,
+                      roughness: 0.2,
+                      metalness: 0.8,
+                      wireframe: !isHighlighted 
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    
+                    if (isHighlighted) {
+                      const wireframeGeo = new THREE.EdgesGeometry(geometry);
+                      const wireframeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 });
+                      const wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
+                      mesh.add(wireframe);
+                    }
+                    
+                    return mesh;
+                  }
                 }}
                 linkColor={(link: any) => {
                   if (link.relationType === 'observation') {
