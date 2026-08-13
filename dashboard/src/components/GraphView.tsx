@@ -40,11 +40,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
   onClearSearch,
   refreshTrigger,
 }) => {
-  const [is3D, setIs3D] = useState(false);
+  const [is3D, setIs3D] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
   // Interactive Physics Controls
   const [chargeStrength, setChargeStrength] = useState(-120);
   const [linkDistance, setLinkDistance] = useState(30);
