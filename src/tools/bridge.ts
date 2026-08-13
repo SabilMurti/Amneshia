@@ -52,7 +52,7 @@ export function registerBridgeTools(
       const allTools = [];
       for (const server of servers) {
         if (!server) continue;
-        const tools = await bridgeManager.listTools(server.id, server.command, server.args);
+        const tools = await bridgeManager.listTools(server.id, server.command, server.args, server.name);
         allTools.push(...tools);
       }
       return { content: [{ type: 'text', text: JSON.stringify(allTools, null, 2) }] };

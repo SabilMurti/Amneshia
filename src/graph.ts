@@ -1,4 +1,4 @@
-import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget } from './types.js';
+import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
 import { getAIProvider } from './ai/index.js';
@@ -151,6 +151,81 @@ export class KnowledgeGraph {
       results: filtered.slice(0, limit),
     };
   }
+  getContext(query: string, depth = 1, limit = 5, domain?: string): string {
+    const seeds = this.database.searchFTSRelevant(query, limit).filter((result) => (domain ? result.entity.domain === domain : true));
+    
+    if (seeds.length === 0) return "No relevant context found.";
+
+    const visitedEntityIds = new Set<string>();
+    const currentLevelIds = new Set<string>();
+
+    for (const seed of seeds) {
+      visitedEntityIds.add(seed.entity.id);
+      currentLevelIds.add(seed.entity.id);
+    }
+
+    const relationsCollected = new Map<string, RelationWithNames>();
+
+    for (let currentDepth = 0; currentDepth < depth; currentDepth++) {
+      const nextLevelIds = new Set<string>();
+      
+      for (const id of currentLevelIds) {
+        const relations = this.database.getRelationsByEntity(id);
+        for (const rel of relations) {
+          relationsCollected.set(rel.id, rel);
+          if (!visitedEntityIds.has(rel.fromEntity)) {
+             nextLevelIds.add(rel.fromEntity);
+             visitedEntityIds.add(rel.fromEntity);
+          }
+          if (!visitedEntityIds.has(rel.toEntity)) {
+             nextLevelIds.add(rel.toEntity);
+             visitedEntityIds.add(rel.toEntity);
+          }
+        }
+      }
+      
+      currentLevelIds.clear();
+      for (const id of nextLevelIds) currentLevelIds.add(id);
+    }
+
+    const entities = Array.from(visitedEntityIds).map(id => {
+      const entity = this.database.getEntityById(id);
+      if (!entity) return null;
+      const observations = this.database.getObservationsByEntity(id).filter(
+        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+      );
+      return { ...entity, observations };
+    }).filter(e => e !== null);
+
+    const lines: string[] = [];
+    lines.push(`# GraphRAG Context for: "${query}"`);
+    lines.push(`> Depth: ${depth}, Seed matches: ${seeds.length}, Total entities in subgraph: ${entities.length}\n`);
+
+    for (const entity of entities) {
+      lines.push(`### ${entity!.name} [${entity!.entityType}]`);
+      if (entity!.observations.length === 0) {
+        lines.push(`- (No active observations)`);
+      } else {
+        for (const obs of entity!.observations) {
+          lines.push(`- ${obs.content}`);
+        }
+      }
+      
+      const entityRels = Array.from(relationsCollected.values()).filter(r => r.fromEntity === entity!.id || r.toEntity === entity!.id);
+      if (entityRels.length > 0) {
+        const relSummaries = Array.from(new Set(entityRels.map(r => {
+           const other = r.fromEntity === entity!.id ? r.toEntityName : r.fromEntityName;
+           const direction = r.fromEntity === entity!.id ? '→' : '←';
+           return `${direction} ${r.relationType} ${other}`;
+        })));
+        lines.push(`**Relations:** ${relSummaries.join(', ')}`);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n').trimEnd();
+  }
+
 
   readGraph(domain?: string, entityType?: string): GraphSnapshot {
     return this.database.readGraph(domain, entityType);

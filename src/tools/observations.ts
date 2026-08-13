@@ -9,7 +9,7 @@ const observationSchema = {
       contents: z.array(z.string().min(1)).min(1).describe('Observation texts to add'),
       source: z.string().optional().describe('Agent or system that supplied the observation'),
       importance: z.enum(['permanent', 'normal', 'ephemeral']).optional().describe('Retention tier for the observation'),
-      expiresAt: z.string().datetime().optional().describe('ISO 8601 expiration timestamp for ephemeral facts'),
+      expiresAt: z.string().datetime({ offset: true }).optional().describe('ISO 8601 expiration timestamp for ephemeral facts'),
     })
   ).min(1).describe('Observation batches to store'),
 };

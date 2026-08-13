@@ -47,11 +47,12 @@ export function registerUtilityTools(server: McpServer, graph: KnowledgeGraph): 
     'configure_ai',
     'Configure the AI provider for memory synthesis.',
     {
-      provider: z.enum(['none', 'ollama', 'openai']).describe('Active AI provider for memory synthesis'),
+      provider: z.enum(['none', 'ollama', 'openai', '9router', 'ninerouter']).describe('Active AI provider for memory synthesis'),
+      modelName: z.string().optional().describe('Optional specific model name for the provider'),
     },
-    async ({ provider }) => {
+    async ({ provider, modelName }) => {
       try {
-        const active = setAIProvider(provider);
+        const active = setAIProvider(provider, modelName);
         return textContent({ ok: true, provider: active.name });
       } catch (error) {
         return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to configure AI' });

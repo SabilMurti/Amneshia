@@ -41,10 +41,13 @@ function renderMarkdown(snapshot: GraphSnapshot): string {
     lines.push(`## ${title}`);
     for (const entity of entities) {
       lines.push(`### ${entity.name}`);
-      if (entity.observations.length === 0) {
+      const activeObs = entity.observations.filter(
+        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+      );
+      if (activeObs.length === 0) {
         lines.push('- No observations yet');
       } else {
-        for (const observation of entity.observations) {
+        for (const observation of activeObs) {
           lines.push(`- ${observation.content}`);
         }
       }

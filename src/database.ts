@@ -416,21 +416,24 @@ export class DatabaseLayer {
 
     try {
       this.db.prepare("DELETE FROM export_targets WHERE path = ?").run('/home/Memory.md');
+      this.db.prepare("DELETE FROM export_targets WHERE path LIKE '%/home/murtix/%'").run();
       
-      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get('/home/murtix/.amneshia/export/MEMORY.md') as { count: number };
+      const defaultPath = path.join(os.homedir(), '.amneshia', 'export', 'MEMORY.md');
+      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(defaultPath) as { count: number };
       if (check1.count === 0) {
         this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)")
-          .run(uuid(), 'Memory Default', '/home/murtix/.amneshia/export/MEMORY.md', 'markdown', 1);
+          .run(uuid(), 'Memory Default', defaultPath, 'markdown', 1);
       } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run('/home/murtix/.amneshia/export/MEMORY.md');
+        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(defaultPath);
       }
 
-      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get('/home/murtix/projects/Amneshia/MEMORY.md') as { count: number };
+      const projectPath = path.join(process.cwd(), 'MEMORY.md');
+      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(projectPath) as { count: number };
       if (check2.count === 0) {
         this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)")
-          .run(uuid(), 'Amneshia Project', '/home/murtix/projects/Amneshia/MEMORY.md', 'markdown', 1);
+          .run(uuid(), 'Amneshia Project', projectPath, 'markdown', 1);
       } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run('/home/murtix/projects/Amneshia/MEMORY.md');
+        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(projectPath);
       }
     } catch (e) {
       console.error('Failed to clean up / migrate export targets:', e);

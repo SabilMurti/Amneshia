@@ -77,6 +77,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       try {
         const serverId = req.query.serverId as string;
         let command = req.query.command as string;
+        let serverName: string | undefined;
         let args: string[] = [];
         if (req.query.args) {
           args = Array.isArray(req.query.args) ? (req.query.args as string[]) : [req.query.args as string];
@@ -86,13 +87,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
           if (serverObj) {
             command = serverObj.command;
             args = serverObj.args;
+            serverName = serverObj.name;
           }
         }
         if (!command) {
           res.status(400).json({ error: 'Server command not specified and serverId not found' });
           return;
         }
-        res.json(await bridgeManager.listTools(serverId || 'temp', command, args));
+        res.json(await bridgeManager.listTools(serverId || 'temp', command, args, serverName));
       } catch (error) {
         res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
       }

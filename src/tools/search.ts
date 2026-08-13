@@ -75,4 +75,23 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
       }
     }
   );
+
+  server.tool(
+    'get_context',
+    'GraphRAG multi-hop context engine. Provide a query to find seeds via FTS5 BM25, then traverse the graph outwards (BFS) by N levels to collect full relational context into a compressed markdown string. Fast and eliminates round-trips.',
+    {
+      query: z.string().min(1).describe('Search query for starting seeds'),
+      depth: z.number().int().min(0).max(5).optional().describe('Graph traversal depth (0 = seeds only, 1 = immediate neighbors)'),
+      limit: z.number().int().positive().max(50).optional().describe('Maximum number of starting seed entities to match'),
+      domain: z.string().optional().describe('Optional domain filter such as personal or project:<name>'),
+    },
+    async ({ query, depth, limit, domain }) => {
+      try {
+        const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
+        return textContent(context);
+      } catch (error) {
+        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to get context' });
+      }
+    }
+  );
 }

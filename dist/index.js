@@ -363,17 +363,20 @@ var DatabaseLayer = class {
     }
     try {
       this.db.prepare("DELETE FROM export_targets WHERE path = ?").run("/home/Memory.md");
-      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get("/home/murtix/.amneshia/export/MEMORY.md");
+      this.db.prepare("DELETE FROM export_targets WHERE path LIKE '%/home/murtix/%'").run();
+      const defaultPath = path.join(os.homedir(), ".amneshia", "export", "MEMORY.md");
+      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(defaultPath);
       if (check1.count === 0) {
-        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", "/home/murtix/.amneshia/export/MEMORY.md", "markdown", 1);
+        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", defaultPath, "markdown", 1);
       } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run("/home/murtix/.amneshia/export/MEMORY.md");
+        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(defaultPath);
       }
-      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get("/home/murtix/projects/Amneshia/MEMORY.md");
+      const projectPath = path.join(process.cwd(), "MEMORY.md");
+      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(projectPath);
       if (check2.count === 0) {
-        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", "/home/murtix/projects/Amneshia/MEMORY.md", "markdown", 1);
+        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", projectPath, "markdown", 1);
       } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run("/home/murtix/projects/Amneshia/MEMORY.md");
+        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(projectPath);
       }
     } catch (e) {
       console.error("Failed to clean up / migrate export targets:", e);
@@ -817,10 +820,13 @@ function renderMarkdown(snapshot) {
     lines.push(`## ${title}`);
     for (const entity of entities) {
       lines.push(`### ${entity.name}`);
-      if (entity.observations.length === 0) {
+      const activeObs = entity.observations.filter(
+        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+      );
+      if (activeObs.length === 0) {
         lines.push("- No observations yet");
       } else {
-        for (const observation of entity.observations) {
+        for (const observation of activeObs) {
           lines.push(`- ${observation.content}`);
         }
       }
@@ -1177,6 +1183,69 @@ var KnowledgeGraph = class {
       results: filtered.slice(0, limit)
     };
   }
+  getContext(query, depth = 1, limit = 5, domain) {
+    const seeds = this.database.searchFTSRelevant(query, limit).filter((result) => domain ? result.entity.domain === domain : true);
+    if (seeds.length === 0) return "No relevant context found.";
+    const visitedEntityIds = /* @__PURE__ */ new Set();
+    const currentLevelIds = /* @__PURE__ */ new Set();
+    for (const seed of seeds) {
+      visitedEntityIds.add(seed.entity.id);
+      currentLevelIds.add(seed.entity.id);
+    }
+    const relationsCollected = /* @__PURE__ */ new Map();
+    for (let currentDepth = 0; currentDepth < depth; currentDepth++) {
+      const nextLevelIds = /* @__PURE__ */ new Set();
+      for (const id of currentLevelIds) {
+        const relations = this.database.getRelationsByEntity(id);
+        for (const rel of relations) {
+          relationsCollected.set(rel.id, rel);
+          if (!visitedEntityIds.has(rel.fromEntity)) {
+            nextLevelIds.add(rel.fromEntity);
+            visitedEntityIds.add(rel.fromEntity);
+          }
+          if (!visitedEntityIds.has(rel.toEntity)) {
+            nextLevelIds.add(rel.toEntity);
+            visitedEntityIds.add(rel.toEntity);
+          }
+        }
+      }
+      currentLevelIds.clear();
+      for (const id of nextLevelIds) currentLevelIds.add(id);
+    }
+    const entities = Array.from(visitedEntityIds).map((id) => {
+      const entity = this.database.getEntityById(id);
+      if (!entity) return null;
+      const observations = this.database.getObservationsByEntity(id).filter(
+        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+      );
+      return { ...entity, observations };
+    }).filter((e) => e !== null);
+    const lines = [];
+    lines.push(`# GraphRAG Context for: "${query}"`);
+    lines.push(`> Depth: ${depth}, Seed matches: ${seeds.length}, Total entities in subgraph: ${entities.length}
+`);
+    for (const entity of entities) {
+      lines.push(`### ${entity.name} [${entity.entityType}]`);
+      if (entity.observations.length === 0) {
+        lines.push(`- (No active observations)`);
+      } else {
+        for (const obs of entity.observations) {
+          lines.push(`- ${obs.content}`);
+        }
+      }
+      const entityRels = Array.from(relationsCollected.values()).filter((r) => r.fromEntity === entity.id || r.toEntity === entity.id);
+      if (entityRels.length > 0) {
+        const relSummaries = Array.from(new Set(entityRels.map((r) => {
+          const other = r.fromEntity === entity.id ? r.toEntityName : r.fromEntityName;
+          const direction = r.fromEntity === entity.id ? "\u2192" : "\u2190";
+          return `${direction} ${r.relationType} ${other}`;
+        })));
+        lines.push(`**Relations:** ${relSummaries.join(", ")}`);
+      }
+      lines.push("");
+    }
+    return lines.join("\n").trimEnd();
+  }
   readGraph(domain, entityType) {
     return this.database.readGraph(domain, entityType);
   }
@@ -1256,14 +1325,13 @@ var BridgeClientManager = class {
       throw error;
     }
   }
-  async listTools(serverId, command, args) {
+  async listTools(serverId, command, args, serverName) {
     try {
       const client = await this.connectServer(serverId, command, args);
       const result = await client.listTools();
       return result.tools.map((tool) => ({
         serverId,
-        serverName: "unknown",
-        // Need to resolve server name
+        serverName: serverName ?? "unknown",
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema
@@ -1410,7 +1478,7 @@ var observationSchema = {
       contents: z3.array(z3.string().min(1)).min(1).describe("Observation texts to add"),
       source: z3.string().optional().describe("Agent or system that supplied the observation"),
       importance: z3.enum(["permanent", "normal", "ephemeral"]).optional().describe("Retention tier for the observation"),
-      expiresAt: z3.string().datetime().optional().describe("ISO 8601 expiration timestamp for ephemeral facts")
+      expiresAt: z3.string().datetime({ offset: true }).optional().describe("ISO 8601 expiration timestamp for ephemeral facts")
     })
   ).min(1).describe("Observation batches to store")
 };
@@ -1536,6 +1604,24 @@ function registerSearchTools(server, graph) {
       }
     }
   );
+  server.tool(
+    "get_context",
+    "GraphRAG multi-hop context engine. Provide a query to find seeds via FTS5 BM25, then traverse the graph outwards (BFS) by N levels to collect full relational context into a compressed markdown string. Fast and eliminates round-trips.",
+    {
+      query: z4.string().min(1).describe("Search query for starting seeds"),
+      depth: z4.number().int().min(0).max(5).optional().describe("Graph traversal depth (0 = seeds only, 1 = immediate neighbors)"),
+      limit: z4.number().int().positive().max(50).optional().describe("Maximum number of starting seed entities to match"),
+      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>")
+    },
+    async ({ query, depth, limit, domain }) => {
+      try {
+        const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
+        return textContent4(context);
+      } catch (error) {
+        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to get context" });
+      }
+    }
+  );
 }
 
 // src/tools/lifecycle.ts
@@ -1550,8 +1636,8 @@ function getJaccardSimilarity(s1, s2) {
   const union = /* @__PURE__ */ new Set([...words1, ...words2]);
   return intersection.size / union.size;
 }
-async function consolidateMemories(graph, db, domain) {
-  const purgedCount = graph.cleanupExpired();
+async function consolidateMemories(graph, db, domain, dryRun = false) {
+  const purgedCount = dryRun ? 0 : graph.cleanupExpired();
   const snapshot = graph.readGraph(domain);
   const entities = snapshot.entities;
   let supersededCount = 0;
@@ -1592,9 +1678,17 @@ If no observations conflict or update each other, return an empty array: []`;
             const older = activeObs.find((o) => o.id === conf.olderId);
             const newer = activeObs.find((o) => o.id === conf.newerId);
             if (older && newer && !supersededIds.has(older.id)) {
-              db.setSupersedes(older.id, newer.id, "sleep_cycle");
+              if (!dryRun) {
+                db.setSupersedes(older.id, newer.id, "sleep_cycle");
+              }
               supersededIds.add(older.id);
-              supersededList.push({ oldId: older.id, newId: newer.id, reason: conf.reason });
+              supersededList.push({
+                oldId: older.id,
+                newId: newer.id,
+                reason: conf.reason,
+                oldContent: older.content,
+                newContent: newer.content
+              });
               supersededCount++;
             }
           }
@@ -1613,9 +1707,17 @@ If no observations conflict or update each other, return an empty array: []`;
         if (sim >= 0.8 || obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim()) {
           const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
           const newer = older === obs1 ? obs2 : obs1;
-          db.setSupersedes(older.id, newer.id, "sleep_cycle");
+          if (!dryRun) {
+            db.setSupersedes(older.id, newer.id, "sleep_cycle");
+          }
           supersededIds.add(older.id);
-          supersededList.push({ oldId: older.id, newId: newer.id, reason: "Duplicate or near-duplicate content" });
+          supersededList.push({
+            oldId: older.id,
+            newId: newer.id,
+            reason: "Duplicate or near-duplicate content",
+            oldContent: older.content,
+            newContent: newer.content
+          });
           supersededCount++;
         }
       }
@@ -1627,21 +1729,25 @@ If no observations conflict or update each other, return an empty array: []`;
           const contents = finalActiveObs.map((o) => o.content);
           const synthesizedSummary = await synthesizeObservations(contents);
           if (synthesizedSummary && synthesizedSummary.trim() !== "" && synthesizedSummary !== contents.join("\n")) {
-            const newObs = db.addObservation(
-              entity.id,
-              synthesizedSummary.trim(),
-              "synthesis",
-              "high",
-              1
-            );
-            for (const oldObs of finalActiveObs) {
-              db.setSupersedes(oldObs.id, newObs.id, "sleep_cycle");
-              supersededCount++;
+            if (!dryRun) {
+              const newObs = db.addObservation(
+                entity.id,
+                synthesizedSummary.trim(),
+                "synthesis",
+                "high",
+                1
+              );
+              for (const oldObs of finalActiveObs) {
+                db.setSupersedes(oldObs.id, newObs.id, "sleep_cycle");
+                supersededCount++;
+              }
             }
             synthesizedList.push({
               entityId: entity.id,
-              newObservationId: newObs.id,
-              oldObservationIds: finalActiveObs.map((o) => o.id)
+              entityName: entity.name,
+              proposedContent: synthesizedSummary.trim(),
+              oldObservationIds: finalActiveObs.map((o) => o.id),
+              oldContents: contents
             });
             consolidatedCount++;
           }
@@ -1753,11 +1859,12 @@ function registerUtilityTools(server, graph) {
     "configure_ai",
     "Configure the AI provider for memory synthesis.",
     {
-      provider: z6.enum(["none", "ollama", "openai"]).describe("Active AI provider for memory synthesis")
+      provider: z6.enum(["none", "ollama", "openai", "9router", "ninerouter"]).describe("Active AI provider for memory synthesis"),
+      modelName: z6.string().optional().describe("Optional specific model name for the provider")
     },
-    async ({ provider }) => {
+    async ({ provider, modelName }) => {
       try {
-        const active = setAIProvider(provider);
+        const active = setAIProvider(provider, modelName);
         return textContent6({ ok: true, provider: active.name });
       } catch (error) {
         return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to configure AI" });
@@ -1809,7 +1916,7 @@ function registerBridgeTools(server, _graph, db, bridgeManager) {
       const allTools = [];
       for (const server2 of servers) {
         if (!server2) continue;
-        const tools = await bridgeManager.listTools(server2.id, server2.command, server2.args);
+        const tools = await bridgeManager.listTools(server2.id, server2.command, server2.args, server2.name);
         allTools.push(...tools);
       }
       return { content: [{ type: "text", text: JSON.stringify(allTools, null, 2) }] };
@@ -2006,6 +2113,7 @@ async function startServer(options = {}) {
       try {
         const serverId = req.query.serverId;
         let command = req.query.command;
+        let serverName;
         let args = [];
         if (req.query.args) {
           args = Array.isArray(req.query.args) ? req.query.args : [req.query.args];
@@ -2015,13 +2123,14 @@ async function startServer(options = {}) {
           if (serverObj) {
             command = serverObj.command;
             args = serverObj.args;
+            serverName = serverObj.name;
           }
         }
         if (!command) {
           res.status(400).json({ error: "Server command not specified and serverId not found" });
           return;
         }
-        res.json(await bridgeManager.listTools(serverId || "temp", command, args));
+        res.json(await bridgeManager.listTools(serverId || "temp", command, args, serverName));
       } catch (error) {
         res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
       }
@@ -2076,8 +2185,31 @@ async function startServer(options = {}) {
     app.post("/api/cleanup", (req, res) => res.json(graph.cleanupExpired()));
     app.post("/api/consolidate", async (req, res, next) => {
       try {
-        const result = await consolidateMemories(graph, db, req.body?.domain);
+        const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);
         res.json({ ok: true, result });
+      } catch (error) {
+        next(error);
+      }
+    });
+    app.post("/api/consolidate/approve", async (req, res, next) => {
+      try {
+        const { superseded, synthesized } = req.body;
+        if (Array.isArray(superseded)) {
+          for (const sup of superseded) {
+            db.setSupersedes(sup.oldId, sup.newId, "sleep_cycle");
+          }
+        }
+        if (Array.isArray(synthesized)) {
+          for (const syn of synthesized) {
+            const newObs = db.addObservation(syn.entityId, syn.proposedContent, "synthesis", "high", 1);
+            if (Array.isArray(syn.oldObservationIds)) {
+              for (const oldId of syn.oldObservationIds) {
+                db.setSupersedes(oldId, newObs.id, "sleep_cycle");
+              }
+            }
+          }
+        }
+        res.json({ ok: true });
       } catch (error) {
         next(error);
       }

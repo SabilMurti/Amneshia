@@ -29,13 +29,13 @@ export class BridgeClientManager {
     }
   }
 
-  async listTools(serverId: string, command: string, args: string[]): Promise<BridgeToolInfo[]> {
+  async listTools(serverId: string, command: string, args: string[], serverName?: string): Promise<BridgeToolInfo[]> {
     try {
       const client = await this.connectServer(serverId, command, args);
       const result = await client.listTools();
       return result.tools.map(tool => ({
         serverId,
-        serverName: 'unknown', // Need to resolve server name
+        serverName: serverName ?? 'unknown',
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema as Record<string, unknown>
