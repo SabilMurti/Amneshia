@@ -2684,6 +2684,38 @@ function resolveStorageConfig(forceLocal = false) {
     knowledgeDir: path4.join(globalDir, "knowledge")
   };
 }
+function initAmneshiaProject(targetDir = process.cwd()) {
+  const dataDir = path4.join(targetDir, ".amneshia");
+  const knowledgeDir = path4.join(dataDir, "knowledge");
+  const configPath = path4.join(dataDir, "config.yaml");
+  const gitignorePath = path4.join(dataDir, ".gitignore");
+  fs4.mkdirSync(knowledgeDir, { recursive: true });
+  if (!fs4.existsSync(configPath)) {
+    const defaultConfig = `# Amneshia v3 Project Configuration
+version: "3.0.0"
+storage:
+  mode: "local"
+  dual_write: true
+truth_maintenance:
+  auto_cascade: true
+  contradiction_detection: true
+consolidation:
+  jaccard_threshold: 0.8
+  decay_enabled: true
+`;
+    fs4.writeFileSync(configPath, defaultConfig, "utf-8");
+  }
+  if (!fs4.existsSync(gitignorePath)) {
+    const defaultGitignore = `# Amneshia ephemeral SQLite cache (rebuilt automatically from knowledge/)
+*.db
+*.db-wal
+*.db-shm
+*.log
+`;
+    fs4.writeFileSync(gitignorePath, defaultGitignore, "utf-8");
+  }
+  return { dataDir, knowledgeDir };
+}
 var DualWriteSync = class {
   constructor(knowledgeDir, database) {
     this.knowledgeDir = knowledgeDir;
@@ -2842,13 +2874,92 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Unified memory hub for AI agents").version("2.0.0").option("--data-dir <path>", "Custom data directory", path6.join(os3.homedir(), ".amneshia")).option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-d, --daemon", "Run server in background daemon mode", false);
-async function main() {
-  const options = program.parse(process.argv).opts();
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", parseInt, 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false);
+program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").action((dir) => {
+  const targetDir = dir ? path6.resolve(dir) : process.cwd();
+  const { dataDir, knowledgeDir } = initAmneshiaProject(targetDir);
+  console.log(`[Amneshia] Initialized local repository:`);
+  console.log(`  - Data Directory:      ${dataDir}`);
+  console.log(`  - Knowledge Markdown:  ${knowledgeDir}`);
+  console.log(`  - Config File:         ${path6.join(dataDir, "config.yaml")}`);
+  console.log(`  - Cache .gitignore:    ${path6.join(dataDir, ".gitignore")}`);
+  console.log(`
+Ready! Track your markdown files with git, and commit knowledge directly.`);
+});
+program.command("reindex").description("Rebuild SQLite FTS5 cache index from markdown files").option("-l, --local", "Reindex local repository in current working directory").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs5.existsSync(path6.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  console.log(`[Amneshia] Reindexing from: ${config.knowledgeDir}`);
+  const db = new DatabaseLayer(config.dataDir);
+  const sync = new DualWriteSync(config.knowledgeDir, db);
+  const result = sync.reindex();
+  console.log(`[Amneshia] Reindex complete:`);
+  console.log(`  - Entities:     ${result.entities}`);
+  console.log(`  - Observations: ${result.observations}`);
+  console.log(`  - Relations:    ${result.relations}`);
+  db.close();
+});
+program.command("gc").description("Garbage collect decayed, expired, and invalidated observations").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs5.existsSync(path6.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  const expired = db.cleanupExpired();
+  const decayed = db.gc();
+  console.log(`[Amneshia] Garbage collection complete:`);
+  console.log(`  - Purged Expired:  ${expired}`);
+  console.log(`  - Purged Decayed:  ${decayed}`);
+  db.close();
+});
+program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs5.existsSync(path6.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  const stats = db.getStats();
+  console.log(`
+\u{1F9E0} Amneshia Knowledge Graph Stats (${config.mode.toUpperCase()} mode):`);
+  console.log(`-----------------------------------------------`);
+  console.log(`  Total Entities:       ${stats.totalEntities}`);
+  console.log(`  Total Observations:   ${stats.totalObservations}`);
+  console.log(`  Total Relations:      ${stats.totalRelations}`);
+  console.log(`  Export Targets:       ${stats.totalExportTargets}`);
+  console.log(`  Open Contradictions:  ${stats.totalContradictions ?? 0}`);
+  if (stats.observationsByTier && Object.keys(stats.observationsByTier).length > 0) {
+    console.log(`
+  Observations by Authority Tier:`);
+    for (const [tier, count] of Object.entries(stats.observationsByTier)) {
+      console.log(`    - ${tier.padEnd(15)}: ${count}`);
+    }
+  }
+  if (stats.observationsByStatus && Object.keys(stats.observationsByStatus).length > 0) {
+    console.log(`
+  Observations by Status:`);
+    for (const [status, count] of Object.entries(stats.observationsByStatus)) {
+      console.log(`    - ${status.padEnd(15)}: ${count}`);
+    }
+  }
+  if (stats.entitiesByDomain && Object.keys(stats.entitiesByDomain).length > 0) {
+    console.log(`
+  Entities by Domain:`);
+    for (const [domain, count] of Object.entries(stats.entitiesByDomain)) {
+      console.log(`    - ${domain.padEnd(15)}: ${count}`);
+    }
+  }
+  console.log("");
+  db.close();
+});
+program.command("serve").description("Start the HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-l, --local", "Use local repository").action(async (cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local;
+  const port = cmdOpts.port || program.opts().port || 3457;
+  await startServer({ local: isLocal, http: true, port });
+});
+async function runDefault() {
+  const options = program.opts();
+  const isBackground = options.background || options.daemon;
   const isHttpEnabled = options.dashboard !== false && options.http !== false;
-  if (options.daemon) {
+  const toolProfile = options.toolProfile === "full" ? "full" : "core";
+  if (isBackground) {
     if (!isHttpEnabled) {
-      console.error("[Amneshia] Error: Daemon mode requires dashboard to be enabled.");
+      console.error("[Amneshia] Error: Background mode requires dashboard to be enabled.");
       process.exit(1);
     }
     const logDir = path6.join(os3.homedir(), ".amneshia");
@@ -2856,7 +2967,7 @@ async function main() {
     const logFile = path6.join(logDir, "server.log");
     const out = fs5.openSync(logFile, "a");
     const err = fs5.openSync(logFile, "a");
-    const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d");
+    const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d" && arg !== "--background" && arg !== "-b");
     const child = spawn(process.argv[0], [process.argv[1], ...args], {
       detached: true,
       stdio: ["ignore", out, err]
@@ -2867,6 +2978,19 @@ async function main() {
     console.log(`[Amneshia] Server logs: ${logFile}`);
     process.exit(0);
   }
-  await startServer({ dataDir: options.dataDir, http: isHttpEnabled, port: options.port });
+  await startServer({
+    dataDir: options.dataDir,
+    local: options.local,
+    toolProfile,
+    http: isHttpEnabled,
+    port: options.port
+  });
 }
-void main();
+if (process.argv.length <= 2 || !["init", "reindex", "gc", "stats", "serve"].includes(process.argv[2]) && !process.argv[2].startsWith("-")) {
+  program.parse(process.argv);
+  if (!program.args.length) {
+    void runDefault();
+  }
+} else {
+  program.parse(process.argv);
+}
