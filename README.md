@@ -296,14 +296,17 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 - **No Overwriting User Directives:** As an agent, your writes default to `agent` authority. Never try to supersede or contradict user-defined decisions without explicit user consent.
 - **Contradiction Alerts:** If `remember` returns a contradiction alert (e.g. conflicting framework version or competing state library), halt and clarify with the user.
 
-## 3. Post-Flight Persistence (End of Every Completed Task)
-- **Proactive Auto-Memory:** Upon successfully completing a task, implementing a feature, or fixing a bug, you MUST proactively call `remember()` to persist:
-  1. **New Architectural Decisions:** State patterns, database schema additions, or new endpoints.
-  2. **Key Dependencies & Tech Stack Choices:** Packages installed, version constraints, and configurations.
-  3. **User Preferences & Corrections:** Styling preferences, directory structure conventions, or user-specific commands.
-  4. **Credentials & Config Keys:** Environment variable names, API endpoints, or port configurations (never commit raw secrets).
+## 3. Post-Flight Persistence (End of Every Completed Task — Exhaustive & Detailed)
+- **Proactive Auto-Memory:** Upon successfully completing a task, implementing a feature, or fixing a bug, you MUST proactively call `remember()` to persist a comprehensive debrief.
+- **Strict Anti-Shallow Rule:** NEVER output lazy, one-line summaries (e.g. bans like *"Fixed bug in UI"* or *"Updated config"*). 
+- **Mandatory Debrief Structure:** Every stored observation must provide exhaustive technical density:
+  1. **Context & Rationale:** Problem statement, user intent, and why the solution was designed this way.
+  2. **Technical Implementation:** Concrete file paths modified, core components/classes built, algorithms chosen, and schema migrations applied.
+  3. **Operational Parameters:** Ports, endpoints, CLI parameters, and environment variable requirements.
+  4. **Verification & Test Outcomes:** Exact test suites run, number of passing assertions, and edge cases handled.
+  5. **Architectural Guardrails:** Traps, caveats, and conventions that future agents must follow to avoid regressions.
 - **Example Call:**
-  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default", category: "architecture", entity_name: "amneshia", importance: 8, tags: ["networking", "dashboard"])`
+  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default. Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand, preventing terminal background job suspensions. Verified with curl /api/stats (200 OK) and 27/27 vitest assertions passing.", category: "architecture", entity_name: "amneshia", importance: 9, tags: ["networking", "dashboard", "cli"])`
 
 ## 4. Soft Invalidation Over Deletion
 - **Never Leave Stale Memory:** If a prior decision, dependency, or file path is deprecated or replaced, call `forget(observation_id: "<id>", reason: "<why it is deprecated>")`.
