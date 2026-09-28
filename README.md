@@ -207,23 +207,32 @@ updated: "2026-09-28T12:00:00.000Z"
 ### Installation
 
 ```bash
-npm install -g amneshia
+# Global install directly from GitHub:
+npm install -g github:SabilMurti/Amneshia
+
+# Or clone & build from source:
+git clone https://github.com/SabilMurti/Amneshia.git
+cd Amneshia
+npm install
+cd dashboard && npm install && npm run build && cd ..
+npm run build && npm install -g .
 ```
 
 ### Setup in your IDE (MCP Config)
 
-Add Amneshia to your agent settings (`claude_desktop_config.json`, Antigravity `mcp_config.json`, or Cursor):
+Add Amneshia to your agent settings (`claude_desktop_config.json`, Antigravity `mcp_config.json`, Cursor, or Windsurf):
 
 ```json
 {
   "mcpServers": {
     "amneshia": {
-      "command": "npx",
-      "args": ["-y", "amneshia", "--tool-profile", "core"]
+      "command": "amneshia",
+      "args": ["--tool-profile", "core"]
     }
   }
 }
 ```
+*(Note: If running in a repository, add `"-l"` to `"args"` to enable per-repo `.amneshia/` mode).*
 
 ### CLI Commands
 

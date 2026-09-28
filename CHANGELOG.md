@@ -23,9 +23,10 @@ All notable changes to this project will be documented in this file.
 
 ### 🔄 Changed
 - Refactored `DatabaseLayer` into modular architecture (`schema.ts`, `migrations.ts`, `index.ts`).
-- Sleep Cycle consolidation redesigned: non-destructive, tier-isolated deduplication.
-- OpenAI provider made fully generic for custom base URLs and models.
+- Upgraded Web Dashboard to Amneshia 3.0 Electric Violet & Amethyst theme with 3D Neural Universe (Three.js ForceGraph), Memory Inspector, Contradiction Resolver, and Storage Diagnostics.
+- Transformed memory maintenance into a 100% deterministic, zero-token system (instant Jaccard deduplication $\ge 0.8$, authority decay, and expired pruning).
 
 ### 🗑️ Removed
 - Removed MCP bridge system (`manage_bridge_servers`, `list_bridge_tools`, `call_bridge_tool`, `src/bridge/`).
-- Removed legacy `src/ai/9router.ts` (merged into OpenAI-compatible provider).
+- Removed internal LLM reasoning layer (`src/ai/`), eliminating "LLM-in-LLM" latency and third-party API dependencies.
+- Deprecated legacy probabilistic Sleep Cycle in favor of instant deterministic maintenance.
