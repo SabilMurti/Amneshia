@@ -1434,22 +1434,370 @@ var KnowledgeGraph = class {
 };
 
 // src/tools/index.ts
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
+
+// src/tools/core.ts
+import { z } from "zod";
+
+// src/consolidation/contradiction.ts
+var NEGATION_PATTERNS = [
+  /\bnot\b/i,
+  /\bnever\b/i,
+  /\bno longer\b/i,
+  /\binstead of\b/i,
+  /\bdeprecated\b/i,
+  /\bremoved\b/i,
+  /\bdisabled\b/i,
+  /\breplaced by\b/i,
+  /\bmigrated from\b/i,
+  /\bswitched from\b/i,
+  /\btidak lagi\b/i,
+  /\bbukan\b/i,
+  /\bjangan\b/i
+];
+function tokenize(text) {
+  return new Set(
+    text.toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter((w) => w.length > 2)
+  );
+}
+function detectRuleBasedContradiction(incomingContent, existingObservations) {
+  const incomingTokens = tokenize(incomingContent);
+  const incomingHasNegation = NEGATION_PATTERNS.some((pattern) => pattern.test(incomingContent));
+  for (const existing of existingObservations) {
+    if (existing.status !== "active") continue;
+    const existingTokens = tokenize(existing.content);
+    const existingHasNegation = NEGATION_PATTERNS.some((pattern) => pattern.test(existing.content));
+    const intersection = new Set([...incomingTokens].filter((t) => existingTokens.has(t)));
+    const overlapRatio = intersection.size / Math.min(incomingTokens.size, existingTokens.size || 1);
+    if (overlapRatio >= 0.5 && incomingHasNegation !== existingHasNegation) {
+      return {
+        hasContradiction: true,
+        conflictingObservation: existing,
+        reason: `Contradiction detected: polar opposition on overlapping topic ("${[...intersection].slice(0, 3).join(", ")}")`,
+        suggestion: `The existing fact is: "${existing.content}" [${existing.authorityTier}]. Consider updating or superseding it instead of adding a conflicting fact.`
+      };
+    }
+    const insteadMatch = incomingContent.match(/instead of\s+([a-zA-Z0-9_-]+)/i);
+    if (insteadMatch && existing.content.toLowerCase().includes(insteadMatch[1].toLowerCase())) {
+      return {
+        hasContradiction: true,
+        conflictingObservation: existing,
+        reason: `Explicit replacement detected: "${incomingContent}" replaces "${insteadMatch[1]}"`,
+        suggestion: `The existing fact mentions "${insteadMatch[1]}". Consider superseding observation ${existing.id}.`
+      };
+    }
+  }
+  return { hasContradiction: false };
+}
+async function checkContradiction(incomingContent, entityId, db, useAI = false) {
+  const activeObservations = db.getObservationsByEntity(entityId, true);
+  if (activeObservations.length === 0) {
+    return { hasContradiction: false };
+  }
+  const ruleResult = detectRuleBasedContradiction(incomingContent, activeObservations);
+  if (ruleResult.hasContradiction) {
+    return ruleResult;
+  }
+  const provider = getAIProvider();
+  if (useAI && provider.name !== "none") {
+    try {
+      const prompt = `You are a strict contradiction detector for an AI knowledge graph.
+Analyze if the INCOMING FACT directly contradicts any of the EXISTING FACTS for this entity.
+
+EXISTING FACTS:
+${activeObservations.map((o) => `[ID: ${o.id}] ${o.content}`).join("\n")}
+
+INCOMING FACT:
+"${incomingContent}"
+
+If there is a direct factual contradiction, respond with JSON:
+{ "hasContradiction": true, "conflictingId": "ID", "reason": "concise explanation" }
+If there is NO contradiction, respond with:
+{ "hasContradiction": false }`;
+      const response = await provider.chat([
+        { role: "system", content: "You are a precise contradiction detector. Output only valid JSON." },
+        { role: "user", content: prompt }
+      ]);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.hasContradiction && parsed.conflictingId) {
+          const conflicting = activeObservations.find((o) => o.id === parsed.conflictingId);
+          return {
+            hasContradiction: true,
+            conflictingObservation: conflicting,
+            reason: parsed.reason || "AI detected semantic contradiction",
+            suggestion: `Conflicting fact found: "${conflicting?.content}". Consider superseding it.`
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("AI contradiction detection error:", e);
+    }
+  }
+  return { hasContradiction: false };
+}
+
+// src/tools/core.ts
+function textContent(value) {
+  return { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] };
+}
+function estimateTokens(text) {
+  return Math.ceil(text.length / 3.8);
+}
+function registerCoreTools(server, graph, db) {
+  server.tool(
+    "remember",
+    "Store knowledge facts for an entity. Automatically creates the entity if missing, detects contradictions with existing facts, sets authority tiers, and records logical dependencies.",
+    {
+      entity: z.string().min(1).describe('Entity name (e.g. "React Architecture", "Sabil Murti")'),
+      facts: z.array(z.string().min(1)).min(1).describe("List of facts/observations to remember"),
+      type: z.string().optional().describe('Entity type (default: "concept")'),
+      domain: z.string().optional().describe('Domain namespace (default: "personal")'),
+      tier: z.enum(["invariant", "architectural", "contextual", "ephemeral"]).optional().describe(
+        "Authority tier: invariant (never decays), architectural (365d), contextual (90d), ephemeral (7d)"
+      ),
+      derived_from: z.array(z.string()).optional().describe("Observation IDs that these facts logically depend on (for truth maintenance)")
+    },
+    async ({ entity, facts, type, domain, tier, derived_from }) => {
+      try {
+        let ent = db.getEntityByName(entity);
+        if (!ent) {
+          ent = db.createEntity({
+            name: entity,
+            entityType: type ?? "concept",
+            domain: domain ?? "personal"
+          });
+        }
+        const tierVal = tier ?? "contextual";
+        const derivedArr = derived_from ?? [];
+        const observationIds = [];
+        const warnings = [];
+        for (const fact of facts) {
+          const conflict = await checkContradiction(fact, ent.id, db, false);
+          if (conflict.hasContradiction) {
+            warnings.push({
+              fact,
+              reason: conflict.reason || "Semantic clash with existing fact",
+              conflictingId: conflict.conflictingObservation?.id
+            });
+            if (conflict.conflictingObservation) {
+              db.recordContradiction(
+                "pending",
+                conflict.conflictingObservation.id,
+                ent.id,
+                conflict.reason || "Polar opposition"
+              );
+            }
+          }
+          const obs = db.addObservation(
+            ent.id,
+            fact,
+            "agent",
+            "normal",
+            1,
+            void 0,
+            tierVal,
+            derivedArr
+          );
+          observationIds.push(obs.id);
+        }
+        const obsList = db.getObservationsByEntity(ent.id);
+        const relList = db.getRelationsByEntity(ent.id);
+        graph.triggerAutoExport?.();
+        return textContent({
+          ok: true,
+          entity: ent.name,
+          domain: ent.domain,
+          tier: tierVal,
+          observationIds,
+          contradictionWarnings: warnings.length > 0 ? warnings : void 0
+        });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to remember facts"
+        });
+      }
+    }
+  );
+  server.tool(
+    "recall",
+    "Smart memory recall. Searches facts using FTS5 BM25, tracks access for decay scoring, optionally traverses graph neighbors, and enforces a strict token budget.",
+    {
+      query: z.string().min(1).describe("Query text to search across facts and entities"),
+      token_budget: z.number().int().positive().optional().describe("Maximum tokens to return (default: 2000)"),
+      domain: z.string().optional().describe("Filter by domain"),
+      depth: z.number().int().min(0).max(3).optional().describe("Graph expansion depth (0 = flat search, 1+ = multi-hop GraphRAG)")
+    },
+    async ({ query, token_budget = 2e3, domain, depth = 0 }) => {
+      try {
+        const rawResults = db.searchFTSRelevant(query, 20);
+        const filtered = domain ? rawResults.filter((r) => r.entity.domain === domain) : rawResults;
+        const results = [];
+        let currentTokens = 0;
+        let truncated = false;
+        for (const item of filtered) {
+          db.recordAccess(item.entity.id);
+          const facts = [];
+          for (const obs of item.observations) {
+            db.recordAccess(item.entity.id, obs.id);
+            const factSummary = `${obs.content} (${obs.authorityTier})`;
+            const est = estimateTokens(factSummary);
+            if (currentTokens + est > token_budget) {
+              truncated = true;
+              break;
+            }
+            currentTokens += est;
+            facts.push({
+              id: obs.id,
+              content: obs.content,
+              tier: obs.authorityTier,
+              status: obs.status
+            });
+          }
+          if (facts.length > 0) {
+            results.push({
+              entity: item.entity.name,
+              domain: item.entity.domain,
+              type: item.entity.entityType,
+              facts
+            });
+          }
+          if (truncated) break;
+        }
+        let relationalContext;
+        if (depth > 0 && currentTokens < token_budget) {
+          const contextStr = graph.getContext(query, depth, 5, domain);
+          const ctxTokens = estimateTokens(contextStr);
+          if (currentTokens + ctxTokens <= token_budget) {
+            relationalContext = contextStr;
+            currentTokens += ctxTokens;
+          }
+        }
+        return textContent({
+          ok: true,
+          query,
+          tokensEstimated: currentTokens,
+          tokenBudget: token_budget,
+          truncated,
+          results,
+          relationalContext
+        });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to recall memory"
+        });
+      }
+    }
+  );
+  server.tool(
+    "forget",
+    'Forget an entity or specific observation. Supports soft invalidation (status: "invalidated"), hard permanent delete, and cascading invalidation of derived downstream facts.',
+    {
+      target: z.string().min(1).describe("Entity name OR observation UUID to forget"),
+      hard: z.boolean().optional().describe("true = permanent delete from database; false = mark invalidated (default)"),
+      cascade: z.boolean().optional().describe("true = also invalidate facts derived from this target (default: true)")
+    },
+    async ({ target, hard = false, cascade = true }) => {
+      try {
+        const obs = db.getObservationById(target);
+        if (obs) {
+          let staleCount = 0;
+          if (cascade) {
+            const cascadeRes = db.cascadeInvalidate(obs.id);
+            staleCount = cascadeRes.staleIds.length;
+          }
+          if (hard) {
+            db.deleteObservation(obs.id);
+          } else {
+            db.setObservationStatus(obs.id, "invalidated");
+          }
+          graph.triggerAutoExport?.();
+          return textContent({
+            ok: true,
+            type: "observation",
+            targetId: obs.id,
+            mode: hard ? "hard_delete" : "invalidated",
+            cascadedStaleCount: staleCount
+          });
+        }
+        const ent = db.getEntityByName(target);
+        if (ent) {
+          const obsList = db.getObservationsByEntity(ent.id);
+          let staleCount = 0;
+          for (const o of obsList) {
+            if (cascade) {
+              const cascadeRes = db.cascadeInvalidate(o.id);
+              staleCount += cascadeRes.staleIds.length;
+            }
+            if (!hard) {
+              db.setObservationStatus(o.id, "invalidated");
+            }
+          }
+          if (hard) {
+            db.deleteEntity(ent.id);
+          }
+          graph.triggerAutoExport?.();
+          return textContent({
+            ok: true,
+            type: "entity",
+            entity: ent.name,
+            observationsAffected: obsList.length,
+            mode: hard ? "hard_delete" : "invalidated",
+            cascadedStaleCount: staleCount
+          });
+        }
+        return textContent({
+          ok: false,
+          error: `Target not found: "${target}" is neither an existing entity name nor a known observation ID.`
+        });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to forget target"
+        });
+      }
+    }
+  );
+  server.tool(
+    "context",
+    "Multi-hop GraphRAG context retrieval. Finds seed entities matching query via FTS5 BM25 and traverses outward N hops, returning compressed relational markdown.",
+    {
+      query: z.string().min(1).describe("Search query for starting seeds"),
+      depth: z.number().int().min(0).max(4).optional().describe("Traversal depth (default: 1)"),
+      limit: z.number().int().positive().max(20).optional().describe("Maximum seed entities (default: 5)"),
+      domain: z.string().optional().describe("Optional domain filter")
+    },
+    async ({ query, depth = 1, limit = 5, domain }) => {
+      try {
+        const text = graph.getContext(query, depth, limit, domain);
+        return textContent(text);
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to retrieve context"
+        });
+      }
+    }
+  );
+}
 
 // src/tools/entities.ts
-import { z } from "zod";
+import { z as z2 } from "zod";
 var entitySchema = {
-  entities: z.array(
-    z.object({
-      name: z.string().min(1).describe("Unique human-readable entity name"),
-      entityType: z.string().min(1).describe("Entity type such as person, tool, project, preference, concept, or skill"),
-      domain: z.string().optional().describe("Domain scope such as personal or project:<name>"),
-      visibility: z.enum(["public", "restricted", "private"]).optional().describe("Access level for the entity"),
-      allowedAgents: z.array(z.string().min(1)).optional().describe("Explicit agent whitelist; empty means all agents")
+  entities: z2.array(
+    z2.object({
+      name: z2.string().min(1).describe("Unique human-readable entity name"),
+      entityType: z2.string().min(1).describe("Entity type such as person, tool, project, preference, concept, or skill"),
+      domain: z2.string().optional().describe("Domain scope such as personal or project:<name>"),
+      visibility: z2.enum(["public", "restricted", "private"]).optional().describe("Access level for the entity"),
+      allowedAgents: z2.array(z2.string().min(1)).optional().describe("Explicit agent whitelist; empty means all agents")
     })
   ).min(1).describe("Entities to create")
 };
-function textContent(value) {
+function textContent2(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerEntityTools(server, graph) {
@@ -1460,9 +1808,9 @@ function registerEntityTools(server, graph) {
     async ({ entities }) => {
       try {
         const created = graph.createEntities(entities);
-        return textContent({ ok: true, created, count: created.length });
+        return textContent2({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : "Failed to create entities" });
+        return textContent2({ ok: false, error: error instanceof Error ? error.message : "Failed to create entities" });
       }
     }
   );
@@ -1470,31 +1818,31 @@ function registerEntityTools(server, graph) {
     "delete_entities",
     "Delete entities by name. This removes the entity node and cascades to its attached observations and relations. Use with care when a memory branch is obsolete or incorrect.",
     {
-      names: z.array(z.string().min(1)).min(1).describe("Entity names to delete")
+      names: z2.array(z2.string().min(1)).min(1).describe("Entity names to delete")
     },
     async ({ names }) => {
       try {
         const deleted = graph.deleteEntities(names);
-        return textContent({ ok: true, deleted, requested: names.length });
+        return textContent2({ ok: true, deleted, requested: names.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : "Failed to delete entities" });
+        return textContent2({ ok: false, error: error instanceof Error ? error.message : "Failed to delete entities" });
       }
     }
   );
 }
 
 // src/tools/relations.ts
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 var relationSchema = {
-  relations: z2.array(
-    z2.object({
-      from: z2.string().min(1).describe("Source entity name"),
-      to: z2.string().min(1).describe("Target entity name"),
-      relationType: z2.string().min(1).describe("Relation type such as uses, prefers, works_on, knows, or depends_on")
+  relations: z3.array(
+    z3.object({
+      from: z3.string().min(1).describe("Source entity name"),
+      to: z3.string().min(1).describe("Target entity name"),
+      relationType: z3.string().min(1).describe("Relation type such as uses, prefers, works_on, knows, or depends_on")
     })
   ).min(1).describe("Relations to create")
 };
-function textContent2(value) {
+function textContent3(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerRelationTools(server, graph) {
@@ -1505,9 +1853,9 @@ function registerRelationTools(server, graph) {
     async ({ relations }) => {
       try {
         const created = graph.createRelations(relations);
-        return textContent2({ ok: true, created, count: created.length });
+        return textContent3({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent2({ ok: false, error: error instanceof Error ? error.message : "Failed to create relations" });
+        return textContent3({ ok: false, error: error instanceof Error ? error.message : "Failed to create relations" });
       }
     }
   );
@@ -1515,86 +1863,96 @@ function registerRelationTools(server, graph) {
     "delete_relations",
     "Delete relations by relation ID. Use this to remove stale or incorrect edges without touching the connected entities.",
     {
-      ids: z2.array(z2.string().min(1)).min(1).describe("Relation IDs to delete")
+      ids: z3.array(z3.string().min(1)).min(1).describe("Relation IDs to delete")
     },
     async ({ ids }) => {
       try {
         const deleted = graph.deleteRelations(ids);
-        return textContent2({ ok: true, deleted, requested: ids.length });
+        return textContent3({ ok: true, deleted, requested: ids.length });
       } catch (error) {
-        return textContent2({ ok: false, error: error instanceof Error ? error.message : "Failed to delete relations" });
+        return textContent3({ ok: false, error: error instanceof Error ? error.message : "Failed to delete relations" });
       }
     }
   );
 }
 
 // src/tools/observations.ts
-import { z as z3 } from "zod";
+import { z as z4 } from "zod";
 var observationSchema = {
-  observations: z3.array(
-    z3.object({
-      entityName: z3.string().min(1).describe("Entity name to attach the observations to"),
-      contents: z3.array(z3.string().min(1)).min(1).describe("Observation texts to add"),
-      source: z3.string().optional().describe("Agent or system that supplied the observation"),
-      importance: z3.enum(["permanent", "normal", "ephemeral"]).optional().describe("Retention tier for the observation"),
-      expiresAt: z3.string().datetime({ offset: true }).optional().describe("ISO 8601 expiration timestamp for ephemeral facts")
+  observations: z4.array(
+    z4.object({
+      entityName: z4.string().min(1).describe("Entity name to attach the observations to"),
+      contents: z4.array(z4.string().min(1)).min(1).describe("Observation texts to add"),
+      source: z4.string().optional().describe("Agent or system that supplied the observation"),
+      importance: z4.enum(["permanent", "normal", "ephemeral"]).optional().describe("Retention tier for the observation"),
+      authorityTier: z4.enum(["invariant", "architectural", "contextual", "ephemeral"]).optional().describe("Authority tier: invariant, architectural, contextual, ephemeral"),
+      derivedFrom: z4.array(z4.string()).optional().describe("IDs of observations this depends on"),
+      expiresAt: z4.string().datetime({ offset: true }).optional().describe("ISO 8601 expiration timestamp for ephemeral facts")
     })
   ).min(1).describe("Observation batches to store")
 };
-function textContent3(value) {
+function textContent4(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerObservationTools(server, graph) {
   server.tool(
     "add_observations",
-    "Add one or more observations to existing entities. Use this for facts, notes, corrections, or memory updates that should stay attached to an entity node.",
+    "Add one or more observations to existing entities with optional authority tier and provenance dependency tracking.",
     observationSchema,
     async ({ observations }) => {
       try {
         const created = await graph.addObservations(observations);
-        return textContent3({ ok: true, created, count: created.length });
+        return textContent4({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent3({ ok: false, error: error instanceof Error ? error.message : "Failed to add observations" });
+        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to add observations" });
       }
     }
   );
   server.tool(
     "delete_observations",
-    "Delete specific observations by ID. Use this when a fact is stale, incorrect, or superseded and should be removed from the record.",
+    "Delete specific observations by ID.",
     {
-      ids: z3.array(z3.string().min(1)).min(1).describe("Observation IDs to delete")
+      ids: z4.array(z4.string().min(1)).min(1).describe("Observation IDs to delete")
     },
     async ({ ids }) => {
       try {
         const deleted = graph.deleteObservations(ids);
-        return textContent3({ ok: true, deleted, requested: ids.length });
+        return textContent4({ ok: true, deleted, requested: ids.length });
       } catch (error) {
-        return textContent3({ ok: false, error: error instanceof Error ? error.message : "Failed to delete observations" });
+        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to delete observations" });
       }
     }
   );
   server.tool(
     "update_observation",
-    "Replace the text of an existing observation while recording the previous content in history. Use this for corrections rather than delete-and-recreate when you want an audit trail.",
+    "Update an existing observation while recording previous content in history, updating status, or triggering cascade invalidation.",
     {
-      observationId: z3.string().min(1).describe("Observation ID to update"),
-      newContent: z3.string().min(1).describe("Replacement content"),
-      changedBy: z3.string().optional().describe("Optional agent or actor making the change")
+      observationId: z4.string().min(1).describe("Observation ID to update"),
+      newContent: z4.string().min(1).describe("Replacement content"),
+      changedBy: z4.string().optional().describe("Optional agent or actor making the change"),
+      authorityTier: z4.enum(["invariant", "architectural", "contextual", "ephemeral"]).optional(),
+      status: z4.enum(["active", "stale", "invalidated", "superseded", "decayed"]).optional()
     },
-    async ({ observationId, newContent, changedBy }) => {
+    async ({ observationId, newContent, changedBy, authorityTier, status }) => {
       try {
-        const updated = graph.updateObservation({ observationId, newContent, changedBy });
-        return textContent3({ ok: true, updated });
+        const updated = graph.updateObservation({
+          observationId,
+          newContent,
+          changedBy,
+          authorityTier,
+          status
+        });
+        return textContent4({ ok: true, updated });
       } catch (error) {
-        return textContent3({ ok: false, error: error instanceof Error ? error.message : "Failed to update observation" });
+        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to update observation" });
       }
     }
   );
 }
 
 // src/tools/search.ts
-import { z as z4 } from "zod";
-function textContent4(value) {
+import { z as z5 } from "zod";
+function textContent5(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerSearchTools(server, graph) {
@@ -1602,16 +1960,16 @@ function registerSearchTools(server, graph) {
     "search_memory",
     "Search the memory graph using SQLite FTS5 with BM25 ranking. Use this when you know part of a name, fact, or observation text and want the most relevant entities and observations.",
     {
-      query: z4.string().min(1).describe("Search text to match against entity names, types, and observation content"),
-      limit: z4.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
-      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>")
+      query: z5.string().min(1).describe("Search text to match against entity names, types, and observation content"),
+      limit: z5.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
+      domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, limit, domain }) => {
       try {
         const result = graph.searchMemory(query, limit ?? 20, domain);
-        return textContent4({ ok: true, ...result });
+        return textContent5({ ok: true, ...result });
       } catch (error) {
-        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });
+        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });
       }
     }
   );
@@ -1619,16 +1977,16 @@ function registerSearchTools(server, graph) {
     "search_relevant_memory",
     "Search the memory graph with stop words (e.g. yang, di, ke, the, of, in) filtered out to optimize token efficiency and retrieval precision. Use this when querying user profiles or project preferences using a natural language prompt.",
     {
-      query: z4.string().min(1).describe("Search text prompt to filter and match against memory"),
-      limit: z4.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
-      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>")
+      query: z5.string().min(1).describe("Search text prompt to filter and match against memory"),
+      limit: z5.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
+      domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, limit, domain }) => {
       try {
         const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
-        return textContent4({ ok: true, ...result });
+        return textContent5({ ok: true, ...result });
       } catch (error) {
-        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });
+        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to search memory" });
       }
     }
   );
@@ -1636,15 +1994,15 @@ function registerSearchTools(server, graph) {
     "read_graph",
     "Read the complete knowledge graph or a filtered slice of it. Use this when you need structured entities, their observations, and their relations rather than a ranked search result.",
     {
-      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>"),
-      entityType: z4.string().optional().describe("Optional entity type filter such as person, tool, or project")
+      domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>"),
+      entityType: z5.string().optional().describe("Optional entity type filter such as person, tool, or project")
     },
     async ({ domain, entityType }) => {
       try {
         const snapshot = graph.readGraph(domain, entityType);
-        return textContent4({ ok: true, snapshot });
+        return textContent5({ ok: true, snapshot });
       } catch (error) {
-        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to read graph" });
+        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to read graph" });
       }
     }
   );
@@ -1652,14 +2010,14 @@ function registerSearchTools(server, graph) {
     "open_nodes",
     "Open a set of entity names and return each matching node with its full observations and relations. Use this when you already know the entities you want to inspect.",
     {
-      names: z4.array(z4.string().min(1)).min(1).describe("Entity names to open")
+      names: z5.array(z5.string().min(1)).min(1).describe("Entity names to open")
     },
     async ({ names }) => {
       try {
         const snapshot = graph.openNodes(names);
-        return textContent4({ ok: true, snapshot });
+        return textContent5({ ok: true, snapshot });
       } catch (error) {
-        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to open nodes" });
+        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to open nodes" });
       }
     }
   );
@@ -1667,24 +2025,24 @@ function registerSearchTools(server, graph) {
     "get_context",
     "GraphRAG multi-hop context engine. Provide a query to find seeds via FTS5 BM25, then traverse the graph outwards (BFS) by N levels to collect full relational context into a compressed markdown string. Fast and eliminates round-trips.",
     {
-      query: z4.string().min(1).describe("Search query for starting seeds"),
-      depth: z4.number().int().min(0).max(5).optional().describe("Graph traversal depth (0 = seeds only, 1 = immediate neighbors)"),
-      limit: z4.number().int().positive().max(50).optional().describe("Maximum number of starting seed entities to match"),
-      domain: z4.string().optional().describe("Optional domain filter such as personal or project:<name>")
+      query: z5.string().min(1).describe("Search query for starting seeds"),
+      depth: z5.number().int().min(0).max(5).optional().describe("Graph traversal depth (0 = seeds only, 1 = immediate neighbors)"),
+      limit: z5.number().int().positive().max(50).optional().describe("Maximum number of starting seed entities to match"),
+      domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, depth, limit, domain }) => {
       try {
         const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
-        return textContent4(context);
+        return textContent5(context);
       } catch (error) {
-        return textContent4({ ok: false, error: error instanceof Error ? error.message : "Failed to get context" });
+        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to get context" });
       }
     }
   );
 }
 
 // src/tools/lifecycle.ts
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 
 // src/consolidation/dedup.ts
 function getJaccardSimilarity(s1, s2) {
@@ -1895,7 +2253,7 @@ If no facts supersede each other, return []`;
 }
 
 // src/tools/lifecycle.ts
-function textContent5(value) {
+function textContent6(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerLifecycleTools(server, graph, db) {
@@ -1906,9 +2264,9 @@ function registerLifecycleTools(server, graph, db) {
     async () => {
       try {
         const removed = graph.cleanupExpired();
-        return textContent5({ ok: true, removed });
+        return textContent6({ ok: true, removed });
       } catch (error) {
-        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to cleanup expired observations" });
+        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to cleanup expired observations" });
       }
     }
   );
@@ -1919,9 +2277,9 @@ function registerLifecycleTools(server, graph, db) {
     async () => {
       try {
         const stats = graph.getStats();
-        return textContent5({ ok: true, stats });
+        return textContent6({ ok: true, stats });
       } catch (error) {
-        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to get stats" });
+        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to get stats" });
       }
     }
   );
@@ -1929,22 +2287,22 @@ function registerLifecycleTools(server, graph, db) {
     "consolidate_memory",
     "Proactively consolidate entity observations by resolving conflicts, removing duplicate statements, and synthesizing semantic summaries (if AI provider is active).",
     {
-      domain: z5.string().optional().describe("Filter consolidation to a specific domain (e.g. personal, work)")
+      domain: z6.string().optional().describe("Filter consolidation to a specific domain (e.g. personal, work)")
     },
     async ({ domain }) => {
       try {
         const result = await consolidateMemories(graph, db, domain);
-        return textContent5({ ok: true, result });
+        return textContent6({ ok: true, result });
       } catch (error) {
-        return textContent5({ ok: false, error: error instanceof Error ? error.message : "Failed to consolidate memories" });
+        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to consolidate memories" });
       }
     }
   );
 }
 
 // src/tools/utility.ts
-import { z as z6 } from "zod";
-function textContent6(value) {
+import { z as z7 } from "zod";
+function textContent7(value) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
 }
 function registerUtilityTools(server, graph) {
@@ -1955,9 +2313,9 @@ function registerUtilityTools(server, graph) {
     async () => {
       try {
         const writes = exportToMarkdown(graph);
-        return textContent6({ ok: true, exported: writes.length, writes });
+        return textContent7({ ok: true, exported: writes.length, writes });
       } catch (error) {
-        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to export memory" });
+        return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to export memory" });
       }
     }
   );
@@ -1965,18 +2323,18 @@ function registerUtilityTools(server, graph) {
     "manage_export_targets",
     "Manage export destinations for markdown snapshots. Use list to inspect targets, add to register a new destination, or remove to delete one by id.",
     {
-      action: z6.enum(["list", "add", "remove"]).describe("Action to perform on export targets"),
-      name: z6.string().optional().describe("Target name when adding a destination"),
-      path: z6.string().optional().describe("Filesystem path when adding a destination"),
-      format: z6.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
-      id: z6.string().optional().describe("Export target id when removing a destination")
+      action: z7.enum(["list", "add", "remove"]).describe("Action to perform on export targets"),
+      name: z7.string().optional().describe("Target name when adding a destination"),
+      path: z7.string().optional().describe("Filesystem path when adding a destination"),
+      format: z7.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
+      id: z7.string().optional().describe("Export target id when removing a destination")
     },
     async ({ action, name, path: path7, format, id }) => {
       try {
         const result = graph.manageExportTargets({ action, name, path: path7, format, id });
-        return textContent6({ ok: true, result });
+        return textContent7({ ok: true, result });
       } catch (error) {
-        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
+        return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
       }
     }
   );
@@ -1984,28 +2342,31 @@ function registerUtilityTools(server, graph) {
     "configure_ai",
     "Configure the AI provider for memory synthesis.",
     {
-      provider: z6.enum(["none", "ollama", "openai", "9router", "ninerouter"]).describe("Active AI provider for memory synthesis"),
-      modelName: z6.string().optional().describe("Optional specific model name for the provider")
+      provider: z7.enum(["none", "ollama", "openai", "9router", "ninerouter"]).describe("Active AI provider for memory synthesis"),
+      modelName: z7.string().optional().describe("Optional specific model name for the provider")
     },
     async ({ provider, modelName }) => {
       try {
         const active = setAIProvider(provider, modelName);
-        return textContent6({ ok: true, provider: active.name });
+        return textContent7({ ok: true, provider: active.name });
       } catch (error) {
-        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to configure AI" });
+        return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to configure AI" });
       }
     }
   );
 }
 
 // src/tools/index.ts
-function registerTools(server, graph, db) {
-  registerEntityTools(server, graph);
-  registerRelationTools(server, graph);
-  registerObservationTools(server, graph);
-  registerSearchTools(server, graph);
-  registerLifecycleTools(server, graph, db);
-  registerUtilityTools(server, graph);
+function registerTools(server, graph, db, profile = "full") {
+  registerCoreTools(server, graph, db);
+  if (profile === "full") {
+    registerEntityTools(server, graph);
+    registerRelationTools(server, graph);
+    registerObservationTools(server, graph);
+    registerSearchTools(server, graph);
+    registerLifecycleTools(server, graph, db);
+    registerUtilityTools(server, graph);
+  }
 }
 
 // src/server.ts

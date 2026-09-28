@@ -1,7 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { KnowledgeGraph } from '../graph.js';
-import type { DatabaseLayer } from '../database.js';
+import type { DatabaseLayer } from '../database/index.js';
 import { z } from 'zod';
+import { registerCoreTools } from './core.js';
 import { registerEntityTools } from './entities.js';
 import { registerRelationTools } from './relations.js';
 import { registerObservationTools } from './observations.js';
@@ -10,16 +11,23 @@ import { registerLifecycleTools } from './lifecycle.js';
 import { registerUtilityTools } from './utility.js';
 
 export function registerTools(
-  server: McpServer, 
-  graph: KnowledgeGraph, 
-  db: DatabaseLayer
+  server: McpServer,
+  graph: KnowledgeGraph,
+  db: DatabaseLayer,
+  profile: 'core' | 'full' = 'full'
 ): void {
-  registerEntityTools(server, graph);
-  registerRelationTools(server, graph);
-  registerObservationTools(server, graph);
-  registerSearchTools(server, graph);
-  registerLifecycleTools(server, graph, db);
-  registerUtilityTools(server, graph);
+  // Always register core 4 tools: remember, recall, forget, context
+  registerCoreTools(server, graph, db);
+
+  // If full profile, register admin and granular tools
+  if (profile === 'full') {
+    registerEntityTools(server, graph);
+    registerRelationTools(server, graph);
+    registerObservationTools(server, graph);
+    registerSearchTools(server, graph);
+    registerLifecycleTools(server, graph, db);
+    registerUtilityTools(server, graph);
+  }
 }
 
 export { z };

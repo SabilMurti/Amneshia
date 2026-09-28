@@ -1,17 +1,26 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { KnowledgeGraph } from '../graph.js';
+import type { AuthorityTier, ObservationStatus } from '../types.js';
 
 const observationSchema = {
-  observations: z.array(
-    z.object({
-      entityName: z.string().min(1).describe('Entity name to attach the observations to'),
-      contents: z.array(z.string().min(1)).min(1).describe('Observation texts to add'),
-      source: z.string().optional().describe('Agent or system that supplied the observation'),
-      importance: z.enum(['permanent', 'normal', 'ephemeral']).optional().describe('Retention tier for the observation'),
-      expiresAt: z.string().datetime({ offset: true }).optional().describe('ISO 8601 expiration timestamp for ephemeral facts'),
-    })
-  ).min(1).describe('Observation batches to store'),
+  observations: z
+    .array(
+      z.object({
+        entityName: z.string().min(1).describe('Entity name to attach the observations to'),
+        contents: z.array(z.string().min(1)).min(1).describe('Observation texts to add'),
+        source: z.string().optional().describe('Agent or system that supplied the observation'),
+        importance: z.enum(['permanent', 'normal', 'ephemeral']).optional().describe('Retention tier for the observation'),
+        authorityTier: z
+          .enum(['invariant', 'architectural', 'contextual', 'ephemeral'])
+          .optional()
+          .describe('Authority tier: invariant, architectural, contextual, ephemeral'),
+        derivedFrom: z.array(z.string()).optional().describe('IDs of observations this depends on'),
+        expiresAt: z.string().datetime({ offset: true }).optional().describe('ISO 8601 expiration timestamp for ephemeral facts'),
+      })
+    )
+    .min(1)
+    .describe('Observation batches to store'),
 };
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
@@ -21,11 +30,11 @@ function textContent(value: unknown): { content: Array<{ type: 'text'; text: str
 export function registerObservationTools(server: McpServer, graph: KnowledgeGraph): void {
   server.tool(
     'add_observations',
-    'Add one or more observations to existing entities. Use this for facts, notes, corrections, or memory updates that should stay attached to an entity node.',
+    'Add one or more observations to existing entities with optional authority tier and provenance dependency tracking.',
     observationSchema,
     async ({ observations }) => {
       try {
-        const created = await graph.addObservations(observations);
+        const created = await graph.addObservations(observations as any);
         return textContent({ ok: true, created, count: created.length });
       } catch (error) {
         return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to add observations' });
@@ -35,7 +44,7 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
 
   server.tool(
     'delete_observations',
-    'Delete specific observations by ID. Use this when a fact is stale, incorrect, or superseded and should be removed from the record.',
+    'Delete specific observations by ID.',
     {
       ids: z.array(z.string().min(1)).min(1).describe('Observation IDs to delete'),
     },
@@ -51,15 +60,23 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
 
   server.tool(
     'update_observation',
-    'Replace the text of an existing observation while recording the previous content in history. Use this for corrections rather than delete-and-recreate when you want an audit trail.',
+    'Update an existing observation while recording previous content in history, updating status, or triggering cascade invalidation.',
     {
       observationId: z.string().min(1).describe('Observation ID to update'),
       newContent: z.string().min(1).describe('Replacement content'),
       changedBy: z.string().optional().describe('Optional agent or actor making the change'),
+      authorityTier: z.enum(['invariant', 'architectural', 'contextual', 'ephemeral']).optional(),
+      status: z.enum(['active', 'stale', 'invalidated', 'superseded', 'decayed']).optional(),
     },
-    async ({ observationId, newContent, changedBy }) => {
+    async ({ observationId, newContent, changedBy, authorityTier, status }) => {
       try {
-        const updated = graph.updateObservation({ observationId, newContent, changedBy });
+        const updated = graph.updateObservation({
+          observationId,
+          newContent,
+          changedBy,
+          authorityTier: authorityTier as AuthorityTier,
+          status: status as ObservationStatus,
+        });
         return textContent({ ok: true, updated });
       } catch (error) {
         return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to update observation' });
