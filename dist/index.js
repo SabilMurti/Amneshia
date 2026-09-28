@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 // src/index.ts
-import os2 from "os";
-import path4 from "path";
-import fs3 from "fs";
+import os3 from "os";
+import path6 from "path";
+import fs5 from "fs";
 import { spawn } from "child_process";
 import { Command } from "commander";
 
@@ -1176,20 +1176,15 @@ function getAIProvider() {
   }
   return activeProvider;
 }
-async function synthesizeObservations(observations) {
-  const provider = getAIProvider();
-  if (provider.name === "none") {
-    return observations.join("\n");
-  }
-  return provider.summarize(observations);
-}
 
 // src/graph.ts
 var KnowledgeGraph = class {
-  constructor(database) {
+  constructor(database, dualWriteSync) {
     this.database = database;
+    this.dualWriteSync = dualWriteSync;
   }
   database;
+  dualWriteSync;
   createEntities(inputs) {
     const created = [];
     for (const input of inputs) {
@@ -1428,6 +1423,13 @@ var KnowledgeGraph = class {
   }
   triggerAutoExport() {
     exportToMarkdown(this);
+    if (this.dualWriteSync) {
+      try {
+        this.dualWriteSync.syncAll();
+      } catch (err) {
+        console.warn("Failed to sync to markdown storage:", err);
+      }
+    }
   }
 };
 
@@ -1684,7 +1686,7 @@ function registerSearchTools(server, graph) {
 // src/tools/lifecycle.ts
 import { z as z5 } from "zod";
 
-// src/consolidation/index.ts
+// src/consolidation/dedup.ts
 function getJaccardSimilarity(s1, s2) {
   const words1 = new Set(s1.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean));
   const words2 = new Set(s2.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean));
@@ -1693,135 +1695,201 @@ function getJaccardSimilarity(s1, s2) {
   const union = /* @__PURE__ */ new Set([...words1, ...words2]);
   return intersection.size / union.size;
 }
+function findDuplicates(observations, threshold) {
+  const simThreshold = threshold ?? (process.env.AMNESHIA_DEDUP_THRESHOLD ? parseFloat(process.env.AMNESHIA_DEDUP_THRESHOLD) : 0.8);
+  const duplicates = [];
+  const supersededIds = /* @__PURE__ */ new Set();
+  const byTier = /* @__PURE__ */ new Map();
+  for (const obs of observations) {
+    if (obs.status !== "active") continue;
+    const tier = obs.authorityTier || "contextual";
+    const list = byTier.get(tier) ?? [];
+    list.push(obs);
+    byTier.set(tier, list);
+  }
+  for (const [_tier, tierObs] of byTier.entries()) {
+    for (let i = 0; i < tierObs.length; i++) {
+      for (let j = i + 1; j < tierObs.length; j++) {
+        const obs1 = tierObs[i];
+        const obs2 = tierObs[j];
+        if (supersededIds.has(obs1.id) || supersededIds.has(obs2.id)) {
+          continue;
+        }
+        const isExact = obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim();
+        const sim = isExact ? 1 : getJaccardSimilarity(obs1.content, obs2.content);
+        if (isExact || sim >= simThreshold) {
+          const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
+          const newer = older === obs1 ? obs2 : obs1;
+          duplicates.push({
+            older,
+            newer,
+            similarity: sim,
+            reason: isExact ? "Exact match duplicate" : `Jaccard similarity ${(sim * 100).toFixed(0)}% >= ${(simThreshold * 100).toFixed(0)}%`
+          });
+          supersededIds.add(older.id);
+        }
+      }
+    }
+  }
+  return duplicates;
+}
+
+// src/consolidation/decay.ts
+var TIER_WEIGHTS = {
+  invariant: 1,
+  architectural: 0.8,
+  contextual: 0.5,
+  ephemeral: 0.2
+};
+var TIER_MAX_INACTIVE_DAYS = {
+  invariant: Infinity,
+  architectural: 365,
+  contextual: 90,
+  ephemeral: 7
+};
+function computeDecayScore(obs, nowMs = Date.now()) {
+  if (obs.authorityTier === "invariant") {
+    return 1;
+  }
+  if (obs.expiresAt && new Date(obs.expiresAt).getTime() <= nowMs) {
+    return 0;
+  }
+  const tierWeight = TIER_WEIGHTS[obs.authorityTier] ?? 0.5;
+  const maxDays = TIER_MAX_INACTIVE_DAYS[obs.authorityTier] ?? 90;
+  const lastActivity = obs.lastAccessedAt ? new Date(obs.lastAccessedAt).getTime() : new Date(obs.createdAt).getTime();
+  const daysInactive = Math.max(0, (nowMs - lastActivity) / (1e3 * 60 * 60 * 24));
+  if (daysInactive >= maxDays) {
+    return 0;
+  }
+  const recencyFactor = Math.max(0, 1 - daysInactive / maxDays);
+  const frequencyFactor = 1 + Math.log10((obs.accessCount || 0) + 1);
+  return tierWeight * frequencyFactor * recencyFactor;
+}
+function evaluateDecay(observations, threshold = 0.1, nowMs = Date.now()) {
+  const decayed = [];
+  const retained = [];
+  for (const obs of observations) {
+    if (obs.status !== "active") {
+      continue;
+    }
+    if (obs.authorityTier === "invariant") {
+      retained.push(obs);
+      continue;
+    }
+    const score = computeDecayScore(obs, nowMs);
+    if (score < threshold) {
+      decayed.push(obs);
+    } else {
+      retained.push(obs);
+    }
+  }
+  return { decayed, retained };
+}
+function applyDecay(db, threshold = 0.1, nowMs = Date.now()) {
+  const snapshot = db.readGraph();
+  const decayedIds = [];
+  for (const entity of snapshot.entities) {
+    const { decayed } = evaluateDecay(entity.observations, threshold, nowMs);
+    for (const obs of decayed) {
+      db.setObservationStatus(obs.id, "decayed");
+      decayedIds.push(obs.id);
+    }
+  }
+  return {
+    decayedCount: decayedIds.length,
+    decayedIds
+  };
+}
+
+// src/consolidation/index.ts
 async function consolidateMemories(graph, db, domain, dryRun = false) {
   const purgedCount = dryRun ? 0 : graph.cleanupExpired();
+  const decayResult = dryRun ? { decayedCount: 0, decayedIds: [] } : applyDecay(db);
   const snapshot = graph.readGraph(domain);
   const entities = snapshot.entities;
   let supersededCount = 0;
-  let consolidatedCount = 0;
   const supersededList = [];
-  const synthesizedList = [];
   const provider = getAIProvider();
   for (const entity of entities) {
-    const allObs = db.getObservationsByEntity(entity.id);
-    const activeObs = allObs.filter((o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now()));
-    if (activeObs.length < 2) {
-      continue;
+    const activeObs = db.getObservationsByEntity(entity.id, true);
+    if (activeObs.length < 2) continue;
+    const supersededInEntity = /* @__PURE__ */ new Set();
+    const duplicates = findDuplicates(activeObs);
+    for (const dup of duplicates) {
+      if (supersededInEntity.has(dup.older.id)) continue;
+      if (!dryRun) {
+        db.setSupersedes(dup.older.id, dup.newer.id, "sleep_cycle");
+        db.cascadeInvalidate(dup.older.id);
+      }
+      supersededInEntity.add(dup.older.id);
+      supersededList.push({
+        oldId: dup.older.id,
+        newId: dup.newer.id,
+        reason: dup.reason,
+        oldContent: dup.older.content,
+        newContent: dup.newer.content
+      });
+      supersededCount++;
     }
-    let supersededIds = /* @__PURE__ */ new Set();
     if (provider.name !== "none") {
-      try {
-        const prompt = `You are an AI assistant analyzing a list of observations for the entity "${entity.name}" (Type: "${entity.entityType}", Domain: "${entity.domain}").
-Identify any pairs of observations where a newer observation conflicts with or updates/supersedes an older observation.
-For example, if an older observation says "lives in Jakarta" and a newer one says "now lives in Bandung", the newer one supersedes the older one.
-If an older observation says "likes acoustic guitars" and a newer one says "likes electric guitars instead of acoustic", the newer one supersedes the older one.
+      const remainingObs = activeObs.filter((o) => !supersededInEntity.has(o.id));
+      if (remainingObs.length >= 2) {
+        try {
+          const prompt = `You are an AI analyzing observations for "${entity.name}".
+Identify pairs where a newer observation directly updates, replaces, or conflicts with an older observation.
+DO NOT synthesize or merge facts into a single summary. Only identify which OLDER fact is superseded by which NEWER fact.
 
 Observations:
-${activeObs.map((o) => `[ID: ${o.id}] (Created: ${o.createdAt}) ${o.content}`).join("\n")}
+${remainingObs.map((o) => `[ID: ${o.id}] (Tier: ${o.authorityTier}) ${o.content}`).join("\n")}
 
-Respond STRICTLY with a JSON array of objects, and absolutely nothing else. Each object in the array must look like this:
-{ "olderId": "older_observation_uuid", "newerId": "newer_observation_uuid", "reason": "concise description of why newer updates/conflicts with older" }
-If no observations conflict or update each other, return an empty array: []`;
-        const responseText = await provider.chat([
-          { role: "system", content: "You are a precise JSON generator. Output only valid JSON." },
-          { role: "user", content: prompt }
-        ]);
-        const jsonStart = responseText.indexOf("[");
-        const jsonEnd = responseText.lastIndexOf("]");
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          const jsonString = responseText.substring(jsonStart, jsonEnd + 1);
-          const conflicts = JSON.parse(jsonString);
-          for (const conf of conflicts) {
-            const older = activeObs.find((o) => o.id === conf.olderId);
-            const newer = activeObs.find((o) => o.id === conf.newerId);
-            if (older && newer && !supersededIds.has(older.id)) {
-              if (!dryRun) {
-                db.setSupersedes(older.id, newer.id, "sleep_cycle");
+Respond with a JSON array:
+[ { "olderId": "...", "newerId": "...", "reason": "..." } ]
+If no facts supersede each other, return []`;
+          const responseText = await provider.chat([
+            { role: "system", content: "Output only valid JSON." },
+            { role: "user", content: prompt }
+          ]);
+          const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const pairs = JSON.parse(jsonMatch[0]);
+            for (const pair of pairs) {
+              const older = remainingObs.find((o) => o.id === pair.olderId);
+              const newer = remainingObs.find((o) => o.id === pair.newerId);
+              if (older?.authorityTier === "invariant" && newer?.authorityTier !== "invariant") {
+                continue;
               }
-              supersededIds.add(older.id);
-              supersededList.push({
-                oldId: older.id,
-                newId: newer.id,
-                reason: conf.reason,
-                oldContent: older.content,
-                newContent: newer.content
-              });
-              supersededCount++;
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`LLM Conflict resolution failed for entity ${entity.name}:`, err);
-      }
-    }
-    const remainingObs = activeObs.filter((o) => !supersededIds.has(o.id));
-    for (let i = 0; i < remainingObs.length; i++) {
-      for (let j = i + 1; j < remainingObs.length; j++) {
-        const obs1 = remainingObs[i];
-        const obs2 = remainingObs[j];
-        if (supersededIds.has(obs1.id) || supersededIds.has(obs2.id)) continue;
-        const sim = getJaccardSimilarity(obs1.content, obs2.content);
-        if (sim >= 0.8 || obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim()) {
-          const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
-          const newer = older === obs1 ? obs2 : obs1;
-          if (!dryRun) {
-            db.setSupersedes(older.id, newer.id, "sleep_cycle");
-          }
-          supersededIds.add(older.id);
-          supersededList.push({
-            oldId: older.id,
-            newId: newer.id,
-            reason: "Duplicate or near-duplicate content",
-            oldContent: older.content,
-            newContent: newer.content
-          });
-          supersededCount++;
-        }
-      }
-    }
-    if (provider.name !== "none") {
-      const finalActiveObs = activeObs.filter((o) => !supersededIds.has(o.id));
-      if (finalActiveObs.length >= 2) {
-        try {
-          const contents = finalActiveObs.map((o) => o.content);
-          const synthesizedSummary = await synthesizeObservations(contents);
-          if (synthesizedSummary && synthesizedSummary.trim() !== "" && synthesizedSummary !== contents.join("\n")) {
-            if (!dryRun) {
-              const newObs = db.addObservation(
-                entity.id,
-                synthesizedSummary.trim(),
-                "synthesis",
-                "high",
-                1
-              );
-              for (const oldObs of finalActiveObs) {
-                db.setSupersedes(oldObs.id, newObs.id, "sleep_cycle");
+              if (older && newer && !supersededInEntity.has(older.id)) {
+                if (!dryRun) {
+                  db.setSupersedes(older.id, newer.id, "sleep_cycle");
+                  db.cascadeInvalidate(older.id);
+                }
+                supersededInEntity.add(older.id);
+                supersededList.push({
+                  oldId: older.id,
+                  newId: newer.id,
+                  reason: pair.reason,
+                  oldContent: older.content,
+                  newContent: newer.content
+                });
                 supersededCount++;
               }
             }
-            synthesizedList.push({
-              entityId: entity.id,
-              entityName: entity.name,
-              proposedContent: synthesizedSummary.trim(),
-              oldObservationIds: finalActiveObs.map((o) => o.id),
-              oldContents: contents
-            });
-            consolidatedCount++;
           }
         } catch (err) {
-          console.error(`LLM Synthesis failed for entity ${entity.name}:`, err);
+          console.error(`AI conflict resolution error for ${entity.name}:`, err);
         }
       }
     }
   }
   return {
     purgedCount,
+    decayedCount: decayResult.decayedCount,
     supersededCount,
-    consolidatedCount,
+    consolidatedCount: supersededCount,
     details: {
       purged: [],
-      superseded: supersededList,
-      synthesized: synthesizedList
+      decayed: decayResult.decayedIds,
+      superseded: supersededList
     }
   };
 }
@@ -1903,9 +1971,9 @@ function registerUtilityTools(server, graph) {
       format: z6.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
       id: z6.string().optional().describe("Export target id when removing a destination")
     },
-    async ({ action, name, path: path5, format, id }) => {
+    async ({ action, name, path: path7, format, id }) => {
       try {
-        const result = graph.manageExportTargets({ action, name, path: path5, format, id });
+        const result = graph.manageExportTargets({ action, name, path: path7, format, id });
         return textContent6({ ok: true, result });
       } catch (error) {
         return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
@@ -1941,12 +2009,358 @@ function registerTools(server, graph, db) {
 }
 
 // src/server.ts
-import path3 from "path";
+import path5 from "path";
 import { fileURLToPath } from "url";
+
+// src/storage/index.ts
+import fs4 from "fs";
+import os2 from "os";
+import path4 from "path";
+
+// src/storage/markdown-store.ts
+import fs3 from "fs";
+import path3 from "path";
+
+// src/storage/slug.ts
+function toSlug(text) {
+  return text.toLowerCase().trim().replace(/[:\/\\?#\[\]@!$&'()*+,;=]/g, "-").replace(/[^a-z0-9-_.]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "unnamed";
+}
+
+// src/storage/markdown-store.ts
+function serializeEntity(entity, observations, relations) {
+  const frontmatter = [
+    "---",
+    `id: ${JSON.stringify(entity.id)}`,
+    `name: ${JSON.stringify(entity.name)}`,
+    `type: ${JSON.stringify(entity.entityType)}`,
+    `domain: ${JSON.stringify(entity.domain)}`,
+    `visibility: ${JSON.stringify(entity.visibility)}`,
+    `allowed_agents: ${JSON.stringify(entity.allowedAgents)}`,
+    `created: ${JSON.stringify(entity.createdAt)}`,
+    `updated: ${JSON.stringify(entity.updatedAt)}`,
+    "---"
+  ].join("\n");
+  const obsLines = [];
+  for (const obs of observations) {
+    const isInactive = obs.status === "superseded" || obs.status === "invalidated" || obs.status === "decayed";
+    const mainText = `**[${obs.authorityTier}]** ${obs.content}`;
+    const formattedText = isInactive ? `~~${mainText}~~` : mainText;
+    const metaParts = [
+      `id: ${obs.id}`,
+      `confidence: ${obs.confidence}`
+    ];
+    if (obs.derivedFrom && obs.derivedFrom.length > 0) {
+      metaParts.push(`derived_from: [${obs.derivedFrom.join(", ")}]`);
+    }
+    metaParts.push(`status: ${obs.status}`);
+    if (obs.supersedes) {
+      metaParts.push(`superseded_by: ${obs.supersedes}`);
+    }
+    obsLines.push(`- ${formattedText}
+  \`${metaParts.join(" | ")}\``);
+  }
+  const relLines = [];
+  for (const rel of relations) {
+    const target = rel.fromEntity === entity.id ? rel.toEntityName : rel.fromEntityName;
+    const direction = rel.fromEntity === entity.id ? "->" : "<-";
+    relLines.push(`- \`${rel.relationType}\` ${direction} ${target}`);
+  }
+  const sections = [frontmatter];
+  sections.push("## Observations\n");
+  if (obsLines.length > 0) {
+    sections.push(obsLines.join("\n\n"));
+  } else {
+    sections.push("_No observations recorded yet._");
+  }
+  sections.push("\n## Relations\n");
+  if (relLines.length > 0) {
+    sections.push(relLines.join("\n"));
+  } else {
+    sections.push("_No relations recorded yet._");
+  }
+  return sections.join("\n") + "\n";
+}
+function parseEntityMarkdown(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  if (!match) {
+    throw new Error("Invalid markdown entity format: missing frontmatter");
+  }
+  const frontmatterStr = match[1];
+  const bodyStr = match[2];
+  const getFrontmatterValue = (key) => {
+    const fieldMatch = frontmatterStr.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
+    if (!fieldMatch) return null;
+    let val = fieldMatch[1].trim();
+    if (val.startsWith('"') && val.endsWith('"') || val.startsWith("'") && val.endsWith("'")) {
+      val = val.slice(1, -1);
+    }
+    return val;
+  };
+  const id = getFrontmatterValue("id") || "";
+  const name = getFrontmatterValue("name") || "";
+  const entityType = getFrontmatterValue("type") || "concept";
+  const domain = getFrontmatterValue("domain") || "personal";
+  const visibility = getFrontmatterValue("visibility") || "public";
+  const createdAt = getFrontmatterValue("created") || (/* @__PURE__ */ new Date()).toISOString();
+  const updatedAt = getFrontmatterValue("updated") || (/* @__PURE__ */ new Date()).toISOString();
+  let allowedAgents = [];
+  const rawAgents = getFrontmatterValue("allowed_agents");
+  if (rawAgents) {
+    try {
+      allowedAgents = JSON.parse(rawAgents);
+    } catch {
+      allowedAgents = [];
+    }
+  }
+  const observations = [];
+  const relations = [];
+  const obsSectionMatch = bodyStr.match(/## Observations\r?\n([\s\S]*?)(?=\r?\n## Relations|$)/i);
+  if (obsSectionMatch) {
+    const obsBlock = obsSectionMatch[1];
+    const items = obsBlock.split(/(?:^|\n)- /m).filter((item) => item.trim() && !item.includes("_No observations"));
+    for (const item of items) {
+      const lines = item.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length === 0) continue;
+      let contentLine = lines[0];
+      const isStrikethrough = contentLine.startsWith("~~") && contentLine.endsWith("~~");
+      if (isStrikethrough) {
+        contentLine = contentLine.slice(2, -2);
+      }
+      let authorityTier = "contextual";
+      const tierMatch = contentLine.match(/^\*\*\[(invariant|architectural|contextual|ephemeral)\]\*\*\s*(.*)$/);
+      let factContent = contentLine;
+      if (tierMatch) {
+        authorityTier = tierMatch[1];
+        factContent = tierMatch[2];
+      }
+      let obsId = "";
+      let confidence = 1;
+      let status = isStrikethrough ? "superseded" : "active";
+      let derivedFrom = [];
+      let supersedes = null;
+      if (lines.length > 1 && lines[1].startsWith("`") && lines[1].endsWith("`")) {
+        const metaStr = lines[1].slice(1, -1);
+        const parts = metaStr.split("|").map((p) => p.trim());
+        for (const part of parts) {
+          const [k, ...vParts] = part.split(":").map((p) => p.trim());
+          const v = vParts.join(":").trim();
+          if (k === "id") obsId = v;
+          else if (k === "confidence") confidence = parseFloat(v) || 1;
+          else if (k === "status") status = v;
+          else if (k === "superseded_by") supersedes = v;
+          else if (k === "derived_from") {
+            const arrMatch = v.match(/\[(.*)\]/);
+            if (arrMatch && arrMatch[1]) {
+              derivedFrom = arrMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
+            }
+          }
+        }
+      }
+      if (factContent) {
+        observations.push({
+          id: obsId,
+          content: factContent,
+          authorityTier,
+          derivedFrom,
+          confidence,
+          status,
+          supersedes
+        });
+      }
+    }
+  }
+  const relSectionMatch = bodyStr.match(/## Relations\r?\n([\s\S]*?)$/i);
+  if (relSectionMatch) {
+    const relBlock = relSectionMatch[1];
+    const lines = relBlock.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- `"));
+    for (const line of lines) {
+      const relMatch = line.match(/^- `(.*?)`\s*(?:->|<-)\s*(.*)$/);
+      if (relMatch) {
+        relations.push({
+          relationType: relMatch[1],
+          targetName: relMatch[2].trim()
+        });
+      }
+    }
+  }
+  return {
+    id,
+    name,
+    entityType,
+    domain,
+    visibility,
+    allowedAgents,
+    createdAt,
+    updatedAt,
+    observations,
+    relations
+  };
+}
+function getEntityFilePath(knowledgeDir, domain, name) {
+  const domainSlug = toSlug(domain);
+  const nameSlug = toSlug(name);
+  return path3.join(knowledgeDir, domainSlug, `${nameSlug}.md`);
+}
+function saveEntityMarkdown(knowledgeDir, entity, observations, relations) {
+  const filePath = getEntityFilePath(knowledgeDir, entity.domain, entity.name);
+  const dir = path3.dirname(filePath);
+  fs3.mkdirSync(dir, { recursive: true });
+  const content = serializeEntity(entity, observations, relations);
+  fs3.writeFileSync(filePath, content, "utf-8");
+  return filePath;
+}
+function deleteEntityMarkdown(knowledgeDir, domain, name) {
+  const filePath = getEntityFilePath(knowledgeDir, domain, name);
+  if (fs3.existsSync(filePath)) {
+    fs3.unlinkSync(filePath);
+    return true;
+  }
+  return false;
+}
+function loadAllEntityMarkdowns(knowledgeDir) {
+  if (!fs3.existsSync(knowledgeDir)) {
+    return [];
+  }
+  const results = [];
+  function scan(dir) {
+    const entries = fs3.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path3.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scan(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        try {
+          const content = fs3.readFileSync(fullPath, "utf-8");
+          const parsed = parseEntityMarkdown(content);
+          results.push(parsed);
+        } catch (e) {
+          console.warn(`Failed to parse markdown entity at ${fullPath}:`, e);
+        }
+      }
+    }
+  }
+  scan(knowledgeDir);
+  return results;
+}
+
+// src/storage/reindex.ts
+function reindexFromMarkdown(knowledgeDir, db) {
+  const parsedEntities = loadAllEntityMarkdowns(knowledgeDir);
+  let entityCount = 0;
+  let observationCount = 0;
+  let relationCount = 0;
+  for (const item of parsedEntities) {
+    let existing = db.getEntityByName(item.name);
+    if (!existing) {
+      existing = db.createEntity({
+        name: item.name,
+        entityType: item.entityType,
+        domain: item.domain,
+        visibility: item.visibility,
+        allowedAgents: item.allowedAgents
+      });
+      entityCount++;
+    }
+  }
+  for (const item of parsedEntities) {
+    const entity = db.getEntityByName(item.name);
+    if (!entity) continue;
+    const existingObs = db.getObservationsByEntity(entity.id);
+    const existingObsContents = new Set(existingObs.map((o) => o.content));
+    const existingObsIds = new Set(existingObs.map((o) => o.id));
+    for (const obs of item.observations) {
+      if (obs.id && existingObsIds.has(obs.id)) {
+        continue;
+      }
+      if (existingObsContents.has(obs.content)) {
+        continue;
+      }
+      const created = db.addObservation(
+        entity.id,
+        obs.content,
+        "reindex",
+        "normal",
+        obs.confidence,
+        void 0,
+        obs.authorityTier,
+        obs.derivedFrom
+      );
+      if (obs.status && obs.status !== "active") {
+        db.setObservationStatus(created.id, obs.status);
+      }
+      observationCount++;
+    }
+    for (const rel of item.relations) {
+      const targetEntity = db.getEntityByName(rel.targetName);
+      if (targetEntity) {
+        db.createRelation(entity.id, targetEntity.id, rel.relationType);
+        relationCount++;
+      }
+    }
+  }
+  return {
+    entities: entityCount,
+    observations: observationCount,
+    relations: relationCount
+  };
+}
+
+// src/storage/index.ts
+function resolveStorageConfig(forceLocal = false) {
+  const cwd = process.cwd();
+  const localAmneshiaDir = path4.join(cwd, ".amneshia");
+  if (forceLocal || fs4.existsSync(localAmneshiaDir)) {
+    return {
+      mode: "local",
+      dataDir: localAmneshiaDir,
+      knowledgeDir: path4.join(localAmneshiaDir, "knowledge")
+    };
+  }
+  const globalDir = path4.join(os2.homedir(), ".amneshia");
+  return {
+    mode: "global",
+    dataDir: globalDir,
+    knowledgeDir: path4.join(globalDir, "knowledge")
+  };
+}
+var DualWriteSync = class {
+  constructor(knowledgeDir, database) {
+    this.knowledgeDir = knowledgeDir;
+    this.database = database;
+    fs4.mkdirSync(this.knowledgeDir, { recursive: true });
+  }
+  knowledgeDir;
+  database;
+  syncEntity(entity) {
+    const observations = this.database.getObservationsByEntity(entity.id);
+    const relations = this.database.getRelationsByEntity(entity.id);
+    return saveEntityMarkdown(this.knowledgeDir, entity, observations, relations);
+  }
+  syncAll() {
+    const snapshot = this.database.readGraph();
+    let count = 0;
+    for (const entity of snapshot.entities) {
+      saveEntityMarkdown(this.knowledgeDir, entity, entity.observations, entity.relations);
+      count++;
+    }
+    return count;
+  }
+  removeEntity(domain, name) {
+    return deleteEntityMarkdown(this.knowledgeDir, domain, name);
+  }
+  reindex() {
+    return reindexFromMarkdown(this.knowledgeDir, this.database);
+  }
+};
+
+// src/server.ts
 async function startServer(options = {}) {
-  const db = new DatabaseLayer(options.dataDir);
-  const graph = new KnowledgeGraph(db);
-  const server = new McpServer({ name: "Amneshia", version: "2.0.0" });
+  const storageConfig = resolveStorageConfig(options.local);
+  const dataDir = options.dataDir ?? storageConfig.dataDir;
+  const db = new DatabaseLayer(dataDir);
+  const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
+  const graph = new KnowledgeGraph(db, dualWrite);
+  const server = new McpServer({ name: "Amneshia", version: "3.0.0" });
   registerTools(server, graph, db);
   const cleanup = async () => {
     process.exit(0);
@@ -2003,6 +2417,13 @@ async function startServer(options = {}) {
     });
     app.post("/api/config/ai", (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post("/api/cleanup", (req, res) => res.json(graph.cleanupExpired()));
+    app.post("/api/gc", (_req, res) => res.json({ removed: db.gc() }));
+    app.post("/api/reindex", (_req, res) => res.json(dualWrite.reindex()));
+    app.get("/api/contradictions", (req, res) => res.json(db.getContradictions(req.query.entityId)));
+    app.post("/api/contradictions/:id/resolve", (req, res) => {
+      const ok = db.resolveContradiction(req.params.id, req.body.resolution);
+      res.json({ ok });
+    });
     app.post("/api/consolidate", async (req, res, next) => {
       try {
         const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);
@@ -2034,11 +2455,11 @@ async function startServer(options = {}) {
         next(error);
       }
     });
-    const uiPath = path3.join(path3.dirname(fileURLToPath(import.meta.url)), "../dist-ui");
+    const uiPath = path5.join(path5.dirname(fileURLToPath(import.meta.url)), "../dist-ui");
     app.use(express.static(uiPath));
     app.use((req, res, next) => {
       if (req.path.startsWith("/api") || req.path === "/sse" || req.path === "/messages") return next();
-      res.sendFile(path3.join(uiPath, "index.html"));
+      res.sendFile(path5.join(uiPath, "index.html"));
     });
     const httpListener = app.listen(options.port || 3457, () => {
       console.error(`[Amneshia] HTTP Dashboard running on http://localhost:${options.port || 3457}`);
@@ -2060,7 +2481,7 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Unified memory hub for AI agents").version("2.0.0").option("--data-dir <path>", "Custom data directory", path4.join(os2.homedir(), ".amneshia")).option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-d, --daemon", "Run server in background daemon mode", false);
+program.name("amneshia").description("\u{1F9E0} Unified memory hub for AI agents").version("2.0.0").option("--data-dir <path>", "Custom data directory", path6.join(os3.homedir(), ".amneshia")).option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-d, --daemon", "Run server in background daemon mode", false);
 async function main() {
   const options = program.parse(process.argv).opts();
   const isHttpEnabled = options.dashboard !== false && options.http !== false;
@@ -2069,11 +2490,11 @@ async function main() {
       console.error("[Amneshia] Error: Daemon mode requires dashboard to be enabled.");
       process.exit(1);
     }
-    const logDir = path4.join(os2.homedir(), ".amneshia");
-    fs3.mkdirSync(logDir, { recursive: true });
-    const logFile = path4.join(logDir, "server.log");
-    const out = fs3.openSync(logFile, "a");
-    const err = fs3.openSync(logFile, "a");
+    const logDir = path6.join(os3.homedir(), ".amneshia");
+    fs5.mkdirSync(logDir, { recursive: true });
+    const logFile = path6.join(logDir, "server.log");
+    const out = fs5.openSync(logFile, "a");
+    const err = fs5.openSync(logFile, "a");
     const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d");
     const child = spawn(process.argv[0], [process.argv[1], ...args], {
       detached: true,

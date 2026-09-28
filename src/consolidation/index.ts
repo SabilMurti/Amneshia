@@ -1,26 +1,26 @@
 import type { KnowledgeGraph } from '../graph.js';
-import type { DatabaseLayer } from '../database.js';
-import type { Observation } from '../types.js';
-import { getAIProvider, synthesizeObservations } from '../ai/index.js';
+import type { DatabaseLayer } from '../database/index.js';
+import { findDuplicates, type DuplicatePair } from './dedup.js';
+import { applyDecay } from './decay.js';
+import { cascadeInvalidate } from './truth-maintenance.js';
+import { checkContradiction, detectRuleBasedContradiction } from './contradiction.js';
+import { getAIProvider } from '../ai/index.js';
+
+export * from './dedup.js';
+export * from './decay.js';
+export * from './truth-maintenance.js';
+export * from './contradiction.js';
 
 export interface ConsolidationResult {
   purgedCount: number;
+  decayedCount: number;
   supersededCount: number;
   consolidatedCount: number;
   details?: {
     purged: string[];
-    superseded: Array<{ oldId: string; newId: string; reason: string }>;
-    synthesized: Array<{ entityId: string; newObservationId: string; oldObservationIds: string[] }>;
+    decayed: string[];
+    superseded: Array<{ oldId: string; newId: string; reason: string; oldContent?: string; newContent?: string }>;
   };
-}
-
-function getJaccardSimilarity(s1: string, s2: string): number {
-  const words1 = new Set(s1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
-  const words2 = new Set(s2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
-  if (words1.size === 0 || words2.size === 0) return 0;
-  const intersection = new Set([...words1].filter((x) => words2.has(x)));
-  const union = new Set([...words1, ...words2]);
-  return intersection.size / union.size;
 }
 
 export async function consolidateMemories(
@@ -29,139 +29,109 @@ export async function consolidateMemories(
   domain?: string,
   dryRun = false
 ): Promise<ConsolidationResult> {
+  // Step 1: Purge expired ephemeral observations
   const purgedCount = dryRun ? 0 : graph.cleanupExpired();
 
-  // Retrieve entities matching domain
+  // Step 2: Apply authority-tier value decay
+  const decayResult = dryRun
+    ? { decayedCount: 0, decayedIds: [] }
+    : applyDecay(db);
+
+  // Step 3: Read graph entities
   const snapshot = graph.readGraph(domain);
   const entities = snapshot.entities;
 
   let supersededCount = 0;
-  let consolidatedCount = 0;
-
-  const supersededList: Array<{ oldId: string; newId: string; reason: string; oldContent?: string; newContent?: string }> = [];
-  const synthesizedList: Array<{ entityId: string; entityName: string; proposedContent: string; oldObservationIds: string[]; oldContents: string[] }> = [];
+  const supersededList: Array<{
+    oldId: string;
+    newId: string;
+    reason: string;
+    oldContent?: string;
+    newContent?: string;
+  }> = [];
 
   const provider = getAIProvider();
 
   for (const entity of entities) {
-    const allObs = db.getObservationsByEntity(entity.id);
-    const activeObs = allObs.filter((o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now()));
+    const activeObs = db.getObservationsByEntity(entity.id, true);
+    if (activeObs.length < 2) continue;
 
-    if (activeObs.length < 2) {
-      continue;
+    const supersededInEntity = new Set<string>();
+
+    // Step 4: Tier-aware Jaccard and exact deduplication
+    const duplicates = findDuplicates(activeObs);
+    for (const dup of duplicates) {
+      if (supersededInEntity.has(dup.older.id)) continue;
+
+      if (!dryRun) {
+        db.setSupersedes(dup.older.id, dup.newer.id, 'sleep_cycle');
+        // Cascade invalidate any dependents of the superseded observation
+        db.cascadeInvalidate(dup.older.id);
+      }
+
+      supersededInEntity.add(dup.older.id);
+      supersededList.push({
+        oldId: dup.older.id,
+        newId: dup.newer.id,
+        reason: dup.reason,
+        oldContent: dup.older.content,
+        newContent: dup.newer.content,
+      });
+      supersededCount++;
     }
 
-    let supersededIds = new Set<string>();
-
+    // Step 5: Optional AI-assisted pairwise conflict resolution (non-destructive)
     if (provider.name !== 'none') {
-      try {
-        const prompt = `You are an AI assistant analyzing a list of observations for the entity "${entity.name}" (Type: "${entity.entityType}", Domain: "${entity.domain}").
-Identify any pairs of observations where a newer observation conflicts with or updates/supersedes an older observation.
-For example, if an older observation says "lives in Jakarta" and a newer one says "now lives in Bandung", the newer one supersedes the older one.
-If an older observation says "likes acoustic guitars" and a newer one says "likes electric guitars instead of acoustic", the newer one supersedes the older one.
+      const remainingObs = activeObs.filter((o) => !supersededInEntity.has(o.id));
+      if (remainingObs.length >= 2) {
+        try {
+          const prompt = `You are an AI analyzing observations for "${entity.name}".
+Identify pairs where a newer observation directly updates, replaces, or conflicts with an older observation.
+DO NOT synthesize or merge facts into a single summary. Only identify which OLDER fact is superseded by which NEWER fact.
 
 Observations:
-${activeObs.map((o) => `[ID: ${o.id}] (Created: ${o.createdAt}) ${o.content}`).join('\n')}
+${remainingObs.map((o) => `[ID: ${o.id}] (Tier: ${o.authorityTier}) ${o.content}`).join('\n')}
 
-Respond STRICTLY with a JSON array of objects, and absolutely nothing else. Each object in the array must look like this:
-{ "olderId": "older_observation_uuid", "newerId": "newer_observation_uuid", "reason": "concise description of why newer updates/conflicts with older" }
-If no observations conflict or update each other, return an empty array: []`;
+Respond with a JSON array:
+[ { "olderId": "...", "newerId": "...", "reason": "..." } ]
+If no facts supersede each other, return []`;
 
-        const responseText = await provider.chat([
-          { role: 'system', content: 'You are a precise JSON generator. Output only valid JSON.' },
-          { role: 'user', content: prompt }
-        ]);
+          const responseText = await provider.chat([
+            { role: 'system', content: 'Output only valid JSON.' },
+            { role: 'user', content: prompt },
+          ]);
 
-        const jsonStart = responseText.indexOf('[');
-        const jsonEnd = responseText.lastIndexOf(']');
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          const jsonString = responseText.substring(jsonStart, jsonEnd + 1);
-          const conflicts = JSON.parse(jsonString) as Array<{ olderId: string; newerId: string; reason: string }>;
-          for (const conf of conflicts) {
-            const older = activeObs.find((o) => o.id === conf.olderId);
-            const newer = activeObs.find((o) => o.id === conf.newerId);
-            if (older && newer && !supersededIds.has(older.id)) {
-              if (!dryRun) {
-                db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+          const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const pairs = JSON.parse(jsonMatch[0]) as Array<{ olderId: string; newerId: string; reason: string }>;
+            for (const pair of pairs) {
+              const older = remainingObs.find((o) => o.id === pair.olderId);
+              const newer = remainingObs.find((o) => o.id === pair.newerId);
+
+              // Safety check: Never let a lower-tier fact supersede an 'invariant' fact
+              if (older?.authorityTier === 'invariant' && newer?.authorityTier !== 'invariant') {
+                continue;
               }
-              supersededIds.add(older.id);
-              supersededList.push({
-                oldId: older.id,
-                newId: newer.id,
-                reason: conf.reason,
-                oldContent: older.content,
-                newContent: newer.content
-              });
-              supersededCount++;
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`LLM Conflict resolution failed for entity ${entity.name}:`, err);
-      }
-    }
 
-    const remainingObs = activeObs.filter((o) => !supersededIds.has(o.id));
-    for (let i = 0; i < remainingObs.length; i++) {
-      for (let j = i + 1; j < remainingObs.length; j++) {
-        const obs1 = remainingObs[i];
-        const obs2 = remainingObs[j];
-
-        if (supersededIds.has(obs1.id) || supersededIds.has(obs2.id)) continue;
-
-        const sim = getJaccardSimilarity(obs1.content, obs2.content);
-        if (sim >= 0.8 || obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim()) {
-          const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
-          const newer = older === obs1 ? obs2 : obs1;
-          if (!dryRun) {
-            db.setSupersedes(older.id, newer.id, 'sleep_cycle');
-          }
-          supersededIds.add(older.id);
-          supersededList.push({
-            oldId: older.id,
-            newId: newer.id,
-            reason: 'Duplicate or near-duplicate content',
-            oldContent: older.content,
-            newContent: newer.content
-          });
-          supersededCount++;
-        }
-      }
-    }
-
-    if (provider.name !== 'none') {
-      const finalActiveObs = activeObs.filter((o) => !supersededIds.has(o.id));
-      if (finalActiveObs.length >= 2) {
-        try {
-          const contents = finalActiveObs.map((o) => o.content);
-          const synthesizedSummary = await synthesizeObservations(contents);
-
-          if (synthesizedSummary && synthesizedSummary.trim() !== '' && synthesizedSummary !== contents.join('\n')) {
-            if (!dryRun) {
-              const newObs = db.addObservation(
-                entity.id,
-                synthesizedSummary.trim(),
-                'synthesis',
-                'high',
-                1
-              );
-              for (const oldObs of finalActiveObs) {
-                db.setSupersedes(oldObs.id, newObs.id, 'sleep_cycle');
+              if (older && newer && !supersededInEntity.has(older.id)) {
+                if (!dryRun) {
+                  db.setSupersedes(older.id, newer.id, 'sleep_cycle');
+                  db.cascadeInvalidate(older.id);
+                }
+                supersededInEntity.add(older.id);
+                supersededList.push({
+                  oldId: older.id,
+                  newId: newer.id,
+                  reason: pair.reason,
+                  oldContent: older.content,
+                  newContent: newer.content,
+                });
                 supersededCount++;
               }
             }
-
-            synthesizedList.push({
-              entityId: entity.id,
-              entityName: entity.name,
-              proposedContent: synthesizedSummary.trim(),
-              oldObservationIds: finalActiveObs.map((o) => o.id),
-              oldContents: contents,
-            });
-            consolidatedCount++;
           }
         } catch (err) {
-          console.error(`LLM Synthesis failed for entity ${entity.name}:`, err);
+          console.error(`AI conflict resolution error for ${entity.name}:`, err);
         }
       }
     }
@@ -169,12 +139,13 @@ If no observations conflict or update each other, return an empty array: []`;
 
   return {
     purgedCount,
+    decayedCount: decayResult.decayedCount,
     supersededCount,
-    consolidatedCount,
+    consolidatedCount: supersededCount,
     details: {
       purged: [],
-      superseded: supersededList as any,
-      synthesized: synthesizedList as any,
+      decayed: decayResult.decayedIds,
+      superseded: supersededList,
     },
   };
 }
