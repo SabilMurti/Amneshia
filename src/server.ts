@@ -10,16 +10,23 @@ import { consolidateMemories } from './consolidation/index.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveStorageConfig, DualWriteSync } from './storage/index.js';
+
 export interface StartServerOptions {
   dataDir?: string;
+  local?: boolean;
   http?: boolean;
   port?: number;
+  toolProfile?: 'core' | 'full';
 }
 
 export async function startServer(options: StartServerOptions = {}): Promise<void> {
-  const db = new DatabaseLayer(options.dataDir);
-  const graph = new KnowledgeGraph(db);
-  const server = new McpServer({ name: 'Amneshia', version: '2.0.0' });
+  const storageConfig = resolveStorageConfig(options.local);
+  const dataDir = options.dataDir ?? storageConfig.dataDir;
+  const db = new DatabaseLayer(dataDir);
+  const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
+  const graph = new KnowledgeGraph(db, dualWrite);
+  const server = new McpServer({ name: 'Amneshia', version: '3.0.0' });
   registerTools(server, graph, db);
 
   const cleanup = async () => {
@@ -82,6 +89,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
     app.post('/api/config/ai', (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post('/api/cleanup', (req, res) => res.json(graph.cleanupExpired()));
+    app.post('/api/gc', (_req, res) => res.json({ removed: db.gc() }));
+    app.post('/api/reindex', (_req, res) => res.json(dualWrite.reindex()));
+    app.get('/api/contradictions', (req, res) => res.json(db.getContradictions(req.query.entityId as string)));
+    app.post('/api/contradictions/:id/resolve', (req, res) => {
+      const ok = db.resolveContradiction(req.params.id, req.body.resolution);
+      res.json({ ok });
+    });
     app.post('/api/consolidate', async (req, res, next) => {
       try {
         const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);

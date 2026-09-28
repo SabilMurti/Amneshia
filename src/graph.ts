@@ -2,6 +2,7 @@ import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entit
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
 import { getAIProvider } from './ai/index.js';
+import type { DualWriteSync } from './storage/index.js';
 
 export interface ExportTargetActionInput {
   action: 'list' | 'add' | 'remove' | 'toggle';
@@ -24,7 +25,10 @@ export interface ExportMemoryResult {
 }
 
 export class KnowledgeGraph {
-  constructor(private readonly database: DatabaseLayer) {}
+  constructor(
+    private readonly database: DatabaseLayer,
+    private readonly dualWriteSync?: DualWriteSync
+  ) {}
 
   createEntities(inputs: CreateEntityInput[]): Entity[] {
     const created: Entity[] = [];
@@ -294,5 +298,12 @@ export class KnowledgeGraph {
 
   private triggerAutoExport() {
     exportToMarkdown(this);
+    if (this.dualWriteSync) {
+      try {
+        this.dualWriteSync.syncAll();
+      } catch (err) {
+        console.warn('Failed to sync to markdown storage:', err);
+      }
+    }
   }
 }
