@@ -278,6 +278,43 @@ Add Amneshia to your MCP host configuration:
 
 ---
 
+## Agent System Rules & Prompt Presets
+
+To ensure your coding agents (Cursor, Claude Code, Windsurf, Antigravity) actively read, persist, and maintain project memory throughout their lifecycle without human prompting, add this preset rule block to your project configuration (e.g. `.cursor/rules/amneshia.mdc`, `.cursorrules`, `CLAUDE.md`, `.windsurfrules`, or `AGENTS.md`):
+
+````markdown
+# Long-Term Memory Directives (Amneshia Engine)
+
+You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 long-term memory engine with a deterministic Truth Maintenance DAG. You MUST adhere to the following memory lifecycle for every coding task:
+
+## 1. Pre-Flight Retrieval (Start of Every Session & Task)
+- **Mandatory Recall:** Before writing code, planning refactors, or suggesting libraries, ALWAYS query Amneshia using `recall(query: "<topic/keyword>")` or inspect project context via `context(categories: ["architecture", "preference"])`.
+- **Never Guess Conventions:** Verify past architectural decisions, repository quirks, coding styles, and active credentials before scaffolding.
+
+## 2. In-Flight Execution & Authority Hierarchy
+- **Authority Levels:** Amneshia enforces strict tiers: `system` (3) > `user` (2) > `agent` (1).
+- **No Overwriting User Directives:** As an agent, your writes default to `agent` authority. Never try to supersede or contradict user-defined decisions without explicit user consent.
+- **Contradiction Alerts:** If `remember` returns a contradiction alert (e.g. conflicting framework version or competing state library), halt and clarify with the user.
+
+## 3. Post-Flight Persistence (End of Every Completed Task)
+- **Proactive Auto-Memory:** Upon successfully completing a task, implementing a feature, or fixing a bug, you MUST proactively call `remember()` to persist:
+  1. **New Architectural Decisions:** State patterns, database schema additions, or new endpoints.
+  2. **Key Dependencies & Tech Stack Choices:** Packages installed, version constraints, and configurations.
+  3. **User Preferences & Corrections:** Styling preferences, directory structure conventions, or user-specific commands.
+  4. **Credentials & Config Keys:** Environment variable names, API endpoints, or port configurations (never commit raw secrets).
+- **Example Call:**
+  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default", category: "architecture", entity_name: "amneshia", importance: 8, tags: ["networking", "dashboard"])`
+
+## 4. Soft Invalidation Over Deletion
+- **Never Leave Stale Memory:** If a prior decision, dependency, or file path is deprecated or replaced, call `forget(observation_id: "<id>", reason: "<why it is deprecated>")`.
+- Amneshia automatically marks the node as `stale`/`invalidated` in the DAG while preserving audit lineage.
+
+## 5. Dual-Write Transparency
+- All stored memories are dual-written to `.amneshia/knowledge/**/*.md`. You may inspect or commit these files directly with git.
+````
+
+---
+
 ## CLI Reference
 
 ```bash
