@@ -19,4 +19,8 @@ dashboard/node_modules/
 scratch/
 MEMORY.md
 .agents/
+.understand-anything/
+*.sty
+*launch_strategy*.md
+
 
