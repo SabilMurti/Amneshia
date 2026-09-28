@@ -95,7 +95,7 @@ flowchart TB
     Graph <--> SQLite
     MdStore --> Reindex
     Reindex --> SQLite
-    Decay -.->|sleep cycle| SQLite
+    Decay -.->|maintenance/GC| SQLite
 ```
 
 ---
