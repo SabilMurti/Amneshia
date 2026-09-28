@@ -1,3 +1,6 @@
+export type AuthorityTier = 'invariant' | 'architectural' | 'contextual' | 'ephemeral';
+export type ObservationStatus = 'active' | 'stale' | 'invalidated' | 'superseded' | 'decayed';
+
 export interface Entity {
   id: string;
   name: string;
@@ -16,6 +19,11 @@ export interface Observation {
   source: string | null;
   importance: string;
   confidence: number;
+  authorityTier: AuthorityTier;
+  derivedFrom: string[];
+  accessCount: number;
+  lastAccessedAt: string | null;
+  status: ObservationStatus;
   expiresAt: string | null;
   supersedes: string | null;
   createdAt: string;
@@ -47,11 +55,32 @@ export interface ObservationHistory {
   changedAt: string;
 }
 
+export interface ContradictionLogEntry {
+  id: string;
+  observationId: string;
+  conflictingObservationId: string;
+  entityId: string;
+  reason: string;
+  resolution?: 'override' | 'kept_both' | 'rejected' | null;
+  detectedAt: string;
+  resolvedAt?: string | null;
+}
+
+export interface AccessLogEntry {
+  id: string;
+  entityId: string;
+  observationId?: string | null;
+  accessedAt: string;
+}
+
 export interface MemoryStats {
   totalEntities: number;
   totalObservations: number;
   totalRelations: number;
   totalExportTargets: number;
+  totalContradictions?: number;
+  observationsByTier?: Record<string, number>;
+  observationsByStatus?: Record<string, number>;
   entitiesByType: Record<string, number>;
   entitiesByDomain: Record<string, number>;
   recentActivity: Array<{
@@ -101,6 +130,8 @@ export interface AddObservationInput {
   contents: string[];
   source?: string;
   importance?: string;
+  authorityTier?: AuthorityTier;
+  derivedFrom?: string[];
   expiresAt?: string;
 }
 
@@ -108,4 +139,35 @@ export interface UpdateObservationInput {
   observationId: string;
   newContent: string;
   changedBy?: string;
+  authorityTier?: AuthorityTier;
+  status?: ObservationStatus;
+}
+
+export interface RememberInput {
+  entity: string;
+  type?: string;
+  domain?: string;
+  facts: string[];
+  tier?: AuthorityTier;
+  derivedFrom?: string[];
+}
+
+export interface RecallInput {
+  query: string;
+  tokenBudget?: number;
+  domain?: string;
+  depth?: number;
+}
+
+export interface RecallResult {
+  results: SearchResult[];
+  tokensUsed: number;
+  truncated: boolean;
+  totalAvailable: number;
+}
+
+export interface ForgetInput {
+  target: string;
+  hard?: boolean;
+  cascade?: boolean;
 }

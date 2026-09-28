@@ -13,12 +13,183 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 
-// src/database.ts
+// src/database/index.ts
 import fs from "fs";
 import os from "os";
 import path from "path";
 import crypto from "crypto";
 import Database from "better-sqlite3";
+
+// src/database/schema.ts
+var SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  entity_type TEXT NOT NULL,
+  domain TEXT NOT NULL DEFAULT 'personal',
+  visibility TEXT NOT NULL DEFAULT 'public',
+  allowed_agents TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  source TEXT,
+  importance TEXT NOT NULL DEFAULT 'normal',
+  confidence REAL NOT NULL DEFAULT 1.0,
+  authority_tier TEXT NOT NULL DEFAULT 'contextual' CHECK(authority_tier IN ('invariant', 'architectural', 'contextual', 'ephemeral')),
+  derived_from TEXT NOT NULL DEFAULT '[]',
+  access_count INTEGER NOT NULL DEFAULT 0,
+  last_accessed_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'invalidated', 'superseded', 'decayed')),
+  expires_at TEXT,
+  supersedes TEXT REFERENCES observations(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS relations (
+  id TEXT PRIMARY KEY,
+  from_entity TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  to_entity TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  relation_type TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(from_entity, to_entity, relation_type)
+);
+
+CREATE TABLE IF NOT EXISTS observation_history (
+  id TEXT PRIMARY KEY,
+  observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  old_content TEXT NOT NULL,
+  new_content TEXT NOT NULL,
+  changed_by TEXT,
+  changed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS export_targets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  path TEXT NOT NULL,
+  format TEXT NOT NULL DEFAULT 'markdown',
+  auto_export INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS contradiction_log (
+  id TEXT PRIMARY KEY,
+  observation_id TEXT NOT NULL,
+  conflicting_observation_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  resolution TEXT CHECK(resolution IN ('override', 'kept_both', 'rejected', NULL)),
+  detected_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS access_log (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL,
+  observation_id TEXT,
+  accessed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_obs_entity_status ON observations(entity_id, status);
+CREATE INDEX IF NOT EXISTS idx_obs_authority ON observations(authority_tier);
+CREATE INDEX IF NOT EXISTS idx_obs_status ON observations(status);
+CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity);
+CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
+CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
+CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+  entity_name,
+  entity_type,
+  observation_content,
+  observation_id UNINDEXED,
+  entity_id UNINDEXED,
+  tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
+  INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
+  SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
+  FROM entities e
+  WHERE e.id = NEW.entity_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
+  DELETE FROM memory_fts WHERE observation_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+  DELETE FROM memory_fts WHERE observation_id = OLD.id;
+  INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
+  SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
+  FROM entities e
+  WHERE e.id = NEW.entity_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
+  INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
+  VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
+  DELETE FROM memory_fts WHERE observation_id IS NULL AND entity_id = OLD.id;
+  INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
+  VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
+  UPDATE observations SET updated_at = updated_at WHERE entity_id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
+  DELETE FROM memory_fts WHERE entity_id = OLD.id;
+END;
+`;
+
+// src/database/migrations.ts
+function runMigrations(db) {
+  const versionRow = db.pragma("user_version", { simple: true });
+  if (versionRow >= 3) {
+    return;
+  }
+  const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
+  if (tableCheck && tableCheck.count > 0) {
+    const columns = db.pragma("table_info(observations)");
+    const columnNames = new Set(columns.map((c) => c.name));
+    if (!columnNames.has("authority_tier")) {
+      db.exec(
+        "ALTER TABLE observations ADD COLUMN authority_tier TEXT NOT NULL DEFAULT 'contextual' CHECK(authority_tier IN ('invariant', 'architectural', 'contextual', 'ephemeral'))"
+      );
+    }
+    if (!columnNames.has("derived_from")) {
+      db.exec("ALTER TABLE observations ADD COLUMN derived_from TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!columnNames.has("access_count")) {
+      db.exec("ALTER TABLE observations ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columnNames.has("last_accessed_at")) {
+      db.exec("ALTER TABLE observations ADD COLUMN last_accessed_at TEXT");
+    }
+    if (!columnNames.has("status")) {
+      db.exec(
+        "ALTER TABLE observations ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'invalidated', 'superseded', 'decayed'))"
+      );
+    }
+    try {
+      db.exec("UPDATE observations SET status = 'superseded' WHERE supersedes IS NOT NULL AND status = 'active'");
+    } catch {
+    }
+  }
+  try {
+    db.exec("DROP TABLE IF EXISTS bridge_servers;");
+  } catch {
+  }
+  db.pragma("user_version = 3");
+}
+
+// src/database/index.ts
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
@@ -32,6 +203,17 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 function toAllowedAgents(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")) {
+      return parsed;
+    }
+  } catch {
+  }
+  return [];
+}
+function toDerivedFrom(value) {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
@@ -62,6 +244,11 @@ function toObservation(row) {
     source: row.source,
     importance: row.importance,
     confidence: row.confidence,
+    authorityTier: row.authority_tier || "contextual",
+    derivedFrom: toDerivedFrom(row.derived_from),
+    accessCount: row.access_count ?? 0,
+    lastAccessedAt: row.last_accessed_at,
+    status: row.status || "active",
     expiresAt: row.expires_at,
     supersedes: row.supersedes,
     createdAt: row.created_at,
@@ -89,7 +276,6 @@ function toExportTarget(row) {
   };
 }
 var STOP_WORDS = /* @__PURE__ */ new Set([
-  // English stop words
   "the",
   "a",
   "an",
@@ -153,7 +339,6 @@ var STOP_WORDS = /* @__PURE__ */ new Set([
   "not",
   "other",
   "than",
-  // Indonesian stop words
   "yang",
   "di",
   "ke",
@@ -247,131 +432,24 @@ var DatabaseLayer = class {
     this.statements = this.prepareStatements();
   }
   initializeSchema() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS entities (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        entity_type TEXT NOT NULL,
-        domain TEXT NOT NULL DEFAULT 'personal',
-        visibility TEXT NOT NULL DEFAULT 'public',
-        allowed_agents TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-
-      CREATE TABLE IF NOT EXISTS observations (
-        id TEXT PRIMARY KEY,
-        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-        content TEXT NOT NULL,
-        source TEXT,
-        importance TEXT NOT NULL,
-        confidence REAL NOT NULL,
-        expires_at TEXT,
-        supersedes TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (supersedes) REFERENCES observations(id) ON DELETE SET NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS relations (
-        id TEXT PRIMARY KEY,
-        from_entity TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-        to_entity TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-        relation_type TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(from_entity, to_entity, relation_type)
-      );
-
-      CREATE TABLE IF NOT EXISTS observation_history (
-        id TEXT PRIMARY KEY,
-        observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
-        old_content TEXT NOT NULL,
-        new_content TEXT NOT NULL,
-        changed_by TEXT,
-        changed_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS export_targets (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        path TEXT NOT NULL,
-        format TEXT NOT NULL DEFAULT 'markdown',
-        auto_export INTEGER NOT NULL DEFAULT 0
-      );
-
-      CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-        entity_name,
-        entity_type,
-        observation_content,
-        observation_id UNINDEXED,
-        entity_id UNINDEXED,
-        tokenize = 'porter unicode61'
-      );
-    `);
-    this.db.exec(`
-      CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-        INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
-        SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
-        FROM entities e
-        WHERE e.id = NEW.entity_id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-        DELETE FROM memory_fts WHERE observation_id = OLD.id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-        DELETE FROM memory_fts WHERE observation_id = OLD.id;
-        INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
-        SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
-        FROM entities e
-        WHERE e.id = NEW.entity_id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
-        INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
-        VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
-        DELETE FROM memory_fts WHERE observation_id IS NULL AND entity_id = OLD.id;
-        INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
-        VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
-        UPDATE observations SET updated_at = updated_at WHERE entity_id = NEW.id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
-        DELETE FROM memory_fts WHERE entity_id = OLD.id;
-      END;
-    `);
+    runMigrations(this.db);
+    this.db.exec(SCHEMA_SQL);
+    this.ensureDefaultExportTargets();
+  }
+  ensureDefaultExportTargets() {
     try {
-      this.db.exec("ALTER TABLE export_targets ADD COLUMN format TEXT DEFAULT 'markdown';");
-    } catch {
-    }
-    try {
-      this.db.exec("ALTER TABLE export_targets ADD COLUMN auto_export INTEGER DEFAULT 0;");
-    } catch {
-    }
-    try {
-      this.db.prepare("DELETE FROM export_targets WHERE path = ?").run("/home/Memory.md");
-      this.db.prepare("DELETE FROM export_targets WHERE path LIKE '%/home/murtix/%'").run();
       const defaultPath = path.join(os.homedir(), ".amneshia", "export", "MEMORY.md");
       const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(defaultPath);
       if (check1.count === 0) {
         this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", defaultPath, "markdown", 1);
-      } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(defaultPath);
       }
       const projectPath = path.join(process.cwd(), "MEMORY.md");
       const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(projectPath);
       if (check2.count === 0) {
         this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", projectPath, "markdown", 1);
-      } else {
-        this.db.prepare("UPDATE export_targets SET auto_export = 1 WHERE path = ?").run(projectPath);
       }
     } catch (e) {
-      console.error("Failed to clean up / migrate export targets:", e);
+      console.error("Failed to configure default export targets:", e);
     }
   }
   prepareStatements() {
@@ -387,15 +465,21 @@ var DatabaseLayer = class {
       ),
       deleteEntity: this.db.prepare("DELETE FROM entities WHERE id = ?"),
       insertObservation: this.db.prepare(
-        "INSERT INTO observations (id, entity_id, content, source, importance, confidence, expires_at, supersedes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO observations (id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ),
       getObservationsByEntity: this.db.prepare(
-        "SELECT id, entity_id, content, source, importance, confidence, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id = ? ORDER BY created_at ASC"
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id = ? ORDER BY created_at ASC"
+      ),
+      getActiveObservationsByEntity: this.db.prepare(
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id = ? AND status = 'active' ORDER BY created_at ASC"
       ),
       getObservationById: this.db.prepare(
-        "SELECT id, entity_id, content, source, importance, confidence, expires_at, supersedes, created_at, updated_at FROM observations WHERE id = ? LIMIT 1"
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE id = ? LIMIT 1"
       ),
-      updateObservation: this.db.prepare("UPDATE observations SET content = ?, updated_at = ? WHERE id = ?"),
+      updateObservation: this.db.prepare(
+        "UPDATE observations SET content = ?, authority_tier = ?, status = ?, updated_at = ? WHERE id = ?"
+      ),
+      setObservationStatus: this.db.prepare("UPDATE observations SET status = ?, updated_at = ? WHERE id = ?"),
       deleteObservation: this.db.prepare("DELETE FROM observations WHERE id = ?"),
       createRelation: this.db.prepare(
         "INSERT OR IGNORE INTO relations (id, from_entity, to_entity, relation_type, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -423,7 +507,7 @@ var DatabaseLayer = class {
         "SELECT id, name, entity_type, domain, visibility, allowed_agents, created_at, updated_at FROM entities WHERE (? IS NULL OR domain = ?) AND (? IS NULL OR entity_type = ?) ORDER BY name ASC"
       ),
       readGraphObservations: this.db.prepare(
-        "SELECT id, entity_id, content, source, importance, confidence, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id = ? ORDER BY created_at ASC"
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id = ? ORDER BY created_at ASC"
       ),
       readGraphRelations: this.db.prepare(
         `SELECT r.id, r.from_entity, fe.name AS from_entity_name, r.to_entity, te.name AS to_entity_name, r.relation_type, r.created_at
@@ -437,7 +521,7 @@ var DatabaseLayer = class {
         "SELECT id, name, entity_type, domain, visibility, allowed_agents, created_at, updated_at FROM entities WHERE name IN (SELECT value FROM json_each(?)) ORDER BY name ASC"
       ),
       openNodesObservations: this.db.prepare(
-        "SELECT id, entity_id, content, source, importance, confidence, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id IN (SELECT id FROM entities WHERE name IN (SELECT value FROM json_each(?))) ORDER BY created_at ASC"
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE entity_id IN (SELECT id FROM entities WHERE name IN (SELECT value FROM json_each(?))) ORDER BY created_at ASC"
       ),
       openNodesRelations: this.db.prepare(
         `SELECT r.id, r.from_entity, fe.name AS from_entity_name, r.to_entity, te.name AS to_entity_name, r.relation_type, r.created_at
@@ -452,8 +536,19 @@ var DatabaseLayer = class {
       countObservations: this.db.prepare("SELECT COUNT(*) AS value FROM observations"),
       countRelations: this.db.prepare("SELECT COUNT(*) AS value FROM relations"),
       countExportTargets: this.db.prepare("SELECT COUNT(*) AS value FROM export_targets"),
-      entitiesByType: this.db.prepare("SELECT entity_type AS key, COUNT(*) AS value FROM entities GROUP BY entity_type ORDER BY entity_type ASC"),
-      entitiesByDomain: this.db.prepare("SELECT domain AS key, COUNT(*) AS value FROM entities GROUP BY domain ORDER BY domain ASC"),
+      countContradictions: this.db.prepare("SELECT COUNT(*) AS value FROM contradiction_log WHERE resolution IS NULL"),
+      entitiesByType: this.db.prepare(
+        "SELECT entity_type AS key, COUNT(*) AS value FROM entities GROUP BY entity_type ORDER BY entity_type ASC"
+      ),
+      entitiesByDomain: this.db.prepare(
+        "SELECT domain AS key, COUNT(*) AS value FROM entities GROUP BY domain ORDER BY domain ASC"
+      ),
+      observationsByTier: this.db.prepare(
+        "SELECT authority_tier AS key, COUNT(*) AS value FROM observations GROUP BY authority_tier ORDER BY authority_tier ASC"
+      ),
+      observationsByStatus: this.db.prepare(
+        "SELECT status AS key, COUNT(*) AS value FROM observations GROUP BY status ORDER BY status ASC"
+      ),
       recentActivity: this.db.prepare(
         `SELECT 'observation' AS type, content, created_at
          FROM observations
@@ -464,7 +559,10 @@ var DatabaseLayer = class {
          LIMIT 10`
       ),
       cleanupExpired: this.db.prepare(
-        "DELETE FROM observations WHERE expires_at IS NOT NULL AND expires_at <= ? AND importance = ?"
+        "DELETE FROM observations WHERE expires_at IS NOT NULL AND expires_at <= ? AND (authority_tier = 'ephemeral' OR importance = 'ephemeral')"
+      ),
+      gcObservations: this.db.prepare(
+        "DELETE FROM observations WHERE status IN ('decayed', 'invalidated')"
       ),
       getExportTargets: this.db.prepare("SELECT id, name, path, format, auto_export FROM export_targets ORDER BY name ASC"),
       addExportTarget: this.db.prepare(
@@ -474,7 +572,23 @@ var DatabaseLayer = class {
       observationHistory: this.db.prepare(
         "INSERT INTO observation_history (id, observation_id, old_content, new_content, changed_by, changed_at) VALUES (?, ?, ?, ?, ?, ?)"
       ),
-      updateEntityTimestamps: this.db.prepare("UPDATE entities SET updated_at = ? WHERE id = ?")
+      updateEntityTimestamps: this.db.prepare("UPDATE entities SET updated_at = ? WHERE id = ?"),
+      insertContradiction: this.db.prepare(
+        "INSERT INTO contradiction_log (id, observation_id, conflicting_observation_id, entity_id, reason, resolution, detected_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ),
+      getContradictionsByEntity: this.db.prepare(
+        "SELECT id, observation_id, conflicting_observation_id, entity_id, reason, resolution, detected_at, resolved_at FROM contradiction_log WHERE entity_id = ? ORDER BY detected_at DESC"
+      ),
+      getAllContradictions: this.db.prepare(
+        "SELECT id, observation_id, conflicting_observation_id, entity_id, reason, resolution, detected_at, resolved_at FROM contradiction_log ORDER BY detected_at DESC LIMIT ?"
+      ),
+      resolveContradiction: this.db.prepare(
+        "UPDATE contradiction_log SET resolution = ?, resolved_at = ? WHERE id = ?"
+      ),
+      insertAccessLog: this.db.prepare("INSERT INTO access_log (id, entity_id, observation_id, accessed_at) VALUES (?, ?, ?, ?)"),
+      incrementAccess: this.db.prepare(
+        "UPDATE observations SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?"
+      )
     };
   }
   getEntityRowByName(name) {
@@ -523,7 +637,7 @@ var DatabaseLayer = class {
     const result = this.statements.deleteEntity.run(id);
     return result.changes > 0;
   }
-  addObservation(entityId, content, source, importance = "normal", confidence = 1, expiresAt) {
+  addObservation(entityId, content, source, importance = "normal", confidence = 1, expiresAt, authorityTier = "contextual", derivedFrom = []) {
     const now = nowIso();
     const observation = {
       id: uuid(),
@@ -532,6 +646,11 @@ var DatabaseLayer = class {
       source: source ?? null,
       importance,
       confidence,
+      authorityTier,
+      derivedFrom,
+      accessCount: 0,
+      lastAccessedAt: null,
+      status: "active",
       expiresAt: expiresAt ?? null,
       supersedes: null,
       createdAt: now,
@@ -544,6 +663,11 @@ var DatabaseLayer = class {
       observation.source,
       observation.importance,
       observation.confidence,
+      observation.authorityTier,
+      JSON.stringify(observation.derivedFrom),
+      observation.accessCount,
+      observation.lastAccessedAt,
+      observation.status,
       observation.expiresAt,
       observation.supersedes,
       observation.createdAt,
@@ -551,24 +675,36 @@ var DatabaseLayer = class {
     );
     return observation;
   }
-  getObservationsByEntity(entityId) {
-    return this.statements.getObservationsByEntity.all(entityId).map(toObservation);
+  getObservationsByEntity(entityId, activeOnly = false) {
+    const stmt = activeOnly ? this.statements.getActiveObservationsByEntity : this.statements.getObservationsByEntity;
+    return stmt.all(entityId).map(toObservation);
   }
-  updateObservation(id, newContent, changedBy) {
+  getObservationById(id) {
+    const row = this.getObservationRowById(id);
+    return row ? toObservation(row) : null;
+  }
+  updateObservation(id, newContent, changedBy, authorityTier, status) {
     const existing = this.getObservationRowById(id);
     if (!existing) {
       throw new Error(`Observation not found: ${id}`);
     }
     const now = nowIso();
+    const finalTier = authorityTier ?? existing.authority_tier ?? "contextual";
+    const finalStatus = status ?? existing.status ?? "active";
     this.db.transaction(() => {
       this.statements.observationHistory.run(uuid(), id, existing.content, newContent, changedBy ?? null, now);
-      this.statements.updateObservation.run(newContent, now, id);
+      this.statements.updateObservation.run(newContent, finalTier, finalStatus, now, id);
     })();
     const updated = this.getObservationRowById(id);
     if (!updated) {
       throw new Error(`Observation update failed: ${id}`);
     }
     return toObservation(updated);
+  }
+  setObservationStatus(id, status) {
+    const now = nowIso();
+    const result = this.statements.setObservationStatus.run(status, now, id);
+    return result.changes > 0;
   }
   setSupersedes(id, supersedingId, changedBy) {
     const existing = this.getObservationRowById(id);
@@ -577,15 +713,8 @@ var DatabaseLayer = class {
     }
     const now = nowIso();
     this.db.transaction(() => {
-      this.statements.observationHistory.run(
-        uuid(),
-        id,
-        existing.content,
-        existing.content,
-        changedBy ?? null,
-        now
-      );
-      this.db.prepare("UPDATE observations SET supersedes = ?, updated_at = ? WHERE id = ?").run(supersedingId, now, id);
+      this.statements.observationHistory.run(uuid(), id, existing.content, existing.content, changedBy ?? null, now);
+      this.db.prepare("UPDATE observations SET supersedes = ?, status = 'superseded', updated_at = ? WHERE id = ?").run(supersedingId, now, id);
     })();
   }
   deleteObservation(id) {
@@ -604,15 +733,90 @@ var DatabaseLayer = class {
     return relation;
   }
   getRelationsByEntity(entityId) {
-    return this.statements.getRelationsByEntity.all(entityId, entityId).map(
-      toRelationWithNames
-    );
+    return this.statements.getRelationsByEntity.all(entityId, entityId).map(toRelationWithNames);
   }
   deleteRelation(id) {
     const result = this.statements.deleteRelation.run(id);
     return result.changes > 0;
   }
-  searchFTS(query, limit = 20) {
+  // --- Truth Maintenance & Provenance Helpers ---
+  getDependentObservations(observationId) {
+    const rows = this.db.prepare(
+      "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
+    ).all(`%${observationId}%`);
+    return rows.map(toObservation).filter((obs) => obs.derivedFrom.includes(observationId));
+  }
+  cascadeInvalidate(observationId) {
+    const staleIds = [];
+    const queue = [observationId];
+    const visited = /* @__PURE__ */ new Set();
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      if (visited.has(currentId)) continue;
+      visited.add(currentId);
+      const dependents = this.getDependentObservations(currentId);
+      for (const dep of dependents) {
+        if (!visited.has(dep.id)) {
+          this.setObservationStatus(dep.id, "stale");
+          staleIds.push(dep.id);
+          queue.push(dep.id);
+        }
+      }
+    }
+    return { invalidatedIds: [observationId], staleIds };
+  }
+  // --- Contradiction Log Helpers ---
+  recordContradiction(observationId, conflictingObservationId, entityId, reason) {
+    const entry = {
+      id: uuid(),
+      observationId,
+      conflictingObservationId,
+      entityId,
+      reason,
+      resolution: null,
+      detectedAt: nowIso(),
+      resolvedAt: null
+    };
+    this.statements.insertContradiction.run(
+      entry.id,
+      entry.observationId,
+      entry.conflictingObservationId,
+      entry.entityId,
+      entry.reason,
+      entry.resolution,
+      entry.detectedAt,
+      entry.resolvedAt
+    );
+    return entry;
+  }
+  getContradictions(entityId, limit = 50) {
+    const rows = entityId ? this.statements.getContradictionsByEntity.all(entityId) : this.statements.getAllContradictions.all(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      observationId: r.observation_id,
+      conflictingObservationId: r.conflicting_observation_id,
+      entityId: r.entity_id,
+      reason: r.reason,
+      resolution: r.resolution,
+      detectedAt: r.detected_at,
+      resolvedAt: r.resolved_at
+    }));
+  }
+  resolveContradiction(id, resolution) {
+    const now = nowIso();
+    const result = this.statements.resolveContradiction.run(resolution, now, id);
+    return result.changes > 0;
+  }
+  // --- Access Tracking ---
+  recordAccess(entityId, observationId) {
+    const now = nowIso();
+    this.statements.insertAccessLog.run(uuid(), entityId, observationId ?? null, now);
+    if (observationId) {
+      this.statements.incrementAccess.run(now, observationId);
+    }
+  }
+  // --- Search & Retrieval ---
+  searchFTS(query, limit = 20, includeInactive = false) {
     try {
       const sanitized = sanitizeFtsQuery(query);
       if (sanitized === '""') return [];
@@ -622,7 +826,10 @@ var DatabaseLayer = class {
         const entityRow = this.getEntityRowById(row.entity_id);
         if (!entityRow) continue;
         const entity = toEntity(entityRow);
-        const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id) : [];
+        const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id).filter((obs) => includeInactive || obs.status !== "invalidated" && obs.status !== "decayed") : [];
+        if (row.observation_id && observations.length === 0) {
+          continue;
+        }
         const existing = matches.get(entity.id);
         if (existing) {
           if (row.observation_content && !existing.observations.some((obs) => obs.id === row.observation_id)) {
@@ -648,15 +855,18 @@ var DatabaseLayer = class {
       return [];
     }
   }
-  searchFTSRelevant(query, limit = 20) {
+  searchFTSRelevant(query, limit = 20, includeInactive = false) {
     const cleaned = stripStopWords(query);
-    return this.searchFTS(cleaned, limit);
+    return this.searchFTS(cleaned, limit, includeInactive);
   }
-  readGraph(domain, entityType) {
+  readGraph(domain, entityType, statusFilter) {
     const rows = this.statements.readGraphEntities.all(domain ?? null, domain ?? null, entityType ?? null, entityType ?? null);
     const entities = rows.map((row) => {
       const entity = toEntity(row);
-      const observations = this.getObservationsByEntity(entity.id);
+      let observations = this.getObservationsByEntity(entity.id);
+      if (statusFilter) {
+        observations = observations.filter((obs) => obs.status === statusFilter);
+      }
       const relations = this.getRelationsByEntity(entity.id);
       return { ...entity, observations, relations };
     });
@@ -670,9 +880,9 @@ var DatabaseLayer = class {
     const entityRows = this.statements.openNodesEntities.all(payload);
     const entityMap = /* @__PURE__ */ new Map();
     for (const row of entityRows) {
-      entityMap.set(row.id, { entity: toEntity(row), allowedAgents: toAllowedAgents(row.allowed_agents) });
+      entityMap.set(row.id, toEntity(row));
     }
-    const entities = [...entityMap.values()].map(({ entity }) => ({
+    const entities = [...entityMap.values()].map((entity) => ({
       ...entity,
       observations: this.getObservationsByEntity(entity.id),
       relations: this.getRelationsByEntity(entity.id)
@@ -682,20 +892,30 @@ var DatabaseLayer = class {
   getStats() {
     const entitiesByTypeRows = this.statements.entitiesByType.all();
     const entitiesByDomainRows = this.statements.entitiesByDomain.all();
+    const observationsByTierRows = this.statements.observationsByTier.all();
+    const observationsByStatusRows = this.statements.observationsByStatus.all();
     const recentActivityRows = this.statements.recentActivity.all();
+    const contradictionCount = this.statements.countContradictions.get().value;
     return {
       totalEntities: this.statements.countEntities.get().value,
       totalObservations: this.statements.countObservations.get().value,
       totalRelations: this.statements.countRelations.get().value,
       totalExportTargets: this.statements.countExportTargets.get().value,
+      totalContradictions: contradictionCount,
       entitiesByType: Object.fromEntries(entitiesByTypeRows.map((row) => [row.key, row.value])),
       entitiesByDomain: Object.fromEntries(entitiesByDomainRows.map((row) => [row.key, row.value])),
+      observationsByTier: Object.fromEntries(observationsByTierRows.map((row) => [row.key, row.value])),
+      observationsByStatus: Object.fromEntries(observationsByStatusRows.map((row) => [row.key, row.value])),
       recentActivity: recentActivityRows.map((row) => ({ type: row.type, content: row.content, createdAt: row.created_at }))
     };
   }
   cleanupExpired() {
     const now = nowIso();
-    const result = this.statements.cleanupExpired.run(now, "ephemeral");
+    const result = this.statements.cleanupExpired.run(now);
+    return result.changes;
+  }
+  gc() {
+    const result = this.statements.gcObservations.run();
     return result.changes;
   }
   getExportTargets() {
@@ -1022,7 +1242,9 @@ var KnowledgeGraph = class {
           input.source,
           input.importance ?? "normal",
           1,
-          input.expiresAt
+          input.expiresAt,
+          input.authorityTier ?? "contextual",
+          input.derivedFrom ?? []
         );
         observationIds.push(observation.id);
       }
@@ -1064,7 +1286,16 @@ var KnowledgeGraph = class {
     return removed;
   }
   updateObservation(input) {
-    const updated = this.database.updateObservation(input.observationId, input.newContent, input.changedBy);
+    const updated = this.database.updateObservation(
+      input.observationId,
+      input.newContent,
+      input.changedBy,
+      input.authorityTier,
+      input.status
+    );
+    if (input.status === "invalidated" || input.status === "stale") {
+      this.database.cascadeInvalidate(input.observationId);
+    }
     this.triggerAutoExport();
     return updated;
   }
@@ -1117,7 +1348,7 @@ var KnowledgeGraph = class {
       const entity = this.database.getEntityById(id);
       if (!entity) return null;
       const observations = this.database.getObservationsByEntity(id).filter(
-        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+        (o) => o.status === "active" && !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
       );
       return { ...entity, observations };
     }).filter((e) => e !== null);

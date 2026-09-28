@@ -83,7 +83,9 @@ export class KnowledgeGraph {
           input.source,
           input.importance ?? 'normal',
           1,
-          input.expiresAt
+          input.expiresAt,
+          input.authorityTier ?? 'contextual',
+          input.derivedFrom ?? []
         );
         observationIds.push(observation.id);
       }
@@ -129,7 +131,16 @@ export class KnowledgeGraph {
   }
 
   updateObservation(input: UpdateObservationInput) {
-    const updated = this.database.updateObservation(input.observationId, input.newContent, input.changedBy);
+    const updated = this.database.updateObservation(
+      input.observationId,
+      input.newContent,
+      input.changedBy,
+      input.authorityTier,
+      input.status
+    );
+    if (input.status === 'invalidated' || input.status === 'stale') {
+      this.database.cascadeInvalidate(input.observationId);
+    }
     this.triggerAutoExport();
     return updated;
   }
@@ -192,7 +203,7 @@ export class KnowledgeGraph {
       const entity = this.database.getEntityById(id);
       if (!entity) return null;
       const observations = this.database.getObservationsByEntity(id).filter(
-        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+        (o) => o.status === 'active' && !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
       );
       return { ...entity, observations };
     }).filter(e => e !== null);
