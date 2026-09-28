@@ -2,9 +2,8 @@ import type {
   GraphSnapshot,
   SearchResult,
   MemoryStats,
-  BridgeServer,
-  BridgeToolInfo,
-  ExportTarget
+  ExportTarget,
+  ContradictionLogEntry,
 } from '../types';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -52,7 +51,7 @@ export const api = {
     });
   },
 
-  addObservations: (observations: Array<{ entityName: string; content: string; confidence?: number; importance?: string; expiresAt?: string | null }>): Promise<unknown> => {
+  addObservations: (observations: Array<{ entityName: string; contents: string[]; source?: string; importance?: string; authorityTier?: string; derivedFrom?: string[]; expiresAt?: string | null }>): Promise<unknown> => {
     return fetchJson('/api/observations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -68,15 +67,15 @@ export const api = {
     });
   },
 
-  updateObservation: (observationId: string, newContent: string, changedBy: string): Promise<unknown> => {
+  updateObservation: (observationId: string, newContent: string, changedBy?: string, authorityTier?: string, status?: string): Promise<unknown> => {
     return fetchJson('/api/observations', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ observationId, newContent, changedBy }),
+      body: JSON.stringify({ observationId, newContent, changedBy, authorityTier, status }),
     });
   },
 
-  createRelations: (relations: Array<{ fromEntityName: string; toEntityName: string; relationType: string }>): Promise<unknown> => {
+  createRelations: (relations: Array<{ from: string; to: string; relationType: string }>): Promise<unknown> => {
     return fetchJson('/api/relations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -92,33 +91,28 @@ export const api = {
     });
   },
 
-  getBridgeServers: (): Promise<BridgeServer[]> => {
-    return fetchJson<BridgeServer[]>('/api/bridge/servers');
+  getContradictions: (entityId?: string): Promise<ContradictionLogEntry[]> => {
+    const url = entityId ? `/api/contradictions?entityId=${encodeURIComponent(entityId)}` : '/api/contradictions';
+    return fetchJson<ContradictionLogEntry[]>(url);
   },
 
-  addBridgeServer: (name: string, command: string, args: string[]): Promise<BridgeServer> => {
-    return fetchJson<BridgeServer>('/api/bridge/servers', {
+  resolveContradiction: (id: string, resolution: 'override' | 'kept_both' | 'rejected'): Promise<{ ok: boolean }> => {
+    return fetchJson<{ ok: boolean }>(`/api/contradictions/${encodeURIComponent(id)}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, command, args }),
+      body: JSON.stringify({ resolution }),
     });
   },
 
-  removeBridgeServer: (id: string): Promise<unknown> => {
-    return fetchJson(`/api/bridge/servers/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
+  reindex: (): Promise<{ entities: number; observations: number; relations: number }> => {
+    return fetchJson<{ entities: number; observations: number; relations: number }>('/api/reindex', {
+      method: 'POST',
     });
   },
 
-  getBridgeTools: (serverId: string): Promise<BridgeToolInfo[]> => {
-    return fetchJson<BridgeToolInfo[]>(`/api/bridge/tools?serverId=${encodeURIComponent(serverId)}`);
-  },
-
-  callBridgeTool: (options: { serverId: string; toolName: string; arguments?: Record<string, unknown>; storeAsMemory?: boolean; entityName?: string }): Promise<unknown> => {
-    return fetchJson('/api/bridge/call', {
+  gc: (): Promise<{ removed: number }> => {
+    return fetchJson<{ removed: number }>('/api/gc', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options),
     });
   },
 
@@ -146,13 +140,7 @@ export const api = {
     });
   },
 
-  syncBridge: (): Promise<{ ok: boolean; stats: { projectsSynced: string[]; observationsAdded: number; relationsCreated: number } }> => {
-    return fetchJson('/api/bridge/sync', {
-      method: 'POST',
-    });
-  },
-
-  setAIProvider: (provider: 'openai' | 'ollama' | '9router' | 'none' | string, model?: string): Promise<unknown> => {
+  setAIProvider: (provider: 'openai' | 'ollama' | 'none' | string, model?: string): Promise<unknown> => {
     return fetchJson('/api/config/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -166,7 +154,7 @@ export const api = {
     });
   },
 
-  consolidateMemory: (domain?: string, dryRun = false): Promise<{ ok: boolean; result: { purgedCount: number; supersededCount: number; consolidatedCount: number; details?: { superseded: any[]; synthesized: any[] } } }> => {
+  consolidateMemory: (domain?: string, dryRun = false): Promise<{ ok: boolean; result: { purgedCount: number; decayedCount: number; supersededCount: number; consolidatedCount: number; details?: { superseded: any[]; synthesized: any[] } } }> => {
     return fetchJson('/api/consolidate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

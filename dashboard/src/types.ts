@@ -1,3 +1,6 @@
+export type AuthorityTier = 'invariant' | 'architectural' | 'contextual' | 'ephemeral';
+export type ObservationStatus = 'active' | 'stale' | 'invalidated' | 'superseded' | 'decayed';
+
 export interface Entity {
   id: string;
   name: string;
@@ -15,6 +18,12 @@ export interface Observation {
   content: string;
   confidence: number;
   importance: string;
+  authorityTier: AuthorityTier;
+  derivedFrom: string[];
+  accessCount: number;
+  lastAccessedAt: string | null;
+  status: ObservationStatus;
+  supersedes?: string | null;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -30,10 +39,12 @@ export interface Relation {
 
 export interface RelationWithNames {
   id: string;
-  fromEntityId: string;
+  fromEntity: string;
   fromEntityName: string;
-  toEntityId: string;
+  toEntity: string;
   toEntityName: string;
+  fromEntityId?: string;
+  toEntityId?: string;
   relationType: string;
   createdAt: string;
 }
@@ -46,25 +57,15 @@ export interface ExportTarget {
   autoExport: boolean;
 }
 
-export interface BridgeServer {
+export interface ContradictionLogEntry {
   id: string;
-  name: string;
-  command: string;
-  args: string[];
-  enabled: boolean;
-  createdAt: string;
-}
-
-export interface BridgeToolInfo {
-  serverId: string;
-  serverName: string;
-  name: string;
-  description: string;
-  inputSchema: {
-    type: string;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
+  observationId: string;
+  conflictingObservationId: string;
+  entityId: string;
+  reason: string;
+  resolution?: 'override' | 'kept_both' | 'rejected' | null;
+  detectedAt: string;
+  resolvedAt?: string | null;
 }
 
 export interface MemoryStats {
@@ -72,6 +73,9 @@ export interface MemoryStats {
   totalObservations: number;
   totalRelations: number;
   totalExportTargets: number;
+  totalContradictions?: number;
+  observationsByTier?: Record<string, number>;
+  observationsByStatus?: Record<string, number>;
   entitiesByType: Record<string, number>;
   entitiesByDomain: Record<string, number>;
   recentActivity: Array<{
@@ -88,5 +92,5 @@ export interface GraphSnapshot {
 export interface SearchResult {
   entity: Entity;
   observations: Observation[];
-  relations: RelationWithNames[];
+  relations?: RelationWithNames[];
 }

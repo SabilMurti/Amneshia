@@ -80,160 +80,162 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
   const activeSynCount = synthesized.filter((_, idx) => selectedSynthesized[idx]).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 font-mono text-zinc-300 select-none">
-      <div className="glass-panel-elevated rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden border border-white/10">
-        {/* Header */}
-        <div className="p-4.5 border-b border-white/10 flex items-center justify-between bg-black/30">
-          <div className="flex items-center gap-2.5 text-white">
-            <Moon className="w-5 h-5 text-indigo-400 fill-indigo-400/20 animate-pulse" />
-            <div>
-              <h3 className="text-sm font-bold tracking-tight font-sans">
-                Sleep Cycle Consolidation Proposals
-              </h3>
-              <p className="text-[10px] text-zinc-500 font-mono">
-                Jaccard similarity & LLM conflict resolution review
-              </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 font-mono text-zinc-300 select-none">
+      <div className="double-bezel-shell max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+        <div className="double-bezel-core flex flex-col h-full overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b border-purple-500/20 flex items-center justify-between bg-black/40">
+            <div className="flex items-center gap-2.5 text-white">
+              <Moon className="w-5 h-5 text-purple-400 fill-purple-400/20 animate-pulse" />
+              <div>
+                <h3 className="text-sm font-bold tracking-tight font-sans">
+                  Sleep Cycle Consolidation Proposals
+                </h3>
+                <p className="text-[10px] text-zinc-400 font-mono">
+                  Jaccard similarity deduplication & truth maintenance resolution
+                </p>
+              </div>
             </div>
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
-          <p className="text-zinc-400 font-sans leading-relaxed">
-            Review proposed mutations below. Approved conflict resolutions will deprecate redundant observations, and syntheses will form unified factual nodes.
-          </p>
+          {/* Content */}
+          <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+            <p className="text-zinc-400 font-sans leading-relaxed">
+              Review proposed mutations below. Approved conflict resolutions will deprecate redundant observations, and syntheses will form unified factual nodes.
+            </p>
 
-          {/* Supersessions List */}
-          {superseded.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 text-xs">
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Conflict Resolutions & Supersessions ({superseded.length})</span>
-              </h4>
-              <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
-                {superseded.map((s) => {
-                  const isChecked = !!selectedSuperseded[s.oldId];
-                  return (
-                    <div
-                      key={s.oldId}
-                      onClick={() => handleToggleSuperseded(s.oldId)}
-                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
-                        isChecked
-                          ? 'bg-amber-500/10 border-amber-500/30'
-                          : 'bg-black/20 border-white/5 opacity-50'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        readOnly
-                        className="accent-amber-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
-                      />
-                      <div className="flex-1 space-y-2 min-w-0">
-                        <div className="text-[10px] text-amber-400 font-semibold uppercase">
-                          Reason: {s.reason}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-center">
-                          <div className="p-2.5 bg-black/50 rounded-lg border border-white/5 text-zinc-400 line-clamp-2 text-[11px] font-sans">
-                            {s.oldContent}
+            {/* Supersessions List */}
+            {superseded.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                  <Trash2 className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Conflict Resolutions & Supersessions ({superseded.length})</span>
+                </h4>
+                <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                  {superseded.map((s) => {
+                    const isChecked = !!selectedSuperseded[s.oldId];
+                    return (
+                      <div
+                        key={s.oldId}
+                        onClick={() => handleToggleSuperseded(s.oldId)}
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
+                          isChecked
+                            ? 'bg-purple-950/30 border-purple-500/40 text-purple-100'
+                            : 'bg-black/30 border-white/5 opacity-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          readOnly
+                          className="accent-purple-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
+                        />
+                        <div className="flex-1 space-y-2 min-w-0">
+                          <div className="text-[10px] text-purple-300 font-semibold uppercase">
+                            Reason: {s.reason}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
-                            <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-zinc-100 flex-1 line-clamp-2 text-[11px] font-sans">
-                              {s.newContent}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-center">
+                            <div className="p-2.5 bg-black/50 rounded-lg border border-purple-500/15 text-zinc-400 line-clamp-2 text-[11px] font-sans">
+                              {s.oldContent}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <ChevronRight className="w-4 h-4 text-purple-400 shrink-0" />
+                              <div className="p-2.5 bg-purple-950/40 rounded-lg border border-purple-500/30 text-purple-100 flex-1 line-clamp-2 text-[11px] font-sans">
+                                {s.newContent}
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Syntheses List */}
-          {synthesized.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5 text-xs">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Observation Syntheses ({synthesized.length})</span>
-              </h4>
-              <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
-                {synthesized.map((s, idx) => {
-                  const isChecked = !!selectedSynthesized[idx];
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => handleToggleSynthesized(idx)}
-                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
-                        isChecked
-                          ? 'bg-cyan-500/10 border-cyan-500/30'
-                          : 'bg-black/20 border-white/5 opacity-50'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        readOnly
-                        className="accent-cyan-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
-                      />
-                      <div className="flex-1 space-y-2 min-w-0">
-                        <div className="text-[10px] text-cyan-400 font-semibold uppercase">
-                          Entity: {s.entityName}
-                        </div>
-                        <div className="space-y-1">
-                          <div className="text-[10px] text-zinc-500 font-bold uppercase">Synthesizing Statements:</div>
-                          <div className="pl-2 border-l border-white/10 space-y-1 text-zinc-400 text-[11px] font-sans">
-                            {s.oldContents.map((c, cIdx) => (
-                              <div key={cIdx}>• {c}</div>
-                            ))}
+            {/* Syntheses List */}
+            {synthesized.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Observation Syntheses ({synthesized.length})</span>
+                </h4>
+                <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                  {synthesized.map((s, idx) => {
+                    const isChecked = !!selectedSynthesized[idx];
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => handleToggleSynthesized(idx)}
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
+                          isChecked
+                            ? 'bg-indigo-950/30 border-indigo-500/40 text-indigo-100'
+                            : 'bg-black/30 border-white/5 opacity-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          readOnly
+                          className="accent-indigo-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
+                        />
+                        <div className="flex-1 space-y-2 min-w-0">
+                          <div className="text-[10px] text-indigo-300 font-semibold uppercase">
+                            Entity: {s.entityName}
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-zinc-500 font-bold uppercase">Synthesizing Statements:</div>
+                            <div className="pl-2 border-l border-indigo-500/20 space-y-1 text-zinc-400 text-[11px] font-sans">
+                              {s.oldContents.map((c, cIdx) => (
+                                <div key={cIdx}>• {c}</div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="p-2.5 bg-black/60 rounded-lg border border-indigo-500/30 text-white font-medium text-[11px] font-sans">
+                            {s.proposedContent}
                           </div>
                         </div>
-                        <div className="p-2.5 bg-black/60 rounded-lg border border-cyan-500/30 text-white font-medium text-[11px] font-sans">
-                          {s.proposedContent}
-                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {superseded.length === 0 && synthesized.length === 0 && (
-            <div className="text-center py-8 text-zinc-500">
-              No consolidation proposals generated for this memory partition.
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-white/10 bg-black/30 flex items-center justify-between">
-          <div className="text-[11px] font-mono text-zinc-400">
-            Selected: <span className="text-amber-400 font-bold">{activeSupCount}</span> Supersessions,{' '}
-            <span className="text-cyan-400 font-bold">{activeSynCount}</span> Syntheses
+            {superseded.length === 0 && synthesized.length === 0 && (
+              <div className="text-center py-8 text-zinc-500 font-mono text-xs">
+                No consolidation proposals generated for this memory partition.
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-zinc-300 border border-white/10 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleExecute}
-              disabled={isSubmitting || (activeSupCount === 0 && activeSynCount === 0)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-xs text-black font-bold disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-amber transition-all active:scale-[0.98]"
-            >
-              {isSubmitting ? 'Consolidating Memories…' : 'Approve & Consolidate'}
-            </button>
+
+          {/* Footer */}
+          <div className="p-4 border-t border-purple-500/20 bg-black/40 flex items-center justify-between">
+            <div className="text-[11px] font-mono text-zinc-400">
+              Selected: <span className="text-purple-300 font-bold">{activeSupCount}</span> Supersessions,{' '}
+              <span className="text-indigo-300 font-bold">{activeSynCount}</span> Syntheses
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-zinc-300 border border-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecute}
+                disabled={isSubmitting || (activeSupCount === 0 && activeSynCount === 0)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs text-white font-bold disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-purple transition-all active:scale-[0.98]"
+              >
+                {isSubmitting ? 'Consolidating Memories…' : 'Approve & Consolidate'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

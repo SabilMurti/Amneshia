@@ -43,22 +43,22 @@ interface GraphLink {
   id: string;
 }
 
-// Color palette calibrated for dark cyberpunk luxury interface
+// Color palette calibrated for Amneshia v3.0 Deep Amethyst & Electric Violet theme
 export const NODE_TYPE_COLORS: Record<string, string> = {
-  person: '#f59e0b',       // Amber
-  user: '#f59e0b',
-  server: '#3b82f6',       // Blue
-  service: '#3b82f6',
-  project: '#10b981',      // Emerald Green
-  repo: '#10b981',
-  code: '#10b981',
-  config: '#8b5cf6',       // Violet
-  setting: '#8b5cf6',
-  credential: '#ef4444',   // Red
-  token: '#ef4444',
-  auth: '#ef4444',
-  observation: '#06b6d4',  // Cyan
-  default: '#a1a1aa',      // Zinc
+  person: '#c084fc',       // Light Amethyst
+  user: '#c084fc',
+  server: '#6366f1',       // Indigo
+  service: '#6366f1',
+  project: '#8b5cf6',      // Electric Purple
+  repo: '#8b5cf6',
+  code: '#8b5cf6',
+  config: '#d946ef',       // Fuchsia
+  setting: '#d946ef',
+  credential: '#f43f5e',   // Rose
+  token: '#f43f5e',
+  auth: '#f43f5e',
+  observation: '#a855f7',  // Electric Violet
+  default: '#94a3b8',      // Slate
 };
 
 export const getNodeColor = (type: string): string => {
@@ -71,16 +71,16 @@ export const getNodeColor = (type: string): string => {
 
 export const getRelationColor = (relType: string): string => {
   const clean = relType.toLowerCase();
-  if (clean.includes('work') || clean.includes('dev')) return '#10b981';
-  if (clean.includes('use') || clean.includes('run')) return '#3b82f6';
-  if (clean.includes('own') || clean.includes('create')) return '#f59e0b';
-  if (clean.includes('member') || clean.includes('live')) return '#8b5cf6';
-  if (clean.includes('auth') || clean.includes('pass') || clean.includes('key')) return '#ef4444';
-  return '#71717a';
+  if (clean.includes('work') || clean.includes('dev')) return '#8b5cf6';
+  if (clean.includes('use') || clean.includes('run')) return '#6366f1';
+  if (clean.includes('own') || clean.includes('create')) return '#c084fc';
+  if (clean.includes('member') || clean.includes('live')) return '#d946ef';
+  if (clean.includes('auth') || clean.includes('pass') || clean.includes('key')) return '#f43f5e';
+  return '#7c3aed';
 };
 
 // Canvas text sprite generator for 3D billboard labels
-const createSpriteLabel = (text: string, subtext?: string, color: string = '#f59e0b'): THREE.Sprite => {
+const createSpriteLabel = (text: string, subtext?: string, color: string = '#c084fc'): THREE.Sprite => {
   const canvas = document.createElement('canvas');
   canvas.width = 320;
   canvas.height = 96;
@@ -90,9 +90,9 @@ const createSpriteLabel = (text: string, subtext?: string, color: string = '#f59
     ctx.imageSmoothingEnabled = true;
 
     // Glowing container pill
-    ctx.fillStyle = 'rgba(10, 12, 18, 0.88)';
+    ctx.fillStyle = 'rgba(9, 7, 20, 0.92)';
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2.5;
     
     // Draw rounded rect
     const x = 8, y = 8, w = 304, h = 80, r = 16;
@@ -201,7 +201,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
         const entities = results.map(r => ({
           ...r.entity,
           observations: r.observations,
-          relations: r.relations,
+          relations: (r.relations || []) as any,
         }));
         setSnapshot({ entities });
       } else {
@@ -447,7 +447,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const createThreeNode = useCallback((node: unknown) => {
     const n = node as GraphNode;
     const isObs = n.entityType === 'observation';
-    const color = isObs ? '#06b6d4' : getNodeColor(n.entityType);
+    const color = isObs ? '#a855f7' : getNodeColor(n.entityType);
     const isHighlighted = hoveredNode ? highlightNodes.has(n.id) : true;
     const isSelected = selectedNode?.id === n.id;
     const baseVal = n.val || (isObs ? 4 : 8);
@@ -457,13 +457,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
     (group as any).__data = n;
 
     if (isObs) {
-      // Glowing cyan sphere for facts/observations
+      // Glowing electric violet sphere for facts/observations
       const geometry = new THREE.SphereGeometry(radius, 16, 16);
       const material = new THREE.MeshPhongMaterial({
         color,
         emissive: color,
-        emissiveIntensity: isHighlighted ? 0.75 : 0.2,
-        shininess: 80,
+        emissiveIntensity: isHighlighted ? 0.8 : 0.25,
+        shininess: 90,
         transparent: true,
         opacity: isHighlighted ? 0.95 : 0.25,
       });
@@ -473,7 +473,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       // Label sprite if hovered or selected
       if (hoveredNode?.id === n.id || isSelected) {
-        const sprite = createSpriteLabel(n.name, 'OBSERVATION', '#06b6d4');
+        const sprite = createSpriteLabel(n.name, 'FACT', '#c084fc');
         group.add(sprite);
       }
     } else {
@@ -482,10 +482,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
       const material = new THREE.MeshPhongMaterial({
         color,
         emissive: color,
-        emissiveIntensity: isHighlighted ? (isSelected ? 0.9 : 0.5) : 0.15,
-        shininess: 90,
+        emissiveIntensity: isHighlighted ? (isSelected ? 0.95 : 0.55) : 0.18,
+        shininess: 95,
         transparent: true,
-        opacity: isHighlighted ? 0.92 : 0.2,
+        opacity: isHighlighted ? 0.94 : 0.2,
       });
       const mesh = new THREE.Mesh(geometry, material);
       (mesh as any).__data = n;
@@ -494,9 +494,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
       // Glowing outer wireframe halo
       const wireframeGeo = new THREE.EdgesGeometry(geometry);
       const wireframeMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0xfbbf24 : 0xffffff,
+        color: isSelected ? 0xd946ef : 0x8b5cf6,
         transparent: true,
-        opacity: isHighlighted ? 0.45 : 0.08,
+        opacity: isHighlighted ? 0.55 : 0.12,
       });
       const wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
       group.add(wireframe);
@@ -512,18 +512,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
   }, [hoveredNode, highlightNodes, selectedNode, showLabels]);
 
   return (
-    <div className="flex flex-col md:flex-row flex-1 h-[calc(100vh-73px)] relative overflow-hidden bg-[#08090c] select-none">
+    <div className="flex flex-col md:flex-row flex-1 h-[calc(100vh-73px)] relative overflow-hidden bg-[#06050b] select-none">
       {/* Visual Canvas Container */}
       <div ref={containerRef} className="flex-1 h-full relative">
         {/* Top Control Bar HUD */}
         <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2.5">
           {/* 3D / 2D Segmented Pill */}
-          <div className="flex items-center p-1 rounded-xl glass-panel shadow-glow-subtle border border-white/10">
+          <div className="flex items-center p-1 rounded-xl bg-[#090714]/80 backdrop-blur-xl border border-purple-500/20 shadow-glow-purple">
             <button
               onClick={() => setIs3D(true)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 is3D
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-glow-amber'
+                  ? 'bg-purple-500/25 text-purple-200 border border-purple-500/40 shadow-glow-purple'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -534,7 +534,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
               onClick={() => setIs3D(false)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 !is3D
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-glow-amber'
+                  ? 'bg-purple-500/25 text-purple-200 border border-purple-500/40 shadow-glow-purple'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -544,7 +544,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
           </div>
 
           {/* Camera Controls Dock */}
-          <div className="flex items-center gap-1 p-1 rounded-xl glass-panel shadow-glow-subtle border border-white/10">
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-[#090714]/80 backdrop-blur-xl border border-purple-500/20 shadow-glow-purple">
             <button
               onClick={handleFitView}
               title="Fit Graph to Viewport"
@@ -572,7 +572,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   onClick={() => setAutoRotate(!autoRotate)}
                   title="Toggle Gentle Orbit"
                   className={`p-1.5 rounded-lg transition-all ${
-                    autoRotate ? 'text-cyan-400 bg-cyan-500/10' : 'text-zinc-400 hover:text-white'
+                    autoRotate ? 'text-purple-300 bg-purple-500/20' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   <RotateCw className={`w-3.5 h-3.5 ${autoRotate ? 'animate-spin' : ''}`} />
@@ -590,10 +590,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
           {/* Query Filter Active Tag */}
           {searchQuery && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl glass-panel border border-amber-500/30 text-xs font-mono text-amber-400 shadow-glow-amber">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#090714]/80 backdrop-blur-xl border border-purple-500/40 text-xs font-mono text-purple-300 shadow-glow-purple">
               <Compass className="w-3.5 h-3.5" />
               <span>"{searchQuery}"</span>
-              <button onClick={onClearSearch} className="hover:text-amber-200 ml-1 font-bold">×</button>
+              <button onClick={onClearSearch} className="hover:text-purple-200 ml-1 font-bold">×</button>
             </div>
           )}
 
@@ -601,8 +601,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
           <button
             onClick={() => setShowControls(!showControls)}
             title="Toggle Physics HUD"
-            className={`p-2 rounded-xl glass-panel border border-white/10 transition-all ${
-              showControls ? 'text-amber-400 bg-amber-500/10' : 'text-zinc-400 hover:text-white'
+            className={`p-2 rounded-xl bg-[#090714]/80 backdrop-blur-xl border border-purple-500/20 transition-all ${
+              showControls ? 'text-purple-300 bg-purple-500/20 shadow-glow-purple' : 'text-zinc-400 hover:text-white'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
@@ -611,10 +611,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
         {/* Floating Physics & Labels HUD */}
         {showControls && (
-          <div className="absolute top-4 right-4 z-20 w-64 p-4 rounded-2xl glass-panel-elevated space-y-3.5 text-xs font-mono text-zinc-300 animate-in fade-in slide-in-from-top-2 duration-200">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
+          <div className="absolute top-4 right-4 z-20 w-64 p-4 rounded-2xl bg-[#090714]/90 backdrop-blur-xl border border-purple-500/25 shadow-glow-purple space-y-3.5 text-xs font-mono text-zinc-300 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center justify-between border-b border-purple-500/20 pb-2">
               <span className="font-bold text-white tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
                 NEURAL PHYSICS
               </span>
               <span className="text-[10px] text-zinc-500">{graphData.nodes.length} nodes</span>
@@ -624,7 +624,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
             <div className="space-y-1.5">
               <div className="flex justify-between text-[11px]">
                 <span className="text-zinc-400">Repulsion Force:</span>
-                <span className="text-amber-400 font-semibold">{chargeStrength}</span>
+                <span className="text-purple-300 font-semibold">{chargeStrength}</span>
               </div>
               <input
                 type="range"
@@ -632,7 +632,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 max="-20"
                 value={chargeStrength}
                 onChange={(e) => setChargeStrength(Number(e.target.value))}
-                className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded cursor-pointer"
+                className="w-full accent-purple-500 bg-purple-950/40 h-1.5 rounded cursor-pointer"
               />
             </div>
 
@@ -640,7 +640,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
             <div className="space-y-1.5">
               <div className="flex justify-between text-[11px]">
                 <span className="text-zinc-400">Synapse Distance:</span>
-                <span className="text-amber-400 font-semibold">{linkDistance}px</span>
+                <span className="text-purple-300 font-semibold">{linkDistance}px</span>
               </div>
               <input
                 type="range"
@@ -648,52 +648,52 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 max="120"
                 value={linkDistance}
                 onChange={(e) => setLinkDistance(Number(e.target.value))}
-                className="w-full accent-amber-500 bg-zinc-800 h-1.5 rounded cursor-pointer"
+                className="w-full accent-purple-500 bg-purple-950/40 h-1.5 rounded cursor-pointer"
               />
             </div>
 
             {/* Labels Toggle */}
-            <label className="flex items-center justify-between pt-1 border-t border-white/5 cursor-pointer">
+            <label className="flex items-center justify-between pt-1 border-t border-purple-500/15 cursor-pointer">
               <span className="text-zinc-400">Permanent Labels:</span>
               <input
                 type="checkbox"
                 checked={showLabels}
                 onChange={(e) => setShowLabels(e.target.checked)}
-                className="accent-amber-500 rounded bg-zinc-800 border-zinc-700 w-3.5 h-3.5 cursor-pointer"
+                className="accent-purple-500 rounded bg-zinc-800 border-purple-500/30 w-3.5 h-3.5 cursor-pointer"
               />
             </label>
           </div>
         )}
 
         {/* Bottom-Left Color Legend Dock */}
-        <div className="absolute bottom-4 left-4 z-20 p-3 rounded-xl glass-panel shadow-glow-subtle border border-white/10 text-[11px] font-mono text-zinc-300 space-y-1.5 min-w-[160px]">
-          <div className="font-bold text-zinc-400 text-[10px] tracking-wider uppercase border-b border-white/5 pb-1 mb-1 flex items-center justify-between">
+        <div className="absolute bottom-4 left-4 z-20 p-3 rounded-xl bg-[#090714]/85 backdrop-blur-xl border border-purple-500/20 text-[11px] font-mono text-zinc-300 space-y-1.5 min-w-[160px] shadow-glow-purple">
+          <div className="font-bold text-purple-400/80 text-[10px] tracking-wider uppercase border-b border-purple-500/15 pb-1 mb-1 flex items-center justify-between">
             <span>ONTOLOGY MAP</span>
             <span className="text-zinc-500">{graphData.nodes.length}</span>
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#f59e0b] shadow-[0_0_8px_#f59e0b]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#c084fc] shadow-[0_0_8px_#c084fc]"></span>
               <span>Person</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#3b82f6] shadow-[0_0_8px_#3b82f6]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#6366f1] shadow-[0_0_8px_#6366f1]"></span>
               <span>Service</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#10b981] shadow-[0_0_8px_#10b981]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#8b5cf6] shadow-[0_0_8px_#8b5cf6]"></span>
               <span>Project</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#8b5cf6] shadow-[0_0_8px_#8b5cf6]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#d946ef] shadow-[0_0_8px_#d946ef]"></span>
               <span>Config</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#ef4444] shadow-[0_0_8px_#ef4444]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#f43f5e] shadow-[0_0_8px_#f43f5e]"></span>
               <span>Auth</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#06b6d4] shadow-[0_0_8px_#06b6d4]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#a855f7] shadow-[0_0_8px_#a855f7]"></span>
               <span>Fact</span>
             </div>
           </div>
@@ -701,7 +701,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
         {/* Error State Banner */}
         {error && (
-          <div className="absolute top-16 left-4 z-30 max-w-md flex items-start gap-3 bg-red-950/40 border border-red-500/30 p-3.5 rounded-xl font-mono text-xs text-red-300 backdrop-blur-md">
+          <div className="absolute top-16 left-4 z-30 max-w-md flex items-start gap-3 bg-red-950/60 border border-red-500/40 p-3.5 rounded-xl font-mono text-xs text-red-300 backdrop-blur-md">
             <AlertTriangle className="w-4 h-4 mt-0.5 text-red-400 flex-shrink-0" />
             <div>
               <p className="font-bold mb-0.5 text-red-200">Failed to load memory snapshot</p>
@@ -713,8 +713,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         {/* Empty State */}
         {!isLoading && graphData.nodes.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 z-10">
-            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 shadow-glow-amber">
-              <Compass className="w-8 h-8 text-amber-400 animate-pulse" />
+            <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/25 flex items-center justify-center mb-4 shadow-glow-purple">
+              <Compass className="w-8 h-8 text-purple-400 animate-pulse" />
             </div>
             <h3 className="font-sans text-base font-bold text-zinc-200 mb-1">Empty Memory Cosmos</h3>
             <p className="font-mono text-xs text-zinc-500 max-w-sm">
@@ -725,10 +725,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
         {/* Loading Overlay */}
         {isLoading && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3 p-6 rounded-2xl glass-panel-elevated">
-              <div className="w-7 h-7 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-              <span className="font-mono text-xs text-zinc-300">Synchronizing Graph Topology…</span>
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-[#090714]/90 border border-purple-500/25 shadow-glow-purple">
+              <div className="w-7 h-7 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+              <span className="font-mono text-xs text-purple-200">Synchronizing Graph Topology…</span>
             </div>
           </div>
         )}
@@ -742,7 +742,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 graphData={graphData}
                 width={dimensions.width}
                 height={dimensions.height}
-                backgroundColor="#08090c"
+                backgroundColor="#06050b"
                 nodeThreeObject={createThreeNode}
                 nodeThreeObjectExtend={false}
                 nodeVal={(node: any) => node.val || 8}
@@ -757,8 +757,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 linkColor={(link: any) => {
                   if (link.relationType === 'observation') {
                     return hoveredNode
-                      ? (highlightLinks.has(link.id) ? '#06b6d4' : 'rgba(6, 182, 212, 0.08)')
-                      : 'rgba(6, 182, 212, 0.35)';
+                      ? (highlightLinks.has(link.id) ? '#a855f7' : 'rgba(168, 85, 247, 0.08)')
+                      : 'rgba(168, 85, 247, 0.4)';
                   }
                   const base = getRelationColor(link.relationType);
                   if (hoveredNode) {
@@ -769,7 +769,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 linkDirectionalParticles={2}
                 linkDirectionalParticleSpeed={0.005}
                 linkDirectionalParticleWidth={(link: any) => highlightLinks.has(link.id) ? 2.5 : 1.5}
-                linkDirectionalParticleColor={(link: any) => link.relationType === 'observation' ? '#06b6d4' : '#f59e0b'}
+                linkDirectionalParticleColor={(link: any) => link.relationType === 'observation' ? '#c084fc' : '#8b5cf6'}
                 linkCurvature={0.08}
                 d3VelocityDecay={0.3}
                 warmupTicks={30}
@@ -781,7 +781,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 graphData={graphData}
                 width={dimensions.width}
                 height={dimensions.height}
-                backgroundColor="#08090c"
+                backgroundColor="#06050b"
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 enableNodeDrag={true}
@@ -792,8 +792,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 linkColor={(link: any) => {
                   if (link.relationType === 'observation') {
                     return hoveredNode
-                      ? (highlightLinks.has(link.id) ? '#06b6d4' : 'rgba(6, 182, 212, 0.08)')
-                      : 'rgba(6, 182, 212, 0.4)';
+                      ? (highlightLinks.has(link.id) ? '#a855f7' : 'rgba(168, 85, 247, 0.08)')
+                      : 'rgba(168, 85, 247, 0.45)';
                   }
                   const base = getRelationColor(link.relationType);
                   if (hoveredNode) {
@@ -810,7 +810,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   const isDimmed = hoveredNode && !isHighlighted;
                   const isSelected = selectedNode?.id === node.id;
                   const isObs = node.entityType === 'observation';
-                  const color = isObs ? '#06b6d4' : getNodeColor(node.entityType);
+                  const color = isObs ? '#a855f7' : getNodeColor(node.entityType);
 
                   const size = Math.sqrt(node.val || 8) * (isObs ? 1.5 : 2.2);
 
@@ -818,7 +818,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   if (isSelected || isHighlighted) {
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, size + 4, 0, 2 * Math.PI, false);
-                    ctx.fillStyle = isSelected ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.15)';
+                    ctx.fillStyle = isSelected ? 'rgba(168, 85, 247, 0.45)' : 'rgba(255, 255, 255, 0.15)';
                     ctx.fill();
                   }
 
@@ -838,7 +838,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                       const pillH = fontSize * 1.5;
 
                       // Pill background
-                      ctx.fillStyle = isDimmed ? 'rgba(10, 12, 18, 0.3)' : 'rgba(10, 12, 18, 0.85)';
+                      ctx.fillStyle = isDimmed ? 'rgba(9, 7, 20, 0.3)' : 'rgba(9, 7, 20, 0.92)';
                       ctx.strokeStyle = isDimmed ? 'rgba(255, 255, 255, 0.05)' : color;
                       ctx.lineWidth = 1;
                       
@@ -865,13 +865,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       {/* Slide-Out Inspector Drawer */}
       {selectedNode && (
-        <aside className="w-full md:w-96 glass-panel-elevated border-t md:border-t-0 md:border-l border-white/10 h-full flex flex-col justify-between flex-shrink-0 z-30 animate-in slide-in-from-right-4 duration-300">
+        <aside className="w-full md:w-96 bg-[#090714]/95 backdrop-blur-2xl border-t md:border-t-0 md:border-l border-purple-500/20 h-full flex flex-col justify-between flex-shrink-0 z-30 animate-in slide-in-from-right-4 duration-300">
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Drawer Header */}
-            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/20">
+            <div className="p-4 border-b border-purple-500/20 flex items-center justify-between bg-black/30">
               <div className="flex items-center gap-2">
-                <Tag className="w-4 h-4 text-amber-400" />
-                <span className="font-mono text-xs uppercase font-bold tracking-wider text-zinc-300">
+                <Tag className="w-4 h-4 text-purple-400" />
+                <span className="font-mono text-xs uppercase font-bold tracking-wider text-purple-200">
                   Node Inspector
                 </span>
               </div>
@@ -884,12 +884,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
             </div>
 
             {/* Navigation Tabs in Inspector */}
-            <div className="flex items-center border-b border-white/10 px-4 gap-4 text-xs font-mono bg-black/10">
+            <div className="flex items-center border-b border-purple-500/20 px-4 gap-4 text-xs font-mono bg-black/20">
               <button
                 onClick={() => setInspectorTab('overview')}
                 className={`py-2.5 font-medium border-b-2 transition-all ${
                   inspectorTab === 'overview'
-                    ? 'border-amber-500 text-amber-400'
+                    ? 'border-purple-500 text-purple-300'
                     : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -899,12 +899,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 onClick={() => setInspectorTab('observations')}
                 className={`py-2.5 font-medium border-b-2 transition-all flex items-center gap-1.5 ${
                   inspectorTab === 'observations'
-                    ? 'border-amber-500 text-amber-400'
+                    ? 'border-purple-500 text-purple-300'
                     : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 <span>Facts</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-white/10 text-[10px]">
+                <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 text-[10px]">
                   {(selectedNode.observations || []).length}
                 </span>
               </button>
@@ -912,12 +912,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 onClick={() => setInspectorTab('relations')}
                 className={`py-2.5 font-medium border-b-2 transition-all flex items-center gap-1.5 ${
                   inspectorTab === 'relations'
-                    ? 'border-amber-500 text-amber-400'
+                    ? 'border-purple-500 text-purple-300'
                     : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 <span>Links</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-white/10 text-[10px]">
+                <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 text-[10px]">
                   {(selectedNode.relations || []).length}
                 </span>
               </button>
@@ -933,10 +933,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
                       {selectedNode.name}
                     </h2>
                     <div className="flex flex-wrap gap-2">
-                      <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 uppercase">
+                      <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase">
                         {selectedNode.entityType}
                       </span>
-                      <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 uppercase">
+                      <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase">
                         {selectedNode.domain}
                       </span>
                       <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-white/10 text-zinc-300 border border-white/10 uppercase">
@@ -946,9 +946,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   </div>
 
                   {/* Access Control (Allowed Agents) */}
-                  <div className="space-y-2 p-3 rounded-xl bg-black/30 border border-white/5">
+                  <div className="space-y-2 p-3 rounded-xl bg-[#090714] border border-purple-500/15">
                     <h4 className="font-mono text-[11px] font-semibold text-zinc-400 flex items-center gap-1.5 uppercase tracking-wider">
-                      <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                      <UserCheck className="w-3.5 h-3.5 text-purple-400" />
                       <span>Authorized Agent Scope</span>
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
@@ -956,7 +956,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                         <span className="text-zinc-500 text-xs font-mono">Unrestricted (All agents)</span>
                       ) : (
                         selectedNode.allowedAgents.map((agent) => (
-                          <span key={agent} className="font-mono text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-white/10">
+                          <span key={agent} className="font-mono text-[10px] px-2 py-0.5 rounded bg-purple-950/40 text-purple-200 border border-purple-500/25">
                             {agent}
                           </span>
                         ))
@@ -965,18 +965,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   </div>
 
                   {/* Timestamps */}
-                  <div className="space-y-2 text-[11px] font-mono text-zinc-500 border-t border-white/5 pt-3">
+                  <div className="space-y-2 text-[11px] font-mono text-zinc-500 border-t border-purple-500/15 pt-3">
                     <div className="flex justify-between items-center">
                       <span>Registered:</span>
                       <span className="text-zinc-300 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-zinc-500" />
+                        <Calendar className="w-3 h-3 text-purple-400/60" />
                         {selectedNode.createdAt ? new Date(selectedNode.createdAt).toLocaleString() : 'N/A'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Last Mutated:</span>
                       <span className="text-zinc-300 flex items-center gap-1">
-                        <Key className="w-3 h-3 text-zinc-500" />
+                        <Key className="w-3 h-3 text-purple-400/60" />
                         {selectedNode.updatedAt ? new Date(selectedNode.updatedAt).toLocaleString() : 'N/A'}
                       </span>
                     </div>
@@ -992,13 +992,20 @@ export const GraphView: React.FC<GraphViewProps> = ({
                     </p>
                   ) : (
                     selectedNode.observations.map((obs) => (
-                      <div key={obs.id} className="p-3.5 rounded-xl bg-black/40 border border-white/10 space-y-2 text-xs">
+                      <div key={obs.id} className="p-3.5 rounded-xl bg-[#090714] border border-purple-500/20 space-y-2.5 text-xs">
                         <p className="font-sans text-zinc-200 leading-relaxed break-words">{obs.content}</p>
-                        <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400 border-t border-white/5 pt-2">
-                          <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                            Imp: {obs.importance || 'MEDIUM'}
-                          </span>
-                          <span>Conf: {obs.confidence ?? 1.0}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono border-t border-purple-500/10 pt-2">
+                          <div className="flex items-center gap-1.5">
+                            {obs.authorityTier && (
+                              <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase font-bold">
+                                {obs.authorityTier}
+                              </span>
+                            )}
+                            {obs.status && (
+                              <span className="text-emerald-400">{obs.status}</span>
+                            )}
+                          </div>
+                          <span className="text-zinc-500">Conf: {obs.confidence ?? 1.0}</span>
                         </div>
                       </div>
                     ))
@@ -1014,23 +1021,24 @@ export const GraphView: React.FC<GraphViewProps> = ({
                     </p>
                   ) : (
                     selectedNode.relations.map((rel) => {
-                      const isSource = rel.fromEntityId === selectedNode.id;
+                      const fromIdentifier = rel.fromEntityId || rel.fromEntity || rel.fromEntityName;
+                      const isSource = fromIdentifier === selectedNode.id || rel.fromEntityName === selectedNode.name;
                       const counterPart = isSource ? rel.toEntityName : rel.fromEntityName;
                       return (
                         <div
                           key={rel.id}
-                          className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-white/10 text-xs font-mono hover:border-zinc-500 transition-all cursor-pointer"
+                          className="flex items-center justify-between p-3 rounded-xl bg-[#090714] border border-purple-500/20 text-xs font-mono hover:border-purple-400 transition-all cursor-pointer"
                           onClick={() => {
                             const counterpartNode = graphData.nodes.find(n => n.name === counterPart);
                             if (counterpartNode) handleNodeClick(counterpartNode);
                           }}
                         >
                           <div className="flex items-center gap-2 overflow-hidden">
-                            <span className="text-zinc-500">{isSource ? 'OUT' : 'IN'}:</span>
+                            <span className="text-purple-400/70">{isSource ? 'OUT' : 'IN'}:</span>
                             <span className="text-zinc-200 font-bold truncate max-w-[140px]">{counterPart}</span>
-                            <ArrowUpRight className="w-3.5 h-3.5 text-zinc-500" />
+                            <ArrowUpRight className="w-3.5 h-3.5 text-purple-400" />
                           </div>
-                          <span className="px-2 py-0.5 rounded-md bg-white/5 text-amber-400 border border-white/10 text-[10px]">
+                          <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px]">
                             {rel.relationType}
                           </span>
                         </div>
@@ -1043,9 +1051,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
           </div>
 
           {/* Drawer Footer */}
-          <div className="p-3 border-t border-white/10 bg-black/40 text-center flex items-center justify-between text-[10px] font-mono text-zinc-500">
+          <div className="p-3 border-t border-purple-500/20 bg-black/40 text-center flex items-center justify-between text-[10px] font-mono text-zinc-500">
             <span>UUID: {selectedNode.id.slice(0, 16)}…</span>
-            <span className="text-zinc-400">{selectedNode.domain}</span>
+            <span className="text-purple-400/80">{selectedNode.domain}</span>
           </div>
         </aside>
       )}

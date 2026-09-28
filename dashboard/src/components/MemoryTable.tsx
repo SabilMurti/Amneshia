@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Trash2, Edit2, X, FileText, Compass, PlusCircle, AlertTriangle,
-  FolderOpen, ArrowUpRight
+  Plus,
+  Trash2,
+  Edit2,
+  FileText,
+  AlertTriangle,
+  FolderOpen,
+  Crown,
+  Building2,
+  Clock,
+  Zap,
+  Network,
+  GitBranch,
+  Compass,
 } from 'lucide-react';
 import { api } from '../api/client';
-import type { GraphSnapshot, Entity, Observation, RelationWithNames } from '../types';
-import { getNodeColor } from './GraphView';
+import type { GraphSnapshot, Entity, Observation, RelationWithNames, AuthorityTier, ObservationStatus } from '../types';
 
 interface MemoryTableProps {
   selectedDomain: string;
@@ -28,6 +38,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [selectedEntityObs, setSelectedEntityObs] = useState<Observation[]>([]);
   const [selectedEntityRels, setSelectedEntityRels] = useState<RelationWithNames[]>([]);
+  const [entityFilter, setEntityFilter] = useState<string>('');
 
   // Modals state
   const [showAddEntity, setShowAddEntity] = useState(false);
@@ -35,13 +46,22 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   const [showAddRelation, setShowAddRelation] = useState(false);
 
   // Forms state
-  const [newEntity, setNewEntity] = useState({ name: '', entityType: 'User', domain: 'main', visibility: 'PRIVATE', allowedAgents: '' });
-  const [newObservation, setNewObservation] = useState({ entityName: '', content: '', importance: 'MEDIUM', confidence: '1.0', expiresAt: '' });
-  const [newRelation, setNewRelation] = useState({ fromEntityName: '', toEntityName: '', relationType: 'relates_to' });
+  const [newEntity, setNewEntity] = useState({ name: '', entityType: 'concept', domain: 'personal', visibility: 'public', allowedAgents: '' });
+  const [newObservation, setNewObservation] = useState({
+    entityName: '',
+    content: '',
+    importance: 'normal',
+    authorityTier: 'contextual' as AuthorityTier,
+    derivedFrom: '',
+    expiresAt: '',
+  });
+  const [newRelation, setNewRelation] = useState({ from: '', to: '', relationType: 'relates_to' });
 
   // Inline edit state
   const [editingObsId, setEditingObsId] = useState<string | null>(null);
   const [editingObsContent, setEditingObsContent] = useState('');
+  const [editingObsTier, setEditingObsTier] = useState<AuthorityTier>('contextual');
+  const [editingObsStatus, setEditingObsStatus] = useState<ObservationStatus>('active');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -49,10 +69,10 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     try {
       if (searchQuery) {
         const results = await api.search(searchQuery);
-        const entities = results.map(r => ({
+        const entities = results.map((r) => ({
           ...r.entity,
           observations: r.observations,
-          relations: r.relations,
+          relations: (r.relations || []) as any,
         }));
         setSnapshot({ entities });
       } else {
@@ -70,10 +90,9 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     loadData();
   }, [selectedDomain, searchQuery, refreshTrigger]);
 
-  // Keep inspected entity details fresh when dataset refreshes
   useEffect(() => {
     if (!selectedEntity || !snapshot) return;
-    const fresh = snapshot.entities.find(e => e.id === selectedEntity.id);
+    const fresh = snapshot.entities.find((e) => e.id === selectedEntity.id);
     if (fresh) {
       setSelectedEntity(fresh);
       setSelectedEntityObs(fresh.observations || []);
@@ -87,35 +106,35 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
 
   const selectEntity = (entity: Entity) => {
     setSelectedEntity(entity);
-    const item = snapshot?.entities.find(e => e.id === entity.id);
+    const item = snapshot?.entities.find((e) => e.id === entity.id);
     setSelectedEntityObs(item?.observations || []);
     setSelectedEntityRels(item?.relations || []);
   };
 
-  // Add Entity
   const handleAddEntity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEntity.name.trim()) return;
     try {
-      const allowedAgentsArr = newEntity.allowedAgents.split(',').map(s => s.trim()).filter(Boolean);
-      await api.createEntities([{
-        name: newEntity.name,
-        entityType: newEntity.entityType,
-        domain: newEntity.domain,
-        visibility: newEntity.visibility,
-        allowedAgents: allowedAgentsArr,
-      }]);
-      setNewEntity({ name: '', entityType: 'User', domain: 'main', visibility: 'PRIVATE', allowedAgents: '' });
+      const allowedAgentsArr = newEntity.allowedAgents.split(',').map((s) => s.trim()).filter(Boolean);
+      await api.createEntities([
+        {
+          name: newEntity.name.trim(),
+          entityType: newEntity.entityType.trim(),
+          domain: newEntity.domain.trim() || 'personal',
+          visibility: newEntity.visibility,
+          allowedAgents: allowedAgentsArr,
+        },
+      ]);
       setShowAddEntity(false);
+      setNewEntity({ name: '', entityType: 'concept', domain: 'personal', visibility: 'public', allowedAgents: '' });
       triggerRefresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
   };
 
-  // Delete Entity
   const handleDeleteEntity = async (name: string) => {
-    if (!confirm(`Permanently delete entity "${name}"? This cascades to all associated observations and relations.`)) return;
+    if (!confirm(`Are you sure you want to delete entity "${name}" and all its observations?`)) return;
     try {
       await api.deleteEntities([name]);
       if (selectedEntity?.name === name) {
@@ -127,32 +146,61 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     }
   };
 
-  // Add Observation
   const handleAddObservation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newObservation.content.trim()) return;
-    const targetEntityName = newObservation.entityName || selectedEntity?.name;
-    if (!targetEntityName) return;
+    const targetName = newObservation.entityName || selectedEntity?.name;
+    if (!targetName || !newObservation.content.trim()) return;
 
     try {
-      await api.addObservations([{
-        entityName: targetEntityName,
-        content: newObservation.content,
-        importance: newObservation.importance,
-        confidence: parseFloat(newObservation.confidence) || 1.0,
-        expiresAt: newObservation.expiresAt ? new Date(newObservation.expiresAt).toISOString() : null,
-      }]);
-      setNewObservation({ entityName: '', content: '', importance: 'MEDIUM', confidence: '1.0', expiresAt: '' });
+      const derivedArr = newObservation.derivedFrom
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      await api.addObservations([
+        {
+          entityName: targetName,
+          contents: [newObservation.content.trim()],
+          importance: newObservation.importance,
+          authorityTier: newObservation.authorityTier,
+          derivedFrom: derivedArr,
+          expiresAt: newObservation.expiresAt || null,
+        },
+      ]);
       setShowAddObservation(false);
+      setNewObservation({
+        entityName: '',
+        content: '',
+        importance: 'normal',
+        authorityTier: 'contextual',
+        derivedFrom: '',
+        expiresAt: '',
+      });
       triggerRefresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
   };
 
-  // Delete Observation
+  const handleUpdateObservation = async (obsId: string) => {
+    if (!editingObsContent.trim()) return;
+    try {
+      await api.updateObservation(
+        obsId,
+        editingObsContent.trim(),
+        'dashboard',
+        editingObsTier,
+        editingObsStatus
+      );
+      setEditingObsId(null);
+      triggerRefresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleDeleteObservation = async (id: string) => {
-    if (!confirm('Delete this observation fact?')) return;
+    if (!confirm('Are you sure you want to delete this observation?')) return;
     try {
       await api.deleteObservations([id]);
       triggerRefresh();
@@ -161,41 +209,26 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     }
   };
 
-  // Update Observation
-  const handleSaveObservationEdit = async (id: string) => {
-    if (!editingObsContent.trim()) return;
-    try {
-      await api.updateObservation(id, editingObsContent, 'dashboard-user');
-      setEditingObsId(null);
-      setEditingObsContent('');
-      triggerRefresh();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  // Add Relation
   const handleAddRelation = async (e: React.FormEvent) => {
     e.preventDefault();
-    const fromName = newRelation.fromEntityName || selectedEntity?.name;
-    if (!fromName || !newRelation.toEntityName.trim()) return;
+    if (!newRelation.from.trim() || !newRelation.to.trim() || !newRelation.relationType.trim()) return;
     try {
-      await api.createRelations([{
-        fromEntityName: fromName,
-        toEntityName: newRelation.toEntityName,
-        relationType: newRelation.relationType,
-      }]);
-      setNewRelation({ fromEntityName: '', toEntityName: '', relationType: 'relates_to' });
+      await api.createRelations([
+        {
+          from: newRelation.from.trim(),
+          to: newRelation.to.trim(),
+          relationType: newRelation.relationType.trim(),
+        },
+      ]);
       setShowAddRelation(false);
+      setNewRelation({ from: '', to: '', relationType: 'relates_to' });
       triggerRefresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
   };
 
-  // Delete Relation
   const handleDeleteRelation = async (id: string) => {
-    if (!confirm('Delete this semantic relation link?')) return;
     try {
       await api.deleteRelations([id]);
       triggerRefresh();
@@ -204,309 +237,402 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     }
   };
 
+  // Helper renderers for Authority Tiers
+  const renderTierBadge = (tier: AuthorityTier) => {
+    switch (tier) {
+      case 'invariant':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <Crown className="w-2.5 h-2.5 text-amber-400" />
+            <span>INVARIANT</span>
+          </span>
+        );
+      case 'architectural':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+            <Building2 className="w-2.5 h-2.5 text-purple-400" />
+            <span>ARCHITECTURAL</span>
+          </span>
+        );
+      case 'contextual':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+            <Clock className="w-2.5 h-2.5 text-emerald-400" />
+            <span>CONTEXTUAL</span>
+          </span>
+        );
+      case 'ephemeral':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30">
+            <Zap className="w-2.5 h-2.5 text-rose-400" />
+            <span>EPHEMERAL</span>
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderStatusBadge = (status: ObservationStatus) => {
+    switch (status) {
+      case 'active':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>active</span>
+          </span>
+        );
+      case 'stale':
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono">
+            <AlertTriangle className="w-2.5 h-2.5" />
+            <span>stale</span>
+          </span>
+        );
+      case 'invalidated':
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-mono line-through">
+            invalidated
+          </span>
+        );
+      case 'superseded':
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 text-[10px] font-mono">
+            superseded
+          </span>
+        );
+      case 'decayed':
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-purple-950/40 text-purple-400/60 border border-purple-500/20 text-[10px] font-mono">
+            decayed
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const entitiesList = (snapshot?.entities || []).filter((e) =>
+    entityFilter ? e.name.toLowerCase().includes(entityFilter.toLowerCase()) || e.domain.toLowerCase().includes(entityFilter.toLowerCase()) : true
+  );
+
   return (
-    <div className="flex-1 flex flex-col md:flex-row h-[calc(100vh-73px)] bg-[#08090c] overflow-hidden select-none">
-      {/* List Panel */}
-      <div className="flex-1 p-6 border-r border-white/[0.08] flex flex-col overflow-hidden">
-        {/* Actions header */}
-        <div className="flex items-center justify-between mb-5 flex-shrink-0">
-          <div>
-            <h2 className="font-sans text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <FolderOpen className="w-4 h-4 text-amber-400" />
-              <span>Entity Directory</span>
-              <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
-                {snapshot?.entities.length ?? 0}
+    <div className="w-full h-full flex flex-col md:flex-row overflow-hidden bg-[#070510]">
+      {/* Left Master Column: Entities List */}
+      <div className="w-full md:w-80 lg:w-96 border-r border-purple-500/15 flex flex-col h-full bg-[#090714]/90 backdrop-blur-xl">
+        <div className="p-4 border-b border-purple-500/15 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-purple-400" />
+              <h2 className="font-sans text-sm font-bold text-white">Entities</h2>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300">
+                {entitiesList.length}
               </span>
-            </h2>
-            <p className="font-mono text-[11px] text-zinc-500 mt-0.5">
-              Knowledge graph nodes and raw observation memory statements.
-            </p>
+            </div>
+
+            <button
+              onClick={() => setShowAddEntity(true)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-mono text-[11px] font-bold transition-all shadow-glow-purple"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Entity</span>
+            </button>
           </div>
-          <button
-            onClick={() => setShowAddEntity(true)}
-            className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black px-3.5 py-2 rounded-xl font-mono text-xs font-bold shadow-glow-amber transition-all active:scale-[0.98]"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>New Entity</span>
-          </button>
+
+          <input
+            type="text"
+            placeholder="Filter entities by name or domain…"
+            value={entityFilter}
+            onChange={(e) => setEntityFilter(e.target.value)}
+            className="w-full bg-[#120f26]/80 border border-purple-500/20 rounded-xl px-3 py-1.5 text-xs font-mono text-purple-100 placeholder-purple-400/40 focus:outline-none focus:border-purple-400"
+          />
+
+          {error && (
+            <div className="p-2 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-300 text-[11px] font-mono flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-rose-400" />
+              <span className="truncate">{error}</span>
+            </div>
+          )}
         </div>
 
-        {/* Loading / Error / Empty States */}
-        {isLoading && (
-          <div className="flex-1 flex flex-col items-center justify-center font-mono text-xs text-zinc-500 gap-2">
-            <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-            <span>Fetching entity matrix…</span>
-          </div>
-        )}
+        {/* Entities Scrollable List */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {isLoading && entitiesList.length === 0 ? (
+            <div className="p-8 text-center text-xs font-mono text-zinc-500">Loading knowledge graph…</div>
+          ) : entitiesList.length === 0 ? (
+            <div className="p-8 text-center text-xs font-mono text-zinc-500">No matching entities found.</div>
+          ) : (
+            entitiesList.map((ent) => {
+              const isSelected = selectedEntity?.id === ent.id;
+              const obsCount = ent.observations?.length || 0;
 
-        {error && (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center font-mono text-xs text-red-400">
-            <AlertTriangle className="w-6 h-6 text-red-500 mb-2" />
-            <p>Directory sync failure: {error}</p>
-          </div>
-        )}
+              return (
+                <div
+                  key={ent.id}
+                  onClick={() => selectEntity(ent)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer select-none group ${
+                    isSelected
+                      ? 'bg-purple-600/20 border-purple-500/40 shadow-glow-purple text-white'
+                      : 'bg-[#0f0c24]/50 border-purple-500/10 hover:border-purple-500/30 hover:bg-purple-950/20 text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-sans font-bold text-xs truncate text-white">{ent.name}</div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 flex-shrink-0">
+                      {obsCount} fact{obsCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
 
-        {!isLoading && snapshot?.entities.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-            <Compass className="w-10 h-10 text-zinc-700 mb-2 animate-pulse" />
-            <span className="font-sans text-sm font-semibold text-zinc-400">No entities registered</span>
-            <span className="font-mono text-xs text-zinc-600 mt-1">
-              Create an entity above or use an agent observation tool.
-            </span>
-          </div>
-        )}
-
-        {/* Table of Entities */}
-        {snapshot && snapshot.entities.length > 0 && (
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="rounded-2xl glass-panel overflow-hidden border border-white/[0.08] shadow-sm">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="bg-black/30 border-b border-white/[0.08] text-zinc-400 select-none">
-                    <th className="py-3 px-4 font-semibold">Entity</th>
-                    <th className="py-3 px-4 font-semibold">Type</th>
-                    <th className="py-3 px-4 font-semibold">Domain</th>
-                    <th className="py-3 px-4 font-semibold">Access</th>
-                    <th className="py-3 px-4 font-semibold text-center">Facts</th>
-                    <th className="py-3 px-4 text-right font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.05]">
-                  {snapshot.entities.map((ent) => {
-                    const isInspected = selectedEntity?.id === ent.id;
-                    const typeColor = getNodeColor(ent.entityType);
-                    return (
-                      <tr
-                        key={ent.id}
-                        onClick={() => selectEntity(ent)}
-                        className={`cursor-pointer transition-colors duration-150 ${
-                          isInspected
-                            ? 'bg-amber-500/10 text-white'
-                            : 'hover:bg-white/[0.03] text-zinc-300'
-                        }`}
-                      >
-                        <td className="py-3 px-4 font-bold text-white flex items-center gap-2">
-                          <span
-                            className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: typeColor, boxShadow: `0 0 8px ${typeColor}` }}
-                          ></span>
-                          <span className="truncate max-w-[180px]">{ent.name}</span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border uppercase"
-                            style={{
-                              backgroundColor: `${typeColor}15`,
-                              color: typeColor,
-                              borderColor: `${typeColor}30`,
-                            }}
-                          >
-                            {ent.entityType}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-zinc-400">{ent.domain}</td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-md ${
-                              ent.visibility === 'PUBLIC'
-                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-zinc-800 text-zinc-400 border border-white/5'
-                            }`}
-                          >
-                            {ent.visibility}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-center tabular-nums text-zinc-400">
-                          {(ent.observations || []).length}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteEntity(ent.name);
-                            }}
-                            className="text-zinc-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
-                            title="Delete entity"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+                  <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-purple-400/70">
+                    <span className="px-1.5 py-0.2 rounded bg-white/5 border border-white/5">{ent.domain}</span>
+                    <span>•</span>
+                    <span className="text-zinc-500">{ent.entityType}</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
-      {/* Inspector Panel */}
-      <div className="w-full md:w-[480px] p-6 flex flex-col justify-between overflow-hidden glass-panel-elevated border-t md:border-t-0 md:border-l border-white/[0.08]">
+      {/* Right Detail Column: Selected Entity Inspector */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#06050b]">
         {selectedEntity ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-4 flex-shrink-0">
-              <div>
-                <h3 className="text-xl font-bold font-sans text-white mb-2 break-all tracking-tight">
-                  {selectedEntity.name}
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 uppercase">
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Entity Header Banner */}
+            <div className="p-6 border-b border-purple-500/15 bg-[#090714] flex flex-wrap items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="font-sans text-xl font-extrabold text-white tracking-tight">
+                    {selectedEntity.name}
+                  </h1>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase">
                     {selectedEntity.entityType}
                   </span>
-                  <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 uppercase">
-                    {selectedEntity.domain}
-                  </span>
-                  <span className="font-mono text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-white/10 text-zinc-300 border border-white/10 uppercase">
-                    {selectedEntity.visibility}
-                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono text-zinc-400">
+                  <span>Domain: <span className="text-purple-300">{selectedEntity.domain}</span></span>
+                  <span>•</span>
+                  <span>Created: {new Date(selectedEntity.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedEntity(null)}
-                className="font-mono text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
-              >
-                Clear
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setNewObservation((prev) => ({ ...prev, entityName: selectedEntity.name }));
+                    setShowAddObservation(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.97]"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Fact</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setNewRelation((prev) => ({ ...prev, from: selectedEntity.name }));
+                    setShowAddRelation(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 hover:bg-purple-900/50 border border-purple-500/30 text-purple-300 font-mono text-xs font-semibold transition-all active:scale-[0.97]"
+                >
+                  <Network className="w-3.5 h-3.5" />
+                  <span>Link Relation</span>
+                </button>
+
+                <button
+                  onClick={() => handleDeleteEntity(selectedEntity.name)}
+                  className="p-2 text-zinc-500 hover:text-rose-400 transition-colors rounded-xl hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20"
+                  title="Delete entire entity"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            {/* Content Lists */}
-            <div className="flex-1 overflow-y-auto pr-1 space-y-6">
-              {/* Observations */}
+            {/* Inspector Content Scroll Area */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Observations Section */}
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="font-mono text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Observations ({selectedEntityObs.length})</span>
-                  </span>
-                  <button
-                    onClick={() => {
-                      setNewObservation({ ...newObservation, entityName: selectedEntity.name });
-                      setShowAddObservation(true);
-                    }}
-                    className="flex items-center gap-1 hover:text-amber-300 font-mono text-xs text-amber-400 transition-colors"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>Add Fact</span>
-                  </button>
+                <div className="flex items-center justify-between border-b border-purple-500/10 pb-2">
+                  <h3 className="font-sans text-sm font-bold text-purple-200 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-purple-400" />
+                    <span>Knowledge Observations & Facts ({selectedEntityObs.length})</span>
+                  </h3>
                 </div>
 
                 {selectedEntityObs.length === 0 ? (
-                  <p className="text-xs font-mono text-zinc-500 italic p-4 rounded-xl bg-black/30 border border-white/5 text-center">
-                    No statements observed.
-                  </p>
+                  <div className="p-8 text-center text-xs font-mono text-zinc-500 border border-dashed border-purple-500/20 rounded-2xl">
+                    No observations recorded yet. Click "Add Fact" to attach memories.
+                  </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {selectedEntityObs.map((obs) => (
-                      <div
-                        key={obs.id}
-                        className="p-3.5 rounded-xl bg-black/40 border border-white/10 text-xs font-mono group hover:border-zinc-500 transition-all"
-                      >
-                        {editingObsId === obs.id ? (
-                          <div className="space-y-2">
-                            <textarea
-                              value={editingObsContent}
-                              onChange={(e) => setEditingObsContent(e.target.value)}
-                              className="w-full bg-black/60 border border-amber-500/50 rounded-lg p-2 text-zinc-100 focus:outline-none text-xs"
-                              rows={3}
-                            />
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => setEditingObsId(null)}
-                                className="px-2.5 py-1 text-[11px] rounded bg-white/5 text-zinc-400 hover:text-white"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => handleSaveObservationEdit(obs.id)}
-                                className="px-2.5 py-1 text-[11px] rounded bg-amber-500 text-black font-bold hover:bg-amber-400"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <p className="font-sans text-zinc-200 leading-relaxed mb-2 break-words text-xs">
-                              {obs.content}
-                            </p>
-                            <div className="flex justify-between items-center text-[10px] text-zinc-500 border-t border-white/5 pt-2">
+                    {selectedEntityObs.map((obs) => {
+                      const isEditing = editingObsId === obs.id;
+
+                      return (
+                        <div key={obs.id} className="double-bezel-shell">
+                          <div className="double-bezel-core p-4 space-y-3">
+                            {/* Card Topline: Tier Badge + Status + Metadata */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2 text-xs font-mono">
                               <div className="flex items-center gap-2">
-                                <span className="text-amber-400 font-semibold uppercase">{obs.importance || 'NORMAL'}</span>
-                                <span>Conf: {obs.confidence ?? 1}</span>
+                                {renderTierBadge(obs.authorityTier)}
+                                {renderStatusBadge(obs.status)}
                               </div>
-                              <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  onClick={() => {
-                                    setEditingObsId(obs.id);
-                                    setEditingObsContent(obs.content);
-                                  }}
-                                  className="text-zinc-400 hover:text-white p-1"
-                                  title="Edit observation"
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteObservation(obs.id)}
-                                  className="text-zinc-400 hover:text-rose-400 p-1"
-                                  title="Delete observation"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
+
+                              <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                                <span>Accessed: <strong className="text-zinc-300">{obs.accessCount ?? 0}x</strong></span>
+                                <span>•</span>
+                                <span>ID: <code className="text-purple-300/80">{obs.id.slice(0, 8)}…</code></span>
                               </div>
                             </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
+
+                            {/* Content or Edit Form */}
+                            {isEditing ? (
+                              <div className="space-y-3">
+                                <textarea
+                                  value={editingObsContent}
+                                  onChange={(e) => setEditingObsContent(e.target.value)}
+                                  className="w-full bg-[#080612] border border-purple-500/30 rounded-xl p-3 text-xs font-mono text-purple-100 focus:outline-none focus:border-purple-400"
+                                  rows={3}
+                                />
+                                <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <label className="text-zinc-400 text-[10px]">Tier:</label>
+                                    <select
+                                      value={editingObsTier}
+                                      onChange={(e) => setEditingObsTier(e.target.value as AuthorityTier)}
+                                      className="bg-[#080612] border border-purple-500/20 rounded-lg px-2 py-1 text-xs text-white"
+                                    >
+                                      <option value="invariant">invariant</option>
+                                      <option value="architectural">architectural</option>
+                                      <option value="contextual">contextual</option>
+                                      <option value="ephemeral">ephemeral</option>
+                                    </select>
+
+                                    <label className="text-zinc-400 text-[10px] ml-2">Status:</label>
+                                    <select
+                                      value={editingObsStatus}
+                                      onChange={(e) => setEditingObsStatus(e.target.value as ObservationStatus)}
+                                      className="bg-[#080612] border border-purple-500/20 rounded-lg px-2 py-1 text-xs text-white"
+                                    >
+                                      <option value="active">active</option>
+                                      <option value="stale">stale</option>
+                                      <option value="invalidated">invalidated</option>
+                                      <option value="superseded">superseded</option>
+                                      <option value="decayed">decayed</option>
+                                    </select>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setEditingObsId(null)}
+                                      className="px-3 py-1 rounded-lg text-zinc-400 hover:text-white"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateObservation(obs.id)}
+                                      className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-4">
+                                <div
+                                  className={`text-xs font-mono leading-relaxed ${
+                                    obs.status === 'invalidated' || obs.status === 'superseded'
+                                      ? 'text-zinc-500 line-through'
+                                      : obs.status === 'stale'
+                                      ? 'text-amber-200'
+                                      : 'text-zinc-200'
+                                  }`}
+                                >
+                                  {obs.content}
+                                </div>
+
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <button
+                                    onClick={() => {
+                                      setEditingObsId(obs.id);
+                                      setEditingObsContent(obs.content);
+                                      setEditingObsTier(obs.authorityTier);
+                                      setEditingObsStatus(obs.status);
+                                    }}
+                                    className="p-1 text-zinc-500 hover:text-purple-300 transition-colors rounded-lg hover:bg-purple-500/10"
+                                    title="Edit observation"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteObservation(obs.id)}
+                                    className="p-1 text-zinc-500 hover:text-rose-400 transition-colors rounded-lg hover:bg-rose-500/10"
+                                    title="Delete observation"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Provenance DAG Links */}
+                            {obs.derivedFrom && obs.derivedFrom.length > 0 && (
+                              <div className="flex items-center gap-1.5 text-[10px] font-mono text-purple-400/80 bg-purple-950/20 border border-purple-500/15 rounded-lg px-2.5 py-1">
+                                <GitBranch className="w-3 h-3 text-purple-400" />
+                                <span>Derived from:</span>
+                                {obs.derivedFrom.map((id) => (
+                                  <span key={id} className="bg-purple-900/40 px-1.5 py-0.2 rounded text-purple-200">
+                                    {id.slice(0, 8)}…
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              {/* Relations */}
-              <div className="space-y-3 border-t border-white/10 pt-4">
-                <div className="flex justify-between items-center">
-                  <span className="font-mono text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <ArrowUpRight className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Relations ({selectedEntityRels.length})</span>
-                  </span>
-                  <button
-                    onClick={() => {
-                      setNewRelation({ ...newRelation, fromEntityName: selectedEntity.name });
-                      setShowAddRelation(true);
-                    }}
-                    className="flex items-center gap-1 hover:text-cyan-300 font-mono text-xs text-cyan-400 transition-colors"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>Add Link</span>
-                  </button>
+              {/* Relations Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between border-b border-purple-500/10 pb-2">
+                  <h3 className="font-sans text-sm font-bold text-indigo-200 flex items-center gap-2">
+                    <Network className="w-4 h-4 text-indigo-400" />
+                    <span>Knowledge Graph Relations ({selectedEntityRels.length})</span>
+                  </h3>
                 </div>
 
                 {selectedEntityRels.length === 0 ? (
-                  <p className="text-xs font-mono text-zinc-500 italic p-4 rounded-xl bg-black/30 border border-white/5 text-center">
-                    No relations registered.
-                  </p>
+                  <div className="p-6 text-center text-xs font-mono text-zinc-500 border border-dashed border-purple-500/20 rounded-2xl">
+                    No relations connected yet. Click "Link Relation" to connect to other nodes.
+                  </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                     {selectedEntityRels.map((rel) => {
-                      const isSource = rel.fromEntityId === selectedEntity.id;
-                      const counterPart = isSource ? rel.toEntityName : rel.fromEntityName;
+                      const isOutgoing = rel.fromEntity === selectedEntity.id;
+                      const target = isOutgoing ? rel.toEntityName : rel.fromEntityName;
+
                       return (
                         <div
                           key={rel.id}
-                          className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-white/10 text-xs font-mono group"
+                          className="flex items-center justify-between p-3 rounded-xl bg-[#090714] border border-purple-500/15 text-xs font-mono"
                         >
-                          <div className="flex items-center gap-2 overflow-hidden">
-                            <span className="text-zinc-500">{isSource ? 'OUT' : 'IN'}:</span>
-                            <span className="text-white font-semibold truncate max-w-[140px]">{counterPart}</span>
-                            <span className="text-[10px] text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                          <div className="flex items-center gap-2">
+                            <span className="text-purple-400 font-bold">{isOutgoing ? '->' : '<-'}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold text-[10px]">
                               {rel.relationType}
                             </span>
+                            <span className="text-white font-bold">{target}</span>
                           </div>
+
                           <button
                             onClick={() => handleDeleteRelation(rel.id)}
-                            className="text-zinc-500 hover:text-rose-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="p-1 text-zinc-500 hover:text-rose-400 transition-colors"
                             title="Delete relation"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -520,266 +646,208 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3">
-              <FolderOpen className="w-6 h-6 text-zinc-500" />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-purple-950/30 border border-purple-500/20 flex items-center justify-center text-purple-400">
+              <Compass className="w-6 h-6" />
             </div>
-            <p className="font-sans text-sm font-semibold text-zinc-300">Select an entity to inspect</p>
-            <p className="font-mono text-xs text-zinc-500 mt-1 max-w-xs">
-              View attached factual observations, lineage history, and linked knowledge graph edges.
+            <h3 className="font-sans text-base font-bold text-white">Select an Entity</h3>
+            <p className="text-xs font-mono text-zinc-400 max-w-sm">
+              Click any entity on the left to inspect its observations, authority tiers, truth status,
+              and connected relations.
             </p>
-          </div>
-        )}
-
-        {/* Footer */}
-        {selectedEntity && (
-          <div className="pt-3 border-t border-white/10 flex justify-between items-center text-[10px] font-mono text-zinc-500">
-            <span>UUID: {selectedEntity.id.slice(0, 16)}…</span>
-            <span className="text-zinc-400">{selectedEntity.domain}</span>
           </div>
         )}
       </div>
 
-      {/* Modal: Add Entity */}
+      {/* Add Entity Modal */}
       {showAddEntity && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-panel-elevated p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl border border-white/10">
-            <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 select-none">
-              <h3 className="font-bold text-sm text-white uppercase tracking-wider">Create Entity</h3>
-              <button onClick={() => setShowAddEntity(false)} className="text-zinc-500 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <form onSubmit={handleAddEntity} className="space-y-4">
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Entity Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Sabil Murti, 9Router, Next.js"
-                  value={newEntity.name}
-                  onChange={(e) => setNewEntity({ ...newEntity, name: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div className="double-bezel-shell max-w-md w-full">
+            <div className="double-bezel-core p-6 space-y-4">
+              <h3 className="font-sans text-lg font-bold text-white">Add New Entity</h3>
+              <form onSubmit={handleAddEntity} className="space-y-3 font-mono text-xs">
                 <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Type</label>
+                  <label className="text-zinc-400 block mb-1">Entity Name</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Person, Service, Tool"
-                    value={newEntity.entityType}
-                    onChange={(e) => setNewEntity({ ...newEntity, entityType: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
+                    placeholder="e.g. React Architecture"
+                    value={newEntity.name}
+                    onChange={(e) => setNewEntity({ ...newEntity, name: e.target.value })}
+                    className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
                   />
                 </div>
-                <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Domain</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. personal, architecture"
-                    value={newEntity.domain}
-                    onChange={(e) => setNewEntity({ ...newEntity, domain: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-zinc-400 block mb-1">Entity Type</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. concept, tool, person"
+                      value={newEntity.entityType}
+                      onChange={(e) => setNewEntity({ ...newEntity, entityType: e.target.value })}
+                      className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-zinc-400 block mb-1">Domain</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. personal, project:alpha"
+                      value={newEntity.domain}
+                      onChange={(e) => setNewEntity({ ...newEntity, domain: e.target.value })}
+                      className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Visibility</label>
-                <select
-                  value={newEntity.visibility}
-                  onChange={(e) => setNewEntity({ ...newEntity, visibility: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                >
-                  <option value="PRIVATE">PRIVATE (Restricted)</option>
-                  <option value="PUBLIC">PUBLIC (Cross-Agent)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Allowed Agents (comma-separated)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. antigravity, seiza, chat"
-                  value={newEntity.allowedAgents}
-                  onChange={(e) => setNewEntity({ ...newEntity, allowedAgents: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setShowAddEntity(false)}
-                  className="px-4 py-2 border border-white/10 text-zinc-400 hover:text-white rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold rounded-xl shadow-glow-amber hover:from-amber-400"
-                >
-                  Create Entity
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Add Observation */}
-      {showAddObservation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-panel-elevated p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl border border-white/10">
-            <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 select-none">
-              <h3 className="font-bold text-sm text-white uppercase tracking-wider">Add Fact Observation</h3>
-              <button onClick={() => setShowAddObservation(false)} className="text-zinc-500 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <form onSubmit={handleAddObservation} className="space-y-4">
-              {!selectedEntity && (
-                <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Target Entity Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Sabil Murti"
-                    value={newObservation.entityName}
-                    onChange={(e) => setNewObservation({ ...newObservation, entityName: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Fact Statement</label>
-                <textarea
-                  required
-                  placeholder="e.g. Uses Gemini 3.8 Flash model for IDE reasoning."
-                  value={newObservation.content}
-                  onChange={(e) => setNewObservation({ ...newObservation, content: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500 h-24"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Importance</label>
-                  <select
-                    value={newObservation.importance}
-                    onChange={(e) => setNewObservation({ ...newObservation, importance: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-purple-500/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEntity(false)}
+                    className="px-3 py-1.5 rounded-xl text-zinc-400 hover:text-white"
                   >
-                    <option value="LOW">LOW</option>
-                    <option value="MEDIUM">MEDIUM</option>
-                    <option value="HIGH">HIGH</option>
-                    <option value="CRITICAL">CRITICAL</option>
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold shadow-glow-purple"
+                  >
+                    Create Entity
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Confidence</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    value={newObservation.confidence}
-                    onChange={(e) => setNewObservation({ ...newObservation, confidence: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setShowAddObservation(false)}
-                  className="px-4 py-2 border border-white/10 text-zinc-400 hover:text-white rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold rounded-xl shadow-glow-amber hover:from-amber-400"
-                >
-                  Inject Fact
-                </button>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Add Relation */}
-      {showAddRelation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="glass-panel-elevated p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl border border-white/10">
-            <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 select-none">
-              <h3 className="font-bold text-sm text-white uppercase tracking-wider">Establish Relation</h3>
-              <button onClick={() => setShowAddRelation(false)} className="text-zinc-500 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <form onSubmit={handleAddRelation} className="space-y-4">
-              {!selectedEntity && (
+      {/* Add Observation Modal */}
+      {showAddObservation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div className="double-bezel-shell max-w-lg w-full">
+            <div className="double-bezel-core p-6 space-y-4">
+              <h3 className="font-sans text-lg font-bold text-white">
+                Add Fact to "{newObservation.entityName || selectedEntity?.name}"
+              </h3>
+              <form onSubmit={handleAddObservation} className="space-y-3 font-mono text-xs">
                 <div>
-                  <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">From Entity</label>
+                  <label className="text-zinc-400 block mb-1">Fact / Content</label>
+                  <textarea
+                    required
+                    placeholder="Enter verifiable fact, architecture decision, or observation…"
+                    value={newObservation.content}
+                    onChange={(e) => setNewObservation({ ...newObservation, content: e.target.value })}
+                    rows={4}
+                    className="w-full bg-[#080612] border border-purple-500/20 rounded-xl p-3 text-white focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-zinc-400 block mb-1">Authority Tier</label>
+                    <select
+                      value={newObservation.authorityTier}
+                      onChange={(e) =>
+                        setNewObservation({ ...newObservation, authorityTier: e.target.value as AuthorityTier })
+                      }
+                      className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                    >
+                      <option value="invariant">invariant (Never decays)</option>
+                      <option value="architectural">architectural (365d)</option>
+                      <option value="contextual">contextual (90d)</option>
+                      <option value="ephemeral">ephemeral (7d/expiry)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-zinc-400 block mb-1">Derived From (Optional IDs)</label>
+                    <input
+                      type="text"
+                      placeholder="obs-id1, obs-id2"
+                      value={newObservation.derivedFrom}
+                      onChange={(e) => setNewObservation({ ...newObservation, derivedFrom: e.target.value })}
+                      className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-purple-500/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddObservation(false)}
+                    className="px-3 py-1.5 rounded-xl text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold shadow-glow-purple"
+                  >
+                    Save Fact
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Relation Modal */}
+      {showAddRelation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div className="double-bezel-shell max-w-md w-full">
+            <div className="double-bezel-core p-6 space-y-4">
+              <h3 className="font-sans text-lg font-bold text-white">Create Relation</h3>
+              <form onSubmit={handleAddRelation} className="space-y-3 font-mono text-xs">
+                <div>
+                  <label className="text-zinc-400 block mb-1">From Entity</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Sabil Murti"
-                    value={newRelation.fromEntityName}
-                    onChange={(e) => setNewRelation({ ...newRelation, fromEntityName: e.target.value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
+                    value={newRelation.from}
+                    onChange={(e) => setNewRelation({ ...newRelation, from: e.target.value })}
+                    className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
                   />
                 </div>
-              )}
+                <div>
+                  <label className="text-zinc-400 block mb-1">Relation Type</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="uses, depends_on, deployed_on, creator_of"
+                    value={newRelation.relationType}
+                    onChange={(e) => setNewRelation({ ...newRelation, relationType: e.target.value })}
+                    className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-zinc-400 block mb-1">To Entity</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Target entity name"
+                    value={newRelation.to}
+                    onChange={(e) => setNewRelation({ ...newRelation, to: e.target.value })}
+                    className="w-full bg-[#080612] border border-purple-500/20 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-400"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">To Entity</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Amneshia"
-                  value={newRelation.toEntityName}
-                  onChange={(e) => setNewRelation({ ...newRelation, toEntityName: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Relationship Type (Edge)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. creator_of, uses, works_on"
-                  value={newRelation.relationType}
-                  onChange={(e) => setNewRelation({ ...newRelation, relationType: e.target.value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setShowAddRelation(false)}
-                  className="px-4 py-2 border border-white/10 text-zinc-400 hover:text-white rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold rounded-xl shadow-glow-amber hover:from-amber-400"
-                >
-                  Create Edge
-                </button>
-              </div>
-            </form>
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-purple-500/10">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddRelation(false)}
+                    className="px-3 py-1.5 rounded-xl text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold shadow-glow-purple"
+                  >
+                    Link Relation
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
