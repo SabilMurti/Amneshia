@@ -57,6 +57,22 @@ program
     db.close();
   });
 
+// Subcommand: sync
+program
+  .command('sync')
+  .description('Export all SQLite entities and observations to Markdown-as-Truth files')
+  .option('-l, --local', 'Sync local repository')
+  .action((cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
+    const db = new DatabaseLayer(config.dataDir);
+    const sync = new DualWriteSync(config.knowledgeDir, db);
+    const count = sync.syncAll();
+    console.log(`[Amneshia] Successfully synced ${count} entities to Markdown-as-Truth files!`);
+    db.close();
+  });
+
 // Subcommand: gc
 program
   .command('gc')

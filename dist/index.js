@@ -2899,6 +2899,16 @@ program.command("reindex").description("Rebuild SQLite FTS5 cache index from mar
   console.log(`  - Relations:    ${result.relations}`);
   db.close();
 });
+program.command("sync").description("Export all SQLite entities and observations to Markdown-as-Truth files").option("-l, --local", "Sync local repository").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs5.existsSync(path6.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
+  const db = new DatabaseLayer(config.dataDir);
+  const sync = new DualWriteSync(config.knowledgeDir, db);
+  const count = sync.syncAll();
+  console.log(`[Amneshia] Successfully synced ${count} entities to Markdown-as-Truth files!`);
+  db.close();
+});
 program.command("gc").description("Garbage collect decayed, expired, and invalidated observations").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
   const isLocal = cmdOpts.local || program.opts().local || fs5.existsSync(path6.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
