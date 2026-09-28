@@ -142,7 +142,7 @@ program
   .action(async (cmdOpts) => {
     const isLocal = cmdOpts.local || program.opts().local;
     const port = cmdOpts.port || program.opts().port || 3457;
-    await startServer({ local: isLocal, http: true, port });
+    await startServer({ local: isLocal, http: true, port, stdio: false });
   });
 
 // Default server launch
@@ -199,12 +199,12 @@ async function runDefault(): Promise<void> {
 }
 
 // Parse args or run default
-if (process.argv.length <= 2 || (!['init', 'reindex', 'gc', 'stats', 'serve'].includes(process.argv[2]) && !process.argv[2].startsWith('-'))) {
-  program.parse(process.argv);
-  // If no subcommand matched
-  if (!program.args.length) {
-    void runDefault();
-  }
-} else {
-  program.parse(process.argv);
+const knownSubcommands = ['init', 'reindex', 'sync', 'gc', 'stats', 'serve', 'help'];
+const hasSubcommand = process.argv.slice(2).some((arg) => knownSubcommands.includes(arg));
+
+program.parse(process.argv);
+
+if (!hasSubcommand) {
+  void runDefault();
 }
+

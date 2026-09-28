@@ -2577,7 +2577,7 @@ async function startServer(options = {}) {
       }
     });
   }
-  if (!process.argv.includes("--daemon")) {
+  if (options.stdio !== false && !process.argv.includes("--daemon")) {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("[Amneshia] MCP Server running on stdio");
@@ -2672,7 +2672,7 @@ program.command("stats").description("Display knowledge graph statistics and hea
 program.command("serve").description("Start the HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-l, --local", "Use local repository").action(async (cmdOpts) => {
   const isLocal = cmdOpts.local || program.opts().local;
   const port = cmdOpts.port || program.opts().port || 3457;
-  await startServer({ local: isLocal, http: true, port });
+  await startServer({ local: isLocal, http: true, port, stdio: false });
 });
 async function runDefault() {
   const options = program.opts();
@@ -2708,11 +2708,9 @@ async function runDefault() {
     port: options.port
   });
 }
-if (process.argv.length <= 2 || !["init", "reindex", "gc", "stats", "serve"].includes(process.argv[2]) && !process.argv[2].startsWith("-")) {
-  program.parse(process.argv);
-  if (!program.args.length) {
-    void runDefault();
-  }
-} else {
-  program.parse(process.argv);
+var knownSubcommands = ["init", "reindex", "sync", "gc", "stats", "serve", "help"];
+var hasSubcommand = process.argv.slice(2).some((arg) => knownSubcommands.includes(arg));
+program.parse(process.argv);
+if (!hasSubcommand) {
+  void runDefault();
 }

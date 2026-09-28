@@ -17,6 +17,7 @@ export interface StartServerOptions {
   http?: boolean;
   port?: number;
   toolProfile?: 'core' | 'full';
+  stdio?: boolean;
 }
 
 export async function startServer(options: StartServerOptions = {}): Promise<void> {
@@ -119,9 +120,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
   }
 
-  if (!process.argv.includes('--daemon')) {
+  if (options.stdio !== false && !process.argv.includes('--daemon')) {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("[Amneshia] MCP Server running on stdio");
   }
 }
+
