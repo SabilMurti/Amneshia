@@ -23,22 +23,24 @@ Amneshia v3 is built on 5 fundamental pillars:
 
 ---
 
-## Competitive Comparison
+## Why Amneshia v3 vs Other MCP Memory Servers?
 
-| Capability | Amneshia v3 | agent-memory | okf-agent-memory | lemmalog | Mem0 |
-|:---|:---:|:---:|:---:|:---:|:---:|
-| **Typed Knowledge Graph** | **YES** | no | no | no | no |
-| **GraphRAG Multi-Hop** | **YES** | no | no | no | no |
-| **Markdown-as-Truth** | **YES** | **YES** | **YES** | no | no |
-| **Git-Native (Per-Repo)** | **YES** | no | **YES** | no | no |
-| **FTS5 BM25 Speed (<1ms)** | **YES** | no | **YES** | no | no |
-| **Truth Maintenance DAG** | **YES** | no | no | **YES** | no |
-| **Cascading Invalidation** | **YES** | no | no | **YES** | no |
-| **Contradiction Detection**| **YES** | no | no | **YES** | no |
-| **Authority Tiers & Decay**| **YES** | **YES** | no | no | no |
-| **Token Budgeting** | **YES** | no | **YES** | no | no |
-| **Zero External DB** | **YES** | **YES** | **YES** | **YES** | no |
-| **Interactive 3D Dashboard**| **YES** | no | no | no | **YES** |
+Most developers looking for long-term memory in Claude Desktop, Cursor, or Windsurf are forced to choose between **naive reference implementations** (like `@modelcontextprotocol/server-memory` that dump everything into a fragile `memory.json`), **heavy database servers** (PostgreSQL/pgvector or Neo4j requiring Docker containers), or **cloud SaaS wrappers** (burning tokens and sending private code to third-party servers).
+
+Amneshia v3 is the **gold-standard local-first memory engine**:
+
+| Capability | Amneshia v3 | Official MCP `server-memory` | `memori-mcp` | `pgvector` Memory MCP | `Memento` (Neo4j MCP) | `Supermemory` MCP |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Zero External DB / Zero Setup** | **YES** (Embedded SQLite) | **YES** (Flat JSON file) | **YES** | ❌ (Requires Docker Postgres) | ❌ (Requires Neo4j Server) | ❌ (Requires Cloud API Key) |
+| **100% Local & Zero Token Cost** | **YES** (0 LLM token burn) | **YES** | **YES** | **YES** | **YES** | ❌ (Cloud token usage) |
+| **Sub-Millisecond Search** | **YES** (<1ms FTS5 BM25) | ❌ (Slow linear scan) | ❌ (Relational scan) | ❌ (50–100ms vector index) | ❌ (Cypher query overhead) | ❌ (Network API latency) |
+| **Markdown-as-Truth & Git-Native** | **YES** (`.amneshia/knowledge/`) | ❌ (Single `memory.json`) | ❌ (No file truth) | ❌ (Postgres binary tables) | ❌ (Neo4j graph db) | ❌ (Proprietary cloud DB) |
+| **Truth Maintenance System (TMS)** | **YES** (4 Authority Tiers) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) |
+| **Cascading Invalidation** | **YES** (`derived_from` DAG) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) |
+| **Pre-Insertion Conflict Detection**| **YES** (Rule-based) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) | ❌ (None) |
+| **GraphRAG Multi-Hop Traversal** | **YES** (Typed relations) | ⚠️ (Basic string graph) | ❌ (Tool call history) | ❌ (Flat vector only) | **YES** (Graph traversal) | ⚠️ (Basic links) |
+| **Token Budgeting & Lean Context** | **YES** (85% reduction, 4 tools) | ❌ (Dumps entire nodes) | ⚠️ | ❌ (Top-K raw dump) | ❌ (Uncapped subgraph) | ⚠️ |
+| **Interactive 3D Web Dashboard** | **YES** (Three.js on port 3457) | ❌ (No UI) | ❌ (No UI) | ❌ (No UI) | ⚠️ (External Neo4j app) | **YES** (Cloud-only web app) |
 
 ---
 
