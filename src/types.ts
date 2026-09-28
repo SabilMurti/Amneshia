@@ -109,20 +109,3 @@ export interface UpdateObservationInput {
   newContent: string;
   changedBy?: string;
 }
-
-export interface BridgeServer {
-  id: string;
-  name: string;
-  command: string;
-  args: string[];
-  enabled: boolean;
-  createdAt: string;
-}
-
-export interface BridgeToolInfo {
-  serverId: string;
-  serverName: string;
-  name: string;
-  description?: string;
-  inputSchema?: Record<string, unknown>;
-}

@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 import type {
   AddObservationInput,
-  BridgeServer,
   CreateEntityInput,
   Entity,
   ExportTarget,
@@ -25,14 +24,6 @@ interface FtsSearchRow {
   rank: number;
 }
 
-interface BridgeServerRow {
-  id: string;
-  name: string;
-  command: string;
-  args: string;
-  enabled: number;
-  created_at: string;
-}
 
 interface EntityRow {
   id: string;
@@ -315,14 +306,6 @@ export class DatabaseLayer {
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS bridge_servers (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        command TEXT NOT NULL,
-        args TEXT NOT NULL,
-        enabled INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
 
       CREATE TABLE IF NOT EXISTS observations (
         id TEXT PRIMARY KEY,
@@ -845,45 +828,6 @@ export class DatabaseLayer {
 
   close(): void {
     this.db.close();
-  }
-
-  getBridgeServers(): BridgeServer[] {
-    const rows = this.db.prepare('SELECT * FROM bridge_servers').all() as BridgeServerRow[];
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      command: row.command,
-      args: JSON.parse(row.args) as string[],
-      enabled: row.enabled === 1,
-      createdAt: row.created_at
-    }));
-  }
-
-  getBridgeServerById(id: string): BridgeServer | null {
-    const row = this.db.prepare('SELECT * FROM bridge_servers WHERE id = ?').get(id) as BridgeServerRow | undefined;
-    if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      command: row.command,
-      args: JSON.parse(row.args) as string[],
-      enabled: row.enabled === 1,
-      createdAt: row.created_at
-    };
-  }
-
-  addBridgeServer(name: string, command: string, args: string[]): BridgeServer {
-    const id = uuid();
-    const createdAt = nowIso();
-    this.db.prepare('INSERT INTO bridge_servers (id, name, command, args, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)').run(
-      id, name, command, JSON.stringify(args), createdAt
-    );
-    return { id, name, command, args, enabled: true, createdAt };
-  }
-
-  removeBridgeServer(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM bridge_servers WHERE id = ?').run(id);
-    return result.changes > 0;
   }
 }
 

@@ -2,7 +2,6 @@ import type { AIProvider } from './provider.js';
 import { NoOpProvider } from './none.js';
 import { OllamaProvider } from './ollama.js';
 import { OpenAIProvider } from './openai.js';
-import { NineRouterProvider } from './9router.js';
 
 let activeProvider: AIProvider = new NoOpProvider();
 
@@ -10,13 +9,11 @@ export function setAIProvider(providerName: string, modelName?: string): AIProvi
   switch (providerName.toLowerCase()) {
     case '9router':
     case 'ninerouter':
-      activeProvider = new NineRouterProvider(modelName);
+    case 'openai':
+      activeProvider = new OpenAIProvider(modelName);
       break;
     case 'ollama':
       activeProvider = new OllamaProvider();
-      break;
-    case 'openai':
-      activeProvider = new OpenAIProvider();
       break;
     default:
       activeProvider = new NoOpProvider();

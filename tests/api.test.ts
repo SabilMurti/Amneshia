@@ -1,9 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseLayer } from '../src/database.js';
 import { KnowledgeGraph } from '../src/graph.js';
-import { BridgeClientManager } from '../src/bridge/client.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { syncBridgeMemories } from '../src/bridge/sync.js';
 import { consolidateMemories } from '../src/consolidation/index.js';
 import { setAIProvider } from '../src/ai/index.js';
 import fs from 'node:fs';
@@ -14,7 +12,6 @@ import type { Server } from 'node:http';
 describe('Amneshia REST API Integration Tests', () => {
   let db: DatabaseLayer;
   let graph: KnowledgeGraph;
-  let bridgeManager: BridgeClientManager;
   let testDir: string;
   let app: express.Express;
   let server: Server;
@@ -25,7 +22,6 @@ describe('Amneshia REST API Integration Tests', () => {
     fs.mkdirSync(testDir, { recursive: true });
     db = new DatabaseLayer(testDir);
     graph = new KnowledgeGraph(db);
-    bridgeManager = new BridgeClientManager();
 
     // Set up mock AI provider
     setAIProvider('none');
@@ -77,26 +73,6 @@ describe('Amneshia REST API Integration Tests', () => {
       res.json(graph.deleteRelations(ids));
     });
 
-    app.get('/api/bridge/servers', (_req: Request, res: Response) => res.json(db.getBridgeServers()));
-    
-    app.post('/api/bridge/servers', (req: Request, res: Response) => {
-      const body = req.body as { name: string; command: string; args: string[] };
-      res.json(db.addBridgeServer(body.name, body.command, body.args));
-    });
-
-    app.delete('/api/bridge/servers/:id', async (req: Request, res: Response) => {
-      await bridgeManager.disconnectServer(req.params.id);
-      res.json(db.removeBridgeServer(req.params.id));
-    });
-
-    app.post('/api/bridge/sync', async (_req: Request, res: Response) => {
-      try {
-        const stats = await syncBridgeMemories(graph, db, bridgeManager);
-        res.json({ ok: true, stats });
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
     app.post('/api/consolidate', async (req: Request, res: Response, next: NextFunction) => {
       try {
         const body = req.body as { domain?: string } | undefined;
@@ -123,7 +99,6 @@ describe('Amneshia REST API Integration Tests', () => {
   });
 
   afterEach(async () => {
-    await bridgeManager.disconnectAll();
     db.close();
     if (server) {
       await new Promise<void>((resolve) => {
@@ -206,48 +181,13 @@ describe('Amneshia REST API Integration Tests', () => {
     expect(sabilEntity!.observations[0].content).toBe('Sabil is the creator of Amneshia');
   });
 
-  it('should support bridge management, bridge sync, and memory consolidation', async () => {
-    // 1. Add bridge server
-    const addBridgeRes = await fetch(`http://localhost:${serverPort}/api/bridge/servers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'codebase-memory-mcp',
-        command: 'node',
-        args: ['/path/to/codebase-memory-mcp/dist/index.js']
-      })
-    });
-    expect(addBridgeRes.status).toBe(200);
-    const bridgeServer = await addBridgeRes.json() as { id: string; name: string };
-    expect(bridgeServer.name).toBe('codebase-memory-mcp');
+  it('should support memory consolidation', async () => {
+    // Create entity with observations for consolidation
+    graph.createEntities([{ name: 'TestProject', entityType: 'project', domain: 'test' }]);
+    await graph.addObservations([
+      { entityName: 'TestProject', contents: ['Uses React for frontend', 'Uses React for the frontend UI'], source: 'test' }
+    ]);
 
-    // 2. Sync bridge
-    const mockListProjectsResponse = {
-      projects: [
-        {
-          name: 'Amneshia-Core',
-          root_path: '/home/murtix/projects/Amneshia',
-          nodes: 10,
-          edges: 20,
-          git: {
-            branch: 'main',
-            head_sha: '1234567'
-          }
-        }
-      ]
-    };
-    vi.spyOn(bridgeManager, 'callTool').mockResolvedValue(mockListProjectsResponse);
-
-    const syncRes = await fetch(`http://localhost:${serverPort}/api/bridge/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    expect(syncRes.status).toBe(200);
-    const syncData = await syncRes.json() as { ok: boolean; stats: { projectsSynced: string[]; observationsAdded: number } };
-    expect(syncData.ok).toBe(true);
-    expect(syncData.stats.projectsSynced).toEqual(['Amneshia']);
-
-    // 3. Consolidate memories
     const consolidateRes = await fetch(`http://localhost:${serverPort}/api/consolidate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
@@ -257,8 +197,11 @@ describe('Amneshia REST API Integration Tests', () => {
     expect(consolidateData.ok).toBe(true);
   });
 
-  it('should support switching to 9router AI provider', () => {
+  it('should support OpenAI-compatible AI provider (covers 9router)', () => {
     const provider = setAIProvider('9router');
-    expect(provider.name).toBe('9router');
+    expect(provider.name).toBe('openai');
+
+    const provider2 = setAIProvider('openai');
+    expect(provider2.name).toBe('openai');
   });
 });

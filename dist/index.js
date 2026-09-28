@@ -259,14 +259,6 @@ var DatabaseLayer = class {
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS bridge_servers (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        command TEXT NOT NULL,
-        args TEXT NOT NULL,
-        enabled INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT (datetime('now'))
-      );
 
       CREATE TABLE IF NOT EXISTS observations (
         id TEXT PRIMARY KEY,
@@ -744,45 +736,6 @@ var DatabaseLayer = class {
   close() {
     this.db.close();
   }
-  getBridgeServers() {
-    const rows = this.db.prepare("SELECT * FROM bridge_servers").all();
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      command: row.command,
-      args: JSON.parse(row.args),
-      enabled: row.enabled === 1,
-      createdAt: row.created_at
-    }));
-  }
-  getBridgeServerById(id) {
-    const row = this.db.prepare("SELECT * FROM bridge_servers WHERE id = ?").get(id);
-    if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      command: row.command,
-      args: JSON.parse(row.args),
-      enabled: row.enabled === 1,
-      createdAt: row.created_at
-    };
-  }
-  addBridgeServer(name, command, args) {
-    const id = uuid();
-    const createdAt = nowIso();
-    this.db.prepare("INSERT INTO bridge_servers (id, name, command, args, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)").run(
-      id,
-      name,
-      command,
-      JSON.stringify(args),
-      createdAt
-    );
-    return { id, name, command, args, enabled: true, createdAt };
-  }
-  removeBridgeServer(id) {
-    const result = this.db.prepare("DELETE FROM bridge_servers WHERE id = ?").run(id);
-    return result.changes > 0;
-  }
 };
 
 // src/export/markdown.ts
@@ -930,11 +883,16 @@ ${observations.join("\n")}` }]);
 var OpenAIProvider = class {
   name = "openai";
   apiKey = process.env.AMNESHIA_OPENAI_API_KEY;
-  model = process.env.AMNESHIA_OPENAI_MODEL || "gpt-4o-mini";
+  model;
+  baseUrl;
+  constructor(modelName) {
+    this.model = modelName || process.env.AMNESHIA_OPENAI_MODEL || "gpt-4o-mini";
+    this.baseUrl = process.env.AMNESHIA_OPENAI_BASE_URL || "https://api.openai.com/v1";
+  }
   async call(messages) {
     if (!this.apiKey) return "";
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -973,74 +931,17 @@ ${observations.join("\n")}` }]);
   }
 };
 
-// src/ai/9router.ts
-var NineRouterProvider = class {
-  name = "9router";
-  baseUrl = (process.env.AMNESHIA_NINEROUTER_BASE_URL || process.env.NINEROUTER_BASE_URL || "http://localhost:20128/v1").replace(/\/$/, "");
-  apiKey = process.env.AMNESHIA_NINEROUTER_API_KEY || process.env.NINEROUTER_API_KEY || "sk-9router";
-  model;
-  constructor(model) {
-    this.model = model || process.env.AMNESHIA_NINEROUTER_MODEL || process.env.NINEROUTER_MODEL || "9router/ag/gemini-3-flash";
-  }
-  async call(messages) {
-    try {
-      const url = `${this.baseUrl}/chat/completions`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({ model: this.model, messages })
-      });
-      if (!response.ok) {
-        throw new Error(`9router API error: ${response.statusText} (${response.status})`);
-      }
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content || "";
-    } catch (e) {
-      console.warn(`[9router Provider] Request failed: ${e instanceof Error ? e.message : String(e)}`);
-      return "";
-    }
-  }
-  async synthesize(newContent, contextObservations) {
-    const prompt = contextObservations ? `Context:
-${contextObservations.join("\n")}
-
-New Content: ${newContent}
-
-Synthesize into a clear, concise memory statement.` : newContent;
-    const response = await this.call([{ role: "user", content: prompt }]);
-    return response ? { content: response, tags: [] } : { content: newContent, tags: [] };
-  }
-  async summarize(observations) {
-    const response = await this.call([{ role: "user", content: `Summarize the following memory observations concisely:
-${observations.join("\n")}` }]);
-    return response || observations.join("\n");
-  }
-  async deduplicate(observations) {
-    const response = await this.call([{ role: "user", content: `Deduplicate the following lines, keeping unique memory statements:
-${observations.join("\n")}` }]);
-    return response ? response.split("\n").map((s) => s.trim()).filter(Boolean) : Array.from(new Set(observations));
-  }
-  async chat(messages) {
-    return this.call(messages);
-  }
-};
-
 // src/ai/index.ts
 var activeProvider = new NoOpProvider();
 function setAIProvider(providerName, modelName) {
   switch (providerName.toLowerCase()) {
     case "9router":
     case "ninerouter":
-      activeProvider = new NineRouterProvider(modelName);
+    case "openai":
+      activeProvider = new OpenAIProvider(modelName);
       break;
     case "ollama":
       activeProvider = new OllamaProvider();
-      break;
-    case "openai":
-      activeProvider = new OpenAIProvider();
       break;
     default:
       activeProvider = new NoOpProvider();
@@ -1299,83 +1200,8 @@ var KnowledgeGraph = class {
   }
 };
 
-// src/bridge/client.ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-var BridgeClientManager = class {
-  sessions;
-  constructor() {
-    this.sessions = /* @__PURE__ */ new Map();
-  }
-  async connectServer(serverId, command, args) {
-    if (this.sessions.has(serverId)) {
-      return this.sessions.get(serverId).client;
-    }
-    try {
-      const transport = new StdioClientTransport({ command, args });
-      const client = new Client(
-        { name: "amneshia-bridge", version: "1.0.0" },
-        { capabilities: {} }
-      );
-      await client.connect(transport);
-      this.sessions.set(serverId, { client, transport });
-      return client;
-    } catch (error) {
-      console.error(`Failed to connect to bridge server ${serverId}:`, error);
-      throw error;
-    }
-  }
-  async listTools(serverId, command, args, serverName) {
-    try {
-      const client = await this.connectServer(serverId, command, args);
-      const result = await client.listTools();
-      return result.tools.map((tool) => ({
-        serverId,
-        serverName: serverName ?? "unknown",
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema
-      }));
-    } catch (error) {
-      console.error(`Failed to list tools for server ${serverId}:`, error);
-      return [];
-    }
-  }
-  async callTool(serverId, command, args, toolName, toolArguments) {
-    try {
-      const client = await this.connectServer(serverId, command, args);
-      const result = await client.callTool({ name: toolName, arguments: toolArguments });
-      return result.content;
-    } catch (error) {
-      console.error(`Failed to call tool ${toolName} on server ${serverId}, attempting reconnect...`, error);
-      await this.disconnectServer(serverId);
-      try {
-        const reconnectedClient = await this.connectServer(serverId, command, args);
-        const result = await reconnectedClient.callTool({ name: toolName, arguments: toolArguments });
-        return result.content;
-      } catch (retryError) {
-        console.error(`Retry tool execution failed for ${toolName} on server ${serverId}:`, retryError);
-        throw retryError;
-      }
-    }
-  }
-  async disconnectServer(serverId) {
-    const session = this.sessions.get(serverId);
-    if (session) {
-      await session.client.close();
-      session.transport.close();
-      this.sessions.delete(serverId);
-    }
-  }
-  async disconnectAll() {
-    for (const serverId of this.sessions.keys()) {
-      await this.disconnectServer(serverId);
-    }
-  }
-};
-
 // src/tools/index.ts
-import { z as z8 } from "zod";
+import { z as z7 } from "zod";
 
 // src/tools/entities.ts
 import { z } from "zod";
@@ -1873,201 +1699,25 @@ function registerUtilityTools(server, graph) {
   );
 }
 
-// src/tools/bridge.ts
-import { z as z7 } from "zod";
-function registerBridgeTools(server, _graph, db, bridgeManager) {
-  server.tool(
-    "manage_bridge_servers",
-    "Manage bridge servers",
-    {
-      action: z7.enum(["list", "add", "remove"]),
-      id: z7.string().optional(),
-      name: z7.string().optional(),
-      command: z7.string().optional(),
-      args: z7.array(z7.string()).optional()
-    },
-    async ({ action, id, name, command, args }) => {
-      if (action === "list") {
-        const servers = db.getBridgeServers();
-        return { content: [{ type: "text", text: JSON.stringify(servers, null, 2) }] };
-      }
-      if (action === "add") {
-        if (!name || !command) return { content: [{ type: "text", text: "Name and command are required" }] };
-        const server2 = db.addBridgeServer(name, command, args ?? []);
-        return { content: [{ type: "text", text: JSON.stringify(server2, null, 2) }] };
-      }
-      if (action === "remove") {
-        if (!id) return { content: [{ type: "text", text: "ID is required" }] };
-        await bridgeManager.disconnectServer(id);
-        const removed = db.removeBridgeServer(id);
-        return { content: [{ type: "text", text: removed ? "Server removed" : "Server not found" }] };
-      }
-      return { content: [{ type: "text", text: "Invalid action" }] };
-    }
-  );
-  server.tool(
-    "list_bridge_tools",
-    "List bridge tools",
-    {
-      serverId: z7.string().optional().describe("Optional server ID to filter tools")
-    },
-    async ({ serverId }) => {
-      const servers = serverId ? [db.getBridgeServerById(serverId)].filter(Boolean) : db.getBridgeServers();
-      const allTools = [];
-      for (const server2 of servers) {
-        if (!server2) continue;
-        const tools = await bridgeManager.listTools(server2.id, server2.command, server2.args, server2.name);
-        allTools.push(...tools);
-      }
-      return { content: [{ type: "text", text: JSON.stringify(allTools, null, 2) }] };
-    }
-  );
-  server.tool(
-    "call_bridge_tool",
-    "Call bridge tool",
-    {
-      serverId: z7.string(),
-      toolName: z7.string(),
-      arguments: z7.record(z7.unknown()).optional(),
-      storeAsMemory: z7.boolean().optional(),
-      entityName: z7.string().optional()
-    },
-    async ({ serverId, toolName, arguments: toolArguments, storeAsMemory, entityName }) => {
-      const server2 = db.getBridgeServerById(serverId);
-      if (!server2) return { content: [{ type: "text", text: "Server not found" }] };
-      const result = await bridgeManager.callTool(server2.id, server2.command, server2.args, toolName, toolArguments);
-      if (storeAsMemory) {
-        const content = `Result of tool [${toolName}]: ${JSON.stringify(result)}`;
-        await _graph.addObservations([{
-          entityName: entityName || server2.name,
-          contents: [content],
-          importance: "normal"
-        }]);
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    }
-  );
-}
-
 // src/tools/index.ts
-function registerTools(server, graph, db, bridgeManager) {
+function registerTools(server, graph, db) {
   registerEntityTools(server, graph);
   registerRelationTools(server, graph);
   registerObservationTools(server, graph);
   registerSearchTools(server, graph);
   registerLifecycleTools(server, graph, db);
   registerUtilityTools(server, graph);
-  registerBridgeTools(server, graph, db, bridgeManager);
 }
 
 // src/server.ts
 import path3 from "path";
-
-// src/bridge/sync.ts
-function deriveCleanName(projName, rootPath) {
-  const parts = rootPath.split(/[/\\]/);
-  const lastPart = parts[parts.length - 1];
-  if (lastPart) return lastPart;
-  const nameParts = projName.split("-");
-  return nameParts[nameParts.length - 1] || projName;
-}
-function parseListProjectsResponse(raw) {
-  if (Array.isArray(raw)) {
-    const textBlock = raw.find((item) => item && typeof item === "object" && item.type === "text" && typeof item.text === "string");
-    if (textBlock) {
-      try {
-        const parsed = JSON.parse(textBlock.text);
-        if (parsed && typeof parsed === "object") {
-          return parsed;
-        }
-      } catch (e) {
-        console.error("Failed to parse textBlock JSON:", e);
-      }
-    }
-  }
-  if (raw && typeof raw === "object") {
-    if ("projects" in raw) {
-      return raw;
-    }
-  }
-  return {};
-}
-async function syncBridgeMemories(graph, db, bridgeManager) {
-  const servers = db.getBridgeServers();
-  const projectsSynced = [];
-  let observationsAdded = 0;
-  let relationsCreated = 0;
-  graph.createEntities([
-    { name: "Sabil Murti", entityType: "person", domain: "personal", visibility: "public" },
-    { name: "Codebase Memory MCP", entityType: "tool", domain: "tool:codebase-memory-mcp", visibility: "public" }
-  ]);
-  for (const server of servers) {
-    const isCodebaseMemory = server.name === "codebase-memory-mcp" || server.command.includes("codebase-memory-mcp") || server.args.some((arg) => arg.includes("codebase-memory-mcp"));
-    if (isCodebaseMemory && server.enabled) {
-      try {
-        const result = await bridgeManager.callTool(server.id, server.command, server.args, "list_projects");
-        const parsed = parseListProjectsResponse(result);
-        if (parsed.projects && Array.isArray(parsed.projects)) {
-          for (const proj of parsed.projects) {
-            const cleanName = deriveCleanName(proj.name, proj.root_path);
-            graph.createEntities([{
-              name: cleanName,
-              entityType: "project",
-              domain: "project:" + cleanName.toLowerCase(),
-              visibility: "public"
-            }]);
-            const entity = db.getEntityByName(cleanName);
-            if (entity) {
-              const existingObs = db.getObservationsByEntity(entity.id);
-              const idsToDelete = existingObs.filter((obs) => obs.content.startsWith("[Codebase Memory MCP]")).map((obs) => obs.id);
-              if (idsToDelete.length > 0) {
-                graph.deleteObservations(idsToDelete);
-              }
-            }
-            const branchName = proj.git?.branch || "main";
-            const headSha = proj.git?.head_sha?.slice(0, 7) || "latest";
-            const contents = [
-              `[Codebase Memory MCP] Root Path: ${proj.root_path}`,
-              `[Codebase Memory MCP] Graph Stats: ${proj.nodes ?? 0} nodes, ${proj.edges ?? 0} edges`,
-              `[Codebase Memory MCP] Git Branch: ${branchName} (SHA: ${headSha})`,
-              `[Codebase Memory MCP] Dashboard URL: http://localhost:9749`
-            ];
-            await graph.addObservations([{
-              entityName: cleanName,
-              contents,
-              source: "codebase-memory-mcp"
-            }]);
-            observationsAdded += contents.length;
-            const rels = graph.createRelations([
-              { from: "Sabil Murti", to: cleanName, relationType: "works_on" },
-              { from: cleanName, to: "Codebase Memory MCP", relationType: "indexed_in" }
-            ]);
-            relationsCreated += rels.length;
-            projectsSynced.push(cleanName);
-          }
-        }
-      } catch (error) {
-        console.error(`Error syncing codebase-memory-mcp server ${server.name}:`, error);
-      }
-    }
-  }
-  return {
-    projectsSynced,
-    observationsAdded,
-    relationsCreated
-  };
-}
-
-// src/server.ts
 import { fileURLToPath } from "url";
 async function startServer(options = {}) {
   const db = new DatabaseLayer(options.dataDir);
   const graph = new KnowledgeGraph(db);
-  const bridgeManager = new BridgeClientManager();
   const server = new McpServer({ name: "Amneshia", version: "2.0.0" });
-  registerTools(server, graph, db, bridgeManager);
+  registerTools(server, graph, db);
   const cleanup = async () => {
-    await bridgeManager.disconnectAll();
     process.exit(0);
   };
   process.on("SIGINT", cleanup);
@@ -2103,67 +1753,6 @@ async function startServer(options = {}) {
     app.put("/api/observations", (req, res) => res.json(graph.updateObservation(req.body)));
     app.post("/api/relations", (req, res) => res.json(graph.createRelations(req.body.relations)));
     app.delete("/api/relations", (req, res) => res.json(graph.deleteRelations(req.body.ids)));
-    app.get("/api/bridge/servers", (req, res) => res.json(db.getBridgeServers()));
-    app.post("/api/bridge/servers", (req, res) => res.json(db.addBridgeServer(req.body.name, req.body.command, req.body.args)));
-    app.delete("/api/bridge/servers/:id", async (req, res) => {
-      await bridgeManager.disconnectServer(req.params.id);
-      res.json(db.removeBridgeServer(req.params.id));
-    });
-    app.get("/api/bridge/tools", async (req, res) => {
-      try {
-        const serverId = req.query.serverId;
-        let command = req.query.command;
-        let serverName;
-        let args = [];
-        if (req.query.args) {
-          args = Array.isArray(req.query.args) ? req.query.args : [req.query.args];
-        }
-        if (serverId && !command) {
-          const serverObj = db.getBridgeServerById(serverId);
-          if (serverObj) {
-            command = serverObj.command;
-            args = serverObj.args;
-            serverName = serverObj.name;
-          }
-        }
-        if (!command) {
-          res.status(400).json({ error: "Server command not specified and serverId not found" });
-          return;
-        }
-        res.json(await bridgeManager.listTools(serverId || "temp", command, args, serverName));
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
-    app.post("/api/bridge/call", async (req, res) => {
-      try {
-        const { serverId, toolName, arguments: toolArguments, storeAsMemory, entityName } = req.body;
-        const serverObj = db.getBridgeServerById(serverId);
-        if (!serverObj) {
-          res.status(404).json({ error: "Server not found" });
-          return;
-        }
-        const result = await bridgeManager.callTool(serverObj.id, serverObj.command, serverObj.args, toolName, toolArguments);
-        if (storeAsMemory) {
-          const content = `Result of tool [${toolName}]: ${JSON.stringify(result)}`;
-          await graph.addObservations([{
-            entityName: entityName || serverObj.name,
-            contents: [content]
-          }]);
-        }
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
-    app.post("/api/bridge/sync", async (req, res) => {
-      try {
-        const stats = await syncBridgeMemories(graph, db, bridgeManager);
-        res.json({ ok: true, stats });
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
     app.get("/api/exports", (req, res) => res.json(db.getExportTargets()));
     app.post("/api/exports", (req, res) => {
       const autoExportVal = req.body.autoExport !== false ? 1 : 0;

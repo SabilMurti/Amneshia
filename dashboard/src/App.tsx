@@ -9,6 +9,7 @@ import { ExportTargets } from './components/ExportTargets';
 import { SettingsView } from './components/SettingsView';
 import { api } from './api/client';
 import type { MemoryStats } from './types';
+import { CheckCircle2, AlertCircle, Zap, X } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('graph');
@@ -27,7 +28,7 @@ export const App: React.FC = () => {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
-    }, 4000);
+    }, 4500);
   };
 
   const triggerRefresh = () => {
@@ -35,18 +36,18 @@ export const App: React.FC = () => {
   };
 
   const handleSyncBridge = async () => {
-    showToast('Syncing Bridge MCP servers...', 'info');
+    showToast('Syncing downstream Bridge MCP servers...', 'info');
     try {
       const response = await api.syncBridge();
       if (response.ok) {
         const stats = response.stats;
         showToast(
-          `Synced ${stats.projectsSynced.length} projects (${stats.observationsAdded} obs, ${stats.relationsCreated} rels).`,
+          `Synced ${stats.projectsSynced.length} projects (${stats.observationsAdded} facts, ${stats.relationsCreated} links).`,
           'success'
         );
         triggerRefresh();
       } else {
-        showToast('Sync failed: ' + JSON.stringify(response), 'error');
+        showToast('Bridge sync failed: ' + JSON.stringify(response), 'error');
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'error');
@@ -63,7 +64,7 @@ export const App: React.FC = () => {
         const synthesized = res.details?.synthesized || [];
 
         if (superseded.length === 0 && synthesized.length === 0) {
-          showToast('🌙 Sleep Cycle: Memory is already consolidated. No proposals generated.', 'info');
+          showToast('🌙 Sleep Cycle: Memory is already consolidated. No conflicts found.', 'info');
           return;
         }
 
@@ -105,7 +106,6 @@ export const App: React.FC = () => {
       const freshStats = await api.getStats();
       setStats(freshStats);
 
-      // Extract domains from stats activity / entity types
       const graphData = await api.getGraph();
       const uniqueDomains = new Set<string>();
       graphData.entities.forEach((entity) => {
@@ -124,7 +124,7 @@ export const App: React.FC = () => {
   }, [refreshTrigger]);
 
   return (
-    <div className="flex w-screen h-screen overflow-hidden bg-[#09090b]">
+    <div className="flex w-screen h-screen overflow-hidden cyber-bg text-zinc-100 antialiased font-sans select-none">
       {/* Sidebar navigation */}
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -143,7 +143,7 @@ export const App: React.FC = () => {
         />
 
         {/* Dynamic Tab view rendering */}
-        <main className="flex-1 min-h-0 bg-[#09090b] relative">
+        <main className="flex-1 min-h-0 relative overflow-hidden">
           {activeTab === 'graph' && (
             <GraphView
               selectedDomain={selectedDomain}
@@ -185,15 +185,26 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* Toast Notification HUD */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4.5 py-3 rounded bg-zinc-900 border border-[#27272a] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300 font-mono text-xs max-w-sm">
-          <span className={toast.type === 'success' ? 'text-green-400' : toast.type === 'error' ? 'text-red-400' : 'text-[#f59e0b]'}>
-            {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : '⚡'}
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl glass-panel-elevated shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300 font-mono text-xs max-w-md border border-white/10">
+          <span className="flex-shrink-0">
+            {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+            {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
+            {toast.type === 'info' && <Zap className="w-4 h-4 text-amber-400 fill-amber-400/20" />}
           </span>
-          <span className="text-zinc-200">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="ml-2 text-zinc-500 hover:text-zinc-300">×</button>
+          <span className="text-zinc-200 flex-1">{toast.message}</span>
+          <button
+            onClick={() => setToast(null)}
+            className="p-1 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
+
+      {/* Sleep Cycle Consolidation Modal */}
       <ConsolidationReviewModal
         isOpen={isReviewOpen}
         onClose={() => setIsReviewOpen(false)}

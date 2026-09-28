@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileUp, Plus, Trash2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { FileUp, Plus, Trash2, AlertTriangle, CheckCircle2, Folder, X, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import type { ExportTarget } from '../types';
 
@@ -63,23 +63,26 @@ export const ExportTargets: React.FC<ExportTargetsProps> = ({
   };
 
   return (
-    <div className="flex-1 p-6 overflow-hidden bg-[#09090b] flex flex-col h-[calc(100vh-73px)]">
+    <div className="flex-1 p-6 overflow-hidden bg-[#08090c] flex flex-col h-[calc(100vh-73px)] select-none">
       {/* Title block */}
       <div className="flex justify-between items-center mb-6 flex-shrink-0">
         <div>
-          <h2 className="text-xl font-bold font-mono text-white flex items-center gap-2">
-            <FileUp className="w-5 h-5 text-[#f59e0b]" />
+          <h2 className="font-sans text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <FileUp className="w-5 h-5 text-amber-400" />
             <span>Markdown Exporters</span>
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-white/10 text-zinc-300">
+              {targets.length} targets
+            </span>
           </h2>
           <p className="font-mono text-xs text-zinc-500 mt-1">
-            Configure system targets for real-time auto-exporting graph nodes into readable Markdown profiles.
+            Real-time auto-synchronization of SQLite knowledge slices into Obsidian vaults or project Markdown docs.
           </p>
         </div>
         <button
           onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] text-black px-4 py-2 rounded font-mono text-xs font-semibold select-none transition-all active:scale-[0.98]"
+          className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black px-4 py-2 rounded-xl font-mono text-xs font-bold shadow-glow-amber transition-all active:scale-[0.98]"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
           <span>Add Export Target</span>
         </button>
       </div>
@@ -87,60 +90,65 @@ export const ExportTargets: React.FC<ExportTargetsProps> = ({
       {/* Main List */}
       {isLoading && (
         <div className="flex-1 flex items-center justify-center font-mono text-xs text-zinc-500">
-          Syncing exporter registry...
+          Syncing exporter registry…
         </div>
       )}
 
       {error && (
-        <div className="flex-1 flex items-center justify-center p-6 text-center font-mono text-xs text-red-400">
-          <AlertTriangle className="w-5 h-5 text-red-500 mb-2" />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center font-mono text-xs text-red-400">
+          <AlertTriangle className="w-6 h-6 text-red-500 mb-2" />
           <p>{error}</p>
         </div>
       )}
 
       {!isLoading && targets.length === 0 && (
-        <div className="flex-1 flex flex-col items-center justify-center select-none text-center p-6">
-          <FileUp className="w-12 h-12 text-zinc-800 mb-3" />
-          <h3 className="font-mono text-sm font-semibold text-zinc-400 mb-1">No Active Exporters</h3>
-          <p className="font-mono text-xs text-zinc-600 max-w-sm">
-            Auto-export translates the SQLite knowledge graph slices into clean markdown file structures automatically whenever observations update. Register your target workspace path.
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+          <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3">
+            <Folder className="w-7 h-7 text-zinc-500" />
+          </div>
+          <h3 className="font-sans text-sm font-semibold text-zinc-300">No Active Exporters Configured</h3>
+          <p className="font-mono text-xs text-zinc-500 max-w-sm mt-1">
+            Auto-export serializes the SQLite knowledge graph slices into clean markdown file structures automatically whenever memories update.
           </p>
         </div>
       )}
 
       {targets.length > 0 && (
         <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {targets.map((tgt) => (
               <div
                 key={tgt.id}
-                className="p-5 rounded bg-[#121215] border border-[#27272a] hover:border-zinc-500 transition-all flex flex-col justify-between gap-4"
+                className="p-5 rounded-2xl glass-panel border border-white/[0.08] hover:border-amber-500/30 transition-all duration-200 flex flex-col justify-between gap-4 group"
               >
                 <div>
                   <div className="flex justify-between items-start">
-                    <h3 className="font-mono text-sm font-bold text-zinc-200">{tgt.name}</h3>
-                    <div className="flex gap-1.5 select-none">
-                      <span className="text-[9px] font-mono bg-zinc-800 text-zinc-400 border border-[#27272a] px-1.5 py-0.5 rounded uppercase font-semibold">
+                    <h3 className="font-sans text-sm font-bold text-white flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{tgt.name}</span>
+                    </h3>
+                    <div className="flex gap-1.5 select-none font-mono text-[9px]">
+                      <span className="bg-white/5 text-zinc-400 border border-white/10 px-2 py-0.5 rounded-md uppercase font-semibold">
                         {tgt.format}
                       </span>
-                      <span className="text-[9px] font-mono bg-green-950/20 text-green-400 border border-green-900/30 px-1.5 py-0.5 rounded uppercase font-semibold flex items-center gap-1">
+                      <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md uppercase font-semibold flex items-center gap-1">
                         <CheckCircle2 className="w-2.5 h-2.5" />
-                        Auto
+                        Auto-Sync
                       </span>
                     </div>
                   </div>
-                  <pre className="font-mono text-xs text-zinc-400 bg-zinc-950/40 p-2.5 rounded border border-zinc-900 mt-3 overflow-x-auto whitespace-pre-wrap break-all">
+                  <pre className="font-mono text-xs text-zinc-300 bg-black/50 p-3 rounded-xl border border-white/10 mt-3.5 overflow-x-auto whitespace-pre-wrap break-all">
                     {tgt.path}
                   </pre>
                 </div>
-                <div className="flex justify-between items-center pt-3 border-t border-zinc-800/40 select-none">
-                  <span className="text-[10px] font-mono text-zinc-600">ID: {tgt.id}</span>
+                <div className="flex justify-between items-center pt-3 border-t border-white/5 select-none font-mono text-[10px]">
+                  <span className="text-zinc-500">ID: {tgt.id.slice(0, 8)}…</span>
                   <button
                     onClick={() => handleDelete(tgt.id)}
-                    className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500 hover:text-red-400 transition-colors"
+                    className="flex items-center gap-1.5 text-zinc-500 hover:text-rose-400 p-1 rounded-md hover:bg-rose-500/10 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Deregister Target</span>
+                    <span>Deregister</span>
                   </button>
                 </div>
               </div>
@@ -151,61 +159,63 @@ export const ExportTargets: React.FC<ExportTargetsProps> = ({
 
       {/* Modal: Add Target */}
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[1px] p-4">
-          <div className="bg-[#121215] border border-[#27272a] p-6 rounded max-w-md w-full font-mono text-xs shadow-2xl">
-            <div className="flex justify-between items-center border-b border-[#27272a] pb-3 mb-4 select-none">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="glass-panel-elevated p-6 rounded-2xl max-w-md w-full font-mono text-xs shadow-2xl border border-white/10">
+            <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 select-none">
               <h3 className="font-bold text-sm text-white uppercase tracking-wider">Register Export Target</h3>
-              <button onClick={() => setShowAdd(false)} className="text-zinc-500 hover:text-zinc-300">×</button>
+              <button onClick={() => setShowAdd(false)} className="text-zinc-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
             </div>
             <form onSubmit={handleAdd} className="space-y-4">
               <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-bold">Target Name</label>
+                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Target Name</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. My Obsidian Vault"
+                  placeholder="e.g. Project Knowledge Base / Obsidian"
                   value={newTarget.name}
                   onChange={(e) => setNewTarget({ ...newTarget, name: e.target.value })}
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-2 text-zinc-200 focus:outline-none focus:border-[#f59e0b]"
+                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-bold">Absolute File System Path</label>
+                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Absolute File System Path</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. /home/user/notes/AmneshiaExport"
+                  placeholder="e.g. /home/user/vault/Amneshia.md"
                   value={newTarget.path}
                   onChange={(e) => setNewTarget({ ...newTarget, path: e.target.value })}
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-2 text-zinc-200 focus:outline-none focus:border-[#f59e0b]"
+                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1.5 uppercase font-bold">Export Format</label>
+                <label className="block text-zinc-400 mb-1.5 uppercase font-semibold">Export Format</label>
                 <select
                   value={newTarget.format}
                   onChange={(e) => setNewTarget({ ...newTarget, format: e.target.value })}
-                  className="w-full bg-[#09090b] border border-[#27272a] rounded px-3 py-2 text-zinc-200 focus:outline-none focus:border-[#f59e0b]"
+                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2 text-zinc-100 focus:outline-none focus:border-amber-500"
                 >
-                  <option value="markdown">Markdown Documents (.md)</option>
+                  <option value="markdown">Markdown Profiles (.md)</option>
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-[#27272a] select-none">
+              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setShowAdd(false)}
-                  className="px-4 py-2 border border-[#27272a] text-zinc-400 hover:text-zinc-200 rounded"
+                  className="px-4 py-2 border border-white/10 text-zinc-400 hover:text-white rounded-xl"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-[#f59e0b] hover:bg-[#d97706] text-black font-semibold rounded"
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold rounded-xl shadow-glow-amber hover:from-amber-400"
                 >
-                  Register Exporter
+                  Register Target
                 </button>
               </div>
             </form>
@@ -215,3 +225,5 @@ export const ExportTargets: React.FC<ExportTargetsProps> = ({
     </div>
   );
 };
+
+export default ExportTargets;

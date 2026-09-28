@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, X, ChevronRight, Sparkles, Trash2 } from 'lucide-react';
+import { ShieldCheck, X, ChevronRight, Trash2, Moon } from 'lucide-react';
 
 interface SupersededProposal {
   oldId: string;
@@ -36,7 +36,6 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
   const [selectedSynthesized, setSelectedSynthesized] = React.useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  // Initialize all to selected by default
   React.useEffect(() => {
     if (isOpen) {
       const supMap: Record<string, boolean> = {};
@@ -81,31 +80,41 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
   const activeSynCount = synthesized.filter((_, idx) => selectedSynthesized[idx]).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 font-mono text-zinc-300">
-      <div className="bg-[#121215] border border-[#27272a] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 font-mono text-zinc-300 select-none">
+      <div className="glass-panel-elevated rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden border border-white/10">
         {/* Header */}
-        <div className="p-4 border-b border-[#27272a] flex items-center justify-between bg-zinc-950/40">
-          <div className="flex items-center gap-2 text-white">
-            <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
-            <h3 className="text-sm font-bold uppercase tracking-wider">Sleep Cycle Consolidation Proposals</h3>
+        <div className="p-4.5 border-b border-white/10 flex items-center justify-between bg-black/30">
+          <div className="flex items-center gap-2.5 text-white">
+            <Moon className="w-5 h-5 text-indigo-400 fill-indigo-400/20 animate-pulse" />
+            <div>
+              <h3 className="text-sm font-bold tracking-tight font-sans">
+                Sleep Cycle Consolidation Proposals
+              </h3>
+              <p className="text-[10px] text-zinc-500 font-mono">
+                Jaccard similarity & LLM conflict resolution review
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
-          <p className="text-zinc-400">
-            Below are proposed consolidations computed from Jaccard similarities and LLM conflict resolution. Review and approve the memory modifications.
+          <p className="text-zinc-400 font-sans leading-relaxed">
+            Review proposed mutations below. Approved conflict resolutions will deprecate redundant observations, and syntheses will form unified factual nodes.
           </p>
 
           {/* Supersessions List */}
           {superseded.length > 0 && (
             <div className="space-y-3">
-              <h4 className="font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+              <h4 className="font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 text-xs">
                 <Trash2 className="w-3.5 h-3.5" />
-                Conflict Resolutions & Supersessions ({superseded.length})
+                <span>Conflict Resolutions & Supersessions ({superseded.length})</span>
               </h4>
               <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
                 {superseded.map((s) => {
@@ -114,27 +123,29 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
                     <div
                       key={s.oldId}
                       onClick={() => handleToggleSuperseded(s.oldId)}
-                      className={`p-3 rounded border transition-all cursor-pointer flex gap-3 ${
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
                         isChecked
-                          ? 'bg-amber-950/10 border-amber-900/30'
-                          : 'bg-zinc-900/10 border-[#27272a] opacity-50'
+                          ? 'bg-amber-500/10 border-amber-500/30'
+                          : 'bg-black/20 border-white/5 opacity-50'
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         readOnly
-                        className="accent-amber-500 rounded bg-zinc-800 border-[#27272a] w-3.5 h-3.5 cursor-pointer mt-0.5"
+                        className="accent-amber-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
                       />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="text-[10px] text-zinc-500 uppercase">Reason: {s.reason}</div>
+                      <div className="flex-1 space-y-2 min-w-0">
+                        <div className="text-[10px] text-amber-400 font-semibold uppercase">
+                          Reason: {s.reason}
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-center">
-                          <div className="p-2 bg-zinc-950/60 rounded border border-zinc-900 text-zinc-500 line-clamp-2">
+                          <div className="p-2.5 bg-black/50 rounded-lg border border-white/5 text-zinc-400 line-clamp-2 text-[11px] font-sans">
                             {s.oldContent}
                           </div>
                           <div className="flex items-center gap-2">
-                            <ChevronRight className="w-4 h-4 text-amber-500 shrink-0" />
-                            <div className="p-2 bg-zinc-900/80 rounded border border-zinc-800 text-zinc-300 flex-1 line-clamp-2">
+                            <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
+                            <div className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/20 text-zinc-100 flex-1 line-clamp-2 text-[11px] font-sans">
                               {s.newContent}
                             </div>
                           </div>
@@ -150,9 +161,9 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
           {/* Syntheses List */}
           {synthesized.length > 0 && (
             <div className="space-y-3">
-              <h4 className="font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+              <h4 className="font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5 text-xs">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                Observation Syntheses & Summaries ({synthesized.length})
+                <span>Observation Syntheses ({synthesized.length})</span>
               </h4>
               <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
                 {synthesized.map((s, idx) => {
@@ -161,30 +172,32 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
                     <div
                       key={idx}
                       onClick={() => handleToggleSynthesized(idx)}
-                      className={`p-3 rounded border transition-all cursor-pointer flex gap-3 ${
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer flex gap-3 ${
                         isChecked
-                          ? 'bg-blue-950/10 border-blue-900/30'
-                          : 'bg-zinc-900/10 border-[#27272a] opacity-50'
+                          ? 'bg-cyan-500/10 border-cyan-500/30'
+                          : 'bg-black/20 border-white/5 opacity-50'
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         readOnly
-                        className="accent-blue-500 rounded bg-zinc-800 border-[#27272a] w-3.5 h-3.5 cursor-pointer mt-0.5"
+                        className="accent-cyan-500 rounded bg-zinc-800 border-white/10 w-4 h-4 cursor-pointer mt-0.5"
                       />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="text-[10px] text-zinc-500 uppercase">Entity: {s.entityName}</div>
+                      <div className="flex-1 space-y-2 min-w-0">
+                        <div className="text-[10px] text-cyan-400 font-semibold uppercase">
+                          Entity: {s.entityName}
+                        </div>
                         <div className="space-y-1">
-                          <div className="text-[10px] text-zinc-600 font-bold">Consolidating:</div>
-                          <div className="pl-2 border-l border-zinc-800 space-y-1 text-zinc-500">
+                          <div className="text-[10px] text-zinc-500 font-bold uppercase">Synthesizing Statements:</div>
+                          <div className="pl-2 border-l border-white/10 space-y-1 text-zinc-400 text-[11px] font-sans">
                             {s.oldContents.map((c, cIdx) => (
                               <div key={cIdx}>• {c}</div>
                             ))}
                           </div>
                         </div>
-                        <div className="p-2 bg-zinc-900/80 rounded border border-zinc-800 text-zinc-300 font-bold">
-                          Proposed: {s.proposedContent}
+                        <div className="p-2.5 bg-black/60 rounded-lg border border-cyan-500/30 text-white font-medium text-[11px] font-sans">
+                          {s.proposedContent}
                         </div>
                       </div>
                     </div>
@@ -195,31 +208,31 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
           )}
 
           {superseded.length === 0 && synthesized.length === 0 && (
-            <div className="text-center py-6 text-zinc-500">
-              No consolidation proposals generated for this slice of memory.
+            <div className="text-center py-8 text-zinc-500">
+              No consolidation proposals generated for this memory partition.
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-[#27272a] bg-zinc-950/40 flex items-center justify-between">
-          <div className="text-[10px] text-zinc-500">
-            Selected: <span className="text-amber-500 font-bold">{activeSupCount}</span> Supersessions,{' '}
-            <span className="text-blue-400 font-bold">{activeSynCount}</span> Syntheses
+        <div className="p-4 border-t border-white/10 bg-black/30 flex items-center justify-between">
+          <div className="text-[11px] font-mono text-zinc-400">
+            Selected: <span className="text-amber-400 font-bold">{activeSupCount}</span> Supersessions,{' '}
+            <span className="text-cyan-400 font-bold">{activeSynCount}</span> Syntheses
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-1.5 rounded bg-zinc-900 hover:bg-zinc-800 text-xs border border-[#27272a]"
+              className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-zinc-300 border border-white/10 transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleExecute}
               disabled={isSubmitting || (activeSupCount === 0 && activeSynCount === 0)}
-              className="px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-600 text-xs text-zinc-950 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-xs text-black font-bold disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-amber transition-all active:scale-[0.98]"
             >
-              {isSubmitting ? 'Executing Consolidation...' : 'Approve & Execute'}
+              {isSubmitting ? 'Consolidating Memories…' : 'Approve & Consolidate'}
             </button>
           </div>
         </div>
@@ -227,3 +240,5 @@ export const ConsolidationReviewModal: React.FC<ConsolidationReviewModalProps> =
     </div>
   );
 };
+
+export default ConsolidationReviewModal;

@@ -4,12 +4,10 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import express from 'express';
 import { DatabaseLayer } from './database.js';
 import { KnowledgeGraph } from './graph.js';
-import { BridgeClientManager } from './bridge/client.js';
 import { registerTools } from './tools/index.js';
 import { setAIProvider } from './ai/index.js';
 import { consolidateMemories } from './consolidation/index.js';
 import path from 'node:path';
-import { syncBridgeMemories } from './bridge/sync.js';
 import { fileURLToPath } from 'node:url';
 
 export interface StartServerOptions {
@@ -21,12 +19,10 @@ export interface StartServerOptions {
 export async function startServer(options: StartServerOptions = {}): Promise<void> {
   const db = new DatabaseLayer(options.dataDir);
   const graph = new KnowledgeGraph(db);
-  const bridgeManager = new BridgeClientManager();
   const server = new McpServer({ name: 'Amneshia', version: '2.0.0' });
-  registerTools(server, graph, db, bridgeManager);
+  registerTools(server, graph, db);
 
   const cleanup = async () => {
-    await bridgeManager.disconnectAll();
     process.exit(0);
   };
   process.on('SIGINT', cleanup);
@@ -67,67 +63,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     app.put('/api/observations', (req, res) => res.json(graph.updateObservation(req.body)));
     app.post('/api/relations', (req, res) => res.json(graph.createRelations(req.body.relations)));
     app.delete('/api/relations', (req, res) => res.json(graph.deleteRelations(req.body.ids)));
-    app.get('/api/bridge/servers', (req, res) => res.json(db.getBridgeServers()));
-    app.post('/api/bridge/servers', (req, res) => res.json(db.addBridgeServer(req.body.name, req.body.command, req.body.args)));
-    app.delete('/api/bridge/servers/:id', async (req, res) => {
-      await bridgeManager.disconnectServer(req.params.id);
-      res.json(db.removeBridgeServer(req.params.id));
-    });
-    app.get('/api/bridge/tools', async (req, res) => {
-      try {
-        const serverId = req.query.serverId as string;
-        let command = req.query.command as string;
-        let serverName: string | undefined;
-        let args: string[] = [];
-        if (req.query.args) {
-          args = Array.isArray(req.query.args) ? (req.query.args as string[]) : [req.query.args as string];
-        }
-        if (serverId && !command) {
-          const serverObj = db.getBridgeServerById(serverId);
-          if (serverObj) {
-            command = serverObj.command;
-            args = serverObj.args;
-            serverName = serverObj.name;
-          }
-        }
-        if (!command) {
-          res.status(400).json({ error: 'Server command not specified and serverId not found' });
-          return;
-        }
-        res.json(await bridgeManager.listTools(serverId || 'temp', command, args, serverName));
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
-    app.post('/api/bridge/call', async (req, res) => {
-      try {
-        const { serverId, toolName, arguments: toolArguments, storeAsMemory, entityName } = req.body;
-        const serverObj = db.getBridgeServerById(serverId);
-        if (!serverObj) {
-          res.status(404).json({ error: 'Server not found' });
-          return;
-        }
-        const result = await bridgeManager.callTool(serverObj.id, serverObj.command, serverObj.args, toolName, toolArguments);
-        if (storeAsMemory) {
-          const content = `Result of tool [${toolName}]: ${JSON.stringify(result)}`;
-          await graph.addObservations([{
-            entityName: entityName || serverObj.name,
-            contents: [content],
-          }]);
-        }
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
-    app.post('/api/bridge/sync', async (req, res) => {
-      try {
-        const stats = await syncBridgeMemories(graph, db, bridgeManager);
-        res.json({ ok: true, stats });
-      } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-      }
-    });
     app.get('/api/exports', (req, res) => res.json(db.getExportTargets()));
     app.post('/api/exports', (req, res) => {
       const autoExportVal = req.body.autoExport !== false ? 1 : 0;

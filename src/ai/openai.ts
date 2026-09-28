@@ -3,12 +3,18 @@ import type { AIProvider, SynthesisResult } from './provider.js';
 export class OpenAIProvider implements AIProvider {
   name = 'openai';
   private apiKey = process.env.AMNESHIA_OPENAI_API_KEY;
-  private model = process.env.AMNESHIA_OPENAI_MODEL || 'gpt-4o-mini';
+  private model: string;
+  private baseUrl: string;
+
+  constructor(modelName?: string) {
+    this.model = modelName || process.env.AMNESHIA_OPENAI_MODEL || 'gpt-4o-mini';
+    this.baseUrl = process.env.AMNESHIA_OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  }
 
   private async call(messages: { role: string; content: string }[]): Promise<string> {
     if (!this.apiKey) return '';
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
