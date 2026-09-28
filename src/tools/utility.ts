@@ -1,6 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { setAIProvider } from '../ai/index.js';
 import type { KnowledgeGraph } from '../graph.js';
 import { exportToMarkdown } from '../export/markdown.js';
 
@@ -42,22 +41,6 @@ export function registerUtilityTools(server: McpServer, graph: KnowledgeGraph): 
       }
     }
   );
-
-  server.tool(
-    'configure_ai',
-    'Configure the AI provider for memory synthesis.',
-    {
-      provider: z.enum(['none', 'ollama', 'openai', '9router', 'ninerouter']).describe('Active AI provider for memory synthesis'),
-      modelName: z.string().optional().describe('Optional specific model name for the provider'),
-    },
-    async ({ provider, modelName }) => {
-      try {
-        const active = setAIProvider(provider, modelName);
-        return textContent({ ok: true, provider: active.name });
-      } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to configure AI' });
-      }
-    }
-  );
 }
+
 

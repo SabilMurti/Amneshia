@@ -5,8 +5,7 @@ import express from 'express';
 import { DatabaseLayer } from './database.js';
 import { KnowledgeGraph } from './graph.js';
 import { registerTools } from './tools/index.js';
-import { setAIProvider } from './ai/index.js';
-import { consolidateMemories } from './consolidation/index.js';
+import { runMaintenance } from './maintenance/index.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,7 +56,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '2.0.0' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.0.0' });
     });
 
     app.get('/api/graph', (req, res) => res.json(graph.readGraph(req.query.domain as string)));
@@ -87,7 +86,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       db.updateExportTarget(req.params.id, newAutoExport);
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
-    app.post('/api/config/ai', (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post('/api/cleanup', (req, res) => res.json(graph.cleanupExpired()));
     app.post('/api/gc', (_req, res) => res.json({ removed: db.gc() }));
     app.post('/api/reindex', (_req, res) => res.json(dualWrite.reindex()));
@@ -96,40 +94,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       const ok = db.resolveContradiction(req.params.id, req.body.resolution);
       res.json({ ok });
     });
-    app.post('/api/consolidate', async (req, res, next) => {
-      try {
-        const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);
-        res.json({ ok: true, result });
-      } catch (error) {
-        next(error);
-      }
-    });
-
-    app.post('/api/consolidate/approve', async (req, res, next) => {
-      try {
-        const { superseded, synthesized } = req.body;
-
-        if (Array.isArray(superseded)) {
-          for (const sup of superseded) {
-            db.setSupersedes(sup.oldId, sup.newId, 'sleep_cycle');
-          }
-        }
-
-        if (Array.isArray(synthesized)) {
-          for (const syn of synthesized) {
-            const newObs = db.addObservation(syn.entityId, syn.proposedContent, 'synthesis', 'high', 1);
-            if (Array.isArray(syn.oldObservationIds)) {
-              for (const oldId of syn.oldObservationIds) {
-                db.setSupersedes(oldId, newObs.id, 'sleep_cycle');
-              }
-            }
-          }
-        }
-
-        res.json({ ok: true });
-      } catch (error) {
-        next(error);
-      }
+    app.post('/api/maintenance', (req, res) => {
+      const result = runMaintenance(graph, db, req.body?.domain, req.body?.dryRun === true);
+      res.json({ ok: true, result });
     });
 
     const uiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../dist-ui');

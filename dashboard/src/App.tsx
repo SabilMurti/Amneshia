@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar, type TabId } from './components/Sidebar';
 import { Header } from './components/Header';
 import { GraphView } from './components/GraphView';
-import { ConsolidationReviewModal } from './components/ConsolidationReviewModal';
 import { MemoryTable } from './components/MemoryTable';
 import { ContradictionsView } from './components/ContradictionsView';
 import { StorageView } from './components/StorageView';
@@ -21,9 +20,6 @@ export const App: React.FC = () => {
   const [contradictionCount, setContradictionCount] = useState<number>(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  const [isReviewOpen, setIsReviewOpen] = useState(false);
-  const [proposals, setProposals] = useState<{ superseded: any[]; synthesized: any[] }>({ superseded: [], synthesized: [] });
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -50,39 +46,19 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleConsolidate = async () => {
-    showToast('🌙 Running Sleep Cycle pre-flight checks...', 'info');
+  const handleRunMaintenance = async () => {
+    showToast('Running deterministic memory maintenance (purge, decay, dedup)...', 'info');
     try {
-      const response = await api.consolidateMemory(selectedDomain || undefined, true);
+      const response = await api.runMaintenance(selectedDomain || undefined, false);
       if (response.ok) {
-        const res = response.result;
-        const superseded = res.details?.superseded || [];
-        const synthesized = res.details?.synthesized || [];
-
-        if (superseded.length === 0 && synthesized.length === 0) {
-          showToast('🌙 Sleep Cycle: Memory graph is optimal. Zero contradictions detected.', 'info');
-          return;
-        }
-
-        setProposals({ superseded, synthesized });
-        setIsReviewOpen(true);
-      } else {
-        showToast('Failed to generate proposals: ' + JSON.stringify(response), 'error');
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), 'error');
-    }
-  };
-
-  const handleApproveConsolidation = async (approvedSup: any[], approvedSyn: any[]) => {
-    showToast('Executing Sleep Cycle consolidation...', 'info');
-    try {
-      const response = await api.approveConsolidation(approvedSup, approvedSyn);
-      if (response.ok) {
-        showToast('🌙 Sleep Cycle consolidation applied successfully!', 'success');
+        const { purgedCount, decayedCount, supersededCount } = response.result;
+        showToast(
+          `Maintenance Complete: ${purgedCount} expired purged, ${decayedCount} decayed, ${supersededCount} duplicates superseded.`,
+          'success'
+        );
         triggerRefresh();
       } else {
-        showToast('Execution failed: ' + JSON.stringify(response), 'error');
+        showToast('Maintenance failed: ' + JSON.stringify(response), 'error');
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'error');
@@ -99,32 +75,16 @@ export const App: React.FC = () => {
 
   const fetchStatsAndDomains = async () => {
     try {
-      const [freshStats, graphData, contradictions] = await Promise.allSettled([
-        api.getStats(),
-        api.getGraph(),
-        api.getContradictions(),
-      ]);
+      const s = await api.getStats();
+      setStats(s);
+      const graphData = await api.getGraph();
+      const doms = Array.from(new Set(graphData.entities.map((e) => e.domain).filter(Boolean)));
+      setDomains(doms);
 
-      if (freshStats.status === 'fulfilled') {
-        setStats(freshStats.value);
-      }
-
-      if (graphData.status === 'fulfilled') {
-        const uniqueDomains = new Set<string>();
-        graphData.value.entities.forEach((entity) => {
-          if (entity.domain) {
-            uniqueDomains.add(entity.domain);
-          }
-        });
-        setDomains(Array.from(uniqueDomains).sort());
-      }
-
-      if (contradictions.status === 'fulfilled') {
-        const unresolved = contradictions.value.filter(c => !c.resolvedAt);
-        setContradictionCount(unresolved.length);
-      }
+      const conflicts = await api.getContradictions();
+      setContradictionCount(conflicts.filter((c) => !c.resolvedAt).length);
     } catch (err) {
-      console.error('Failed to sync stats/domains from backend:', err);
+      console.error('Failed to fetch dashboard metadata:', err);
     }
   };
 
@@ -133,17 +93,17 @@ export const App: React.FC = () => {
   }, [refreshTrigger]);
 
   return (
-    <div className="flex w-screen h-screen overflow-hidden cyber-bg text-zinc-100 antialiased font-sans select-none">
-      {/* Sidebar navigation */}
+    <div className="flex h-screen w-screen overflow-hidden bg-obsidian-bg text-zinc-100 font-sans antialiased selection:bg-purple-500/30 selection:text-purple-200">
+      {/* Navigation Sidebar */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         contradictionCount={contradictionCount}
       />
 
-      {/* Main Workspace Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header Search / Stats Bar */}
+      {/* Primary Content Workspace */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        {/* Global HUD Header */}
         <Header
           onSearch={handleSearch}
           selectedDomain={selectedDomain}
@@ -152,7 +112,7 @@ export const App: React.FC = () => {
           stats={stats}
           refreshStats={fetchStatsAndDomains}
           onSyncMarkdown={handleSyncMarkdown}
-          onConsolidate={handleConsolidate}
+          onRunMaintenance={handleRunMaintenance}
         />
 
         {/* Dynamic Tab view rendering */}
@@ -193,7 +153,7 @@ export const App: React.FC = () => {
             <SettingsView
               stats={stats}
               refreshStats={fetchStatsAndDomains}
-              onConsolidate={handleConsolidate}
+              onRunMaintenance={handleRunMaintenance}
             />
           )}
         </main>
@@ -216,15 +176,6 @@ export const App: React.FC = () => {
           </button>
         </div>
       )}
-
-      {/* Sleep Cycle Consolidation Modal */}
-      <ConsolidationReviewModal
-        isOpen={isReviewOpen}
-        onClose={() => setIsReviewOpen(false)}
-        superseded={proposals.superseded}
-        synthesized={proposals.synthesized}
-        onApprove={handleApproveConsolidation}
-      />
     </div>
   );
 };

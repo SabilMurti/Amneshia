@@ -61,7 +61,7 @@ storage:
 truth_maintenance:
   auto_cascade: true
   contradiction_detection: true
-consolidation:
+maintenance:
   jaccard_threshold: 0.8
   decay_enabled: true
 `;

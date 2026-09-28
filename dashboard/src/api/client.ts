@@ -140,33 +140,17 @@ export const api = {
     });
   },
 
-  setAIProvider: (provider: 'openai' | 'ollama' | 'none' | string, model?: string): Promise<unknown> => {
-    return fetchJson('/api/config/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, model }),
-    });
-  },
-
   cleanupExpired: (): Promise<{ cleanedCount: number }> => {
     return fetchJson<{ cleanedCount: number }>('/api/cleanup', {
       method: 'POST',
     });
   },
 
-  consolidateMemory: (domain?: string, dryRun = false): Promise<{ ok: boolean; result: { purgedCount: number; decayedCount: number; supersededCount: number; consolidatedCount: number; details?: { superseded: any[]; synthesized: any[] } } }> => {
-    return fetchJson('/api/consolidate', {
+  runMaintenance: (domain?: string, dryRun = false): Promise<{ ok: boolean; result: { purgedCount: number; decayedCount: number; supersededCount: number; details?: { superseded: any[] } } }> => {
+    return fetchJson('/api/maintenance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, dryRun })
+      body: JSON.stringify({ domain, dryRun }),
     });
   },
-
-  approveConsolidation: (superseded: any[], synthesized: any[]): Promise<{ ok: boolean }> => {
-    return fetchJson('/api/consolidate/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ superseded, synthesized })
-    });
-  }
 };

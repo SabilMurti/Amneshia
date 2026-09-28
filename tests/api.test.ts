@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseLayer } from '../src/database.js';
 import { KnowledgeGraph } from '../src/graph.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { consolidateMemories } from '../src/consolidation/index.js';
-import { setAIProvider } from '../src/ai/index.js';
+import { runMaintenance } from '../src/maintenance/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -23,21 +22,18 @@ describe('Amneshia REST API Integration Tests', () => {
     db = new DatabaseLayer(testDir);
     graph = new KnowledgeGraph(db);
 
-    // Set up mock AI provider
-    setAIProvider('none');
-
     // Set up Express application matching src/server.ts structure
     app = express();
     app.use(express.json());
 
     app.get('/health', (_req: Request, res: Response) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '2.0.0' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.0.0' });
     });
 
     app.get('/api/graph', (req: Request, res: Response) => res.json(graph.readGraph(req.query.domain as string | undefined)));
-    app.get('/api/search', (req: Request, res: Response) => res.json(graph.searchMemory(req.query.q as string || '')));
+    app.get('/api/search', (req: Request, res: Response) => res.json(graph.searchMemory((req.query.q as string) || '')));
     app.get('/api/stats', (_req: Request, res: Response) => res.json(graph.getStats()));
-    
+
     app.post('/api/entities', (req: Request, res: Response) => {
       const entitiesInput = req.body.entities as Array<{ name: string; entityType: string; domain?: string; visibility?: string; allowedAgents?: string[] }>;
       res.json(graph.createEntities(entitiesInput));
@@ -59,7 +55,7 @@ describe('Amneshia REST API Integration Tests', () => {
     });
 
     app.put('/api/observations', (req: Request, res: Response) => {
-      const updateInput = req.body as { id: string; content: string; changedBy?: string };
+      const updateInput = req.body as any;
       res.json(graph.updateObservation(updateInput));
     });
 
@@ -73,10 +69,10 @@ describe('Amneshia REST API Integration Tests', () => {
       res.json(graph.deleteRelations(ids));
     });
 
-    app.post('/api/consolidate', async (req: Request, res: Response, next: NextFunction) => {
+    app.post('/api/maintenance', (req: Request, res: Response, next: NextFunction) => {
       try {
         const body = req.body as { domain?: string } | undefined;
-        const result = await consolidateMemories(graph, db, body?.domain);
+        const result = runMaintenance(graph, db, body?.domain);
         res.json({ ok: true, result });
       } catch (error) {
         next(error);
@@ -109,13 +105,14 @@ describe('Amneshia REST API Integration Tests', () => {
       fs.rmSync(testDir, { recursive: true, force: true });
     } catch {}
   });
-  it('should respond to /health endpoint', async () => {
+
+  it('should respond to /health endpoint with version 3.0.0', async () => {
     const res = await fetch(`http://localhost:${serverPort}/health`);
     expect(res.status).toBe(200);
-    const body = await res.json() as { status: string; name: string; version: string };
+    const body = (await res.json()) as { status: string; name: string; version: string };
     expect(body.status).toBe('ok');
     expect(body.name).toBe('amneshia');
-    expect(body.version).toBe('2.0.0');
+    expect(body.version).toBe('3.0.0');
   });
 
   it('should support REST API operations for entities, observations, relations, and stats', async () => {
@@ -126,12 +123,12 @@ describe('Amneshia REST API Integration Tests', () => {
       body: JSON.stringify({
         entities: [
           { name: 'Sabil Murti', entityType: 'person', domain: 'personal' },
-          { name: 'Amneshia', entityType: 'project', domain: 'work' }
-        ]
-      })
+          { name: 'Amneshia', entityType: 'project', domain: 'work' },
+        ],
+      }),
     });
     expect(createEntitiesRes.status).toBe(200);
-    const entities = await createEntitiesRes.json() as Array<{ id: string; name: string }>;
+    const entities = (await createEntitiesRes.json()) as Array<{ id: string; name: string }>;
     expect(entities.length).toBe(2);
 
     // 2. Add observations
@@ -140,12 +137,12 @@ describe('Amneshia REST API Integration Tests', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         observations: [
-          { entityName: 'Sabil Murti', contents: ['Sabil is the creator of Amneshia'], source: 'api' }
-        ]
-      })
+          { entityName: 'Sabil Murti', contents: ['Sabil is the creator of Amneshia'], source: 'api' },
+        ],
+      }),
     });
     expect(createObsRes.status).toBe(200);
-    const obsResults = await createObsRes.json() as Array<{ entityName: string; observationIds: string[] }>;
+    const obsResults = (await createObsRes.json()) as Array<{ entityName: string; observationIds: string[] }>;
     expect(obsResults[0].entityName).toBe('Sabil Murti');
     expect(obsResults[0].observationIds.length).toBe(1);
 
@@ -154,19 +151,17 @@ describe('Amneshia REST API Integration Tests', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        relations: [
-          { from: 'Sabil Murti', to: 'Amneshia', relationType: 'creator_of' }
-        ]
-      })
+        relations: [{ from: 'Sabil Murti', to: 'Amneshia', relationType: 'creator_of' }],
+      }),
     });
     expect(createRelationsRes.status).toBe(200);
-    const relations = await createRelationsRes.json() as Array<{ relation: string }>;
+    const relations = (await createRelationsRes.json()) as Array<{ relation: string }>;
     expect(relations.length).toBe(1);
 
     // 4. Query stats
     const statsRes = await fetch(`http://localhost:${serverPort}/api/stats`);
     expect(statsRes.status).toBe(200);
-    const stats = await statsRes.json() as { totalEntities: number; totalObservations: number; totalRelations: number };
+    const stats = (await statsRes.json()) as { totalEntities: number; totalObservations: number; totalRelations: number };
     expect(stats.totalEntities).toBe(2);
     expect(stats.totalObservations).toBe(1);
     expect(stats.totalRelations).toBe(1);
@@ -174,34 +169,28 @@ describe('Amneshia REST API Integration Tests', () => {
     // 5. Query graph
     const graphRes = await fetch(`http://localhost:${serverPort}/api/graph`);
     expect(graphRes.status).toBe(200);
-    const graphData = await graphRes.json() as { entities: Array<{ name: string; observations: Array<{ content: string }> }> };
+    const graphData = (await graphRes.json()) as {
+      entities: Array<{ name: string; observations: Array<{ content: string }> }>;
+    };
     expect(graphData.entities.length).toBe(2);
-    const sabilEntity = graphData.entities.find(e => e.name === 'Sabil Murti');
+    const sabilEntity = graphData.entities.find((e) => e.name === 'Sabil Murti');
     expect(sabilEntity).toBeDefined();
     expect(sabilEntity!.observations[0].content).toBe('Sabil is the creator of Amneshia');
   });
 
-  it('should support memory consolidation', async () => {
-    // Create entity with observations for consolidation
+  it('should support deterministic memory maintenance', async () => {
     graph.createEntities([{ name: 'TestProject', entityType: 'project', domain: 'test' }]);
     await graph.addObservations([
-      { entityName: 'TestProject', contents: ['Uses React for frontend', 'Uses React for the frontend UI'], source: 'test' }
+      { entityName: 'TestProject', contents: ['Uses React for frontend', 'Uses React for frontend'], source: 'test' },
     ]);
 
-    const consolidateRes = await fetch(`http://localhost:${serverPort}/api/consolidate`, {
+    const maintenanceRes = await fetch(`http://localhost:${serverPort}/api/maintenance`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
-    expect(consolidateRes.status).toBe(200);
-    const consolidateData = await consolidateRes.json() as { ok: boolean; result: { purgedCount: number } };
-    expect(consolidateData.ok).toBe(true);
-  });
-
-  it('should support OpenAI-compatible AI provider (covers 9router)', () => {
-    const provider = setAIProvider('9router');
-    expect(provider.name).toBe('openai');
-
-    const provider2 = setAIProvider('openai');
-    expect(provider2.name).toBe('openai');
+    expect(maintenanceRes.status).toBe(200);
+    const data = (await maintenanceRes.json()) as { ok: boolean; result: { purgedCount: number; supersededCount: number } };
+    expect(data.ok).toBe(true);
+    expect(data.result.supersededCount).toBeGreaterThanOrEqual(1);
   });
 });

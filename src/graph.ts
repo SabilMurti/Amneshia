@@ -1,7 +1,6 @@
 import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
-import { getAIProvider } from './ai/index.js';
 import type { DualWriteSync } from './storage/index.js';
 
 export interface ExportTargetActionInput {
@@ -60,7 +59,6 @@ export class KnowledgeGraph {
 
   async addObservations(inputs: AddObservationInput[]): Promise<Array<{ entityName: string; observationIds: string[] }>> {
     const created: Array<{ entityName: string; observationIds: string[] }> = [];
-    const provider = getAIProvider();
 
     for (const input of inputs) {
       const entity = this.database.getEntityByName(input.entityName);
@@ -68,22 +66,11 @@ export class KnowledgeGraph {
         continue;
       }
       const observationIds: string[] = [];
-      let contextObservations: string[] = [];
-      if (provider.name !== 'none') {
-        contextObservations = this.database.getObservationsByEntity(entity.id).map(o => o.content);
-      }
 
       for (const content of input.contents) {
-        let finalContent = content;
-        if (provider.name !== 'none') {
-          const result = await provider.synthesize(content, contextObservations);
-          finalContent = result.content;
-          contextObservations.push(finalContent);
-        }
-
         const observation = this.database.addObservation(
           entity.id,
-          finalContent,
+          content,
           input.source,
           input.importance ?? 'normal',
           1,

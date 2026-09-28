@@ -1039,144 +1039,6 @@ function exportToMarkdown(graph, forceAll = false) {
   return writes;
 }
 
-// src/ai/none.ts
-var NoOpProvider = class {
-  name = "none";
-  async synthesize(newContent) {
-    return { content: newContent, tags: [] };
-  }
-  async summarize(observations) {
-    return observations.join("\n");
-  }
-  async deduplicate(observations) {
-    return Array.from(new Set(observations));
-  }
-  async chat(messages) {
-    return "";
-  }
-};
-
-// src/ai/ollama.ts
-var OllamaProvider = class {
-  name = "ollama";
-  url = process.env.AMNESHIA_OLLAMA_URL || "http://localhost:11434/api/chat";
-  model = process.env.AMNESHIA_OLLAMA_MODEL || "llama3.2";
-  async call(messages) {
-    try {
-      const response = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: this.model, messages, stream: false })
-      });
-      if (!response.ok) throw new Error(`Ollama API error: ${response.statusText}`);
-      const data = await response.json();
-      return data.message.content;
-    } catch (e) {
-      return "";
-    }
-  }
-  async synthesize(newContent, contextObservations) {
-    const prompt = contextObservations ? `Context: ${contextObservations.join("\n")}
-
-New Content: ${newContent}
-
-Synthesize and provide tags.` : newContent;
-    const response = await this.call([{ role: "user", content: prompt }]);
-    return response ? { content: response, tags: [] } : { content: newContent, tags: [] };
-  }
-  async summarize(observations) {
-    const response = await this.call([{ role: "user", content: `Summarize:
-${observations.join("\n")}` }]);
-    return response || observations.join("\n");
-  }
-  async deduplicate(observations) {
-    const response = await this.call([{ role: "user", content: `Deduplicate:
-${observations.join("\n")}` }]);
-    return response ? response.split("\n") : Array.from(new Set(observations));
-  }
-  async chat(messages) {
-    return this.call(messages);
-  }
-};
-
-// src/ai/openai.ts
-var OpenAIProvider = class {
-  name = "openai";
-  apiKey = process.env.AMNESHIA_OPENAI_API_KEY;
-  model;
-  baseUrl;
-  constructor(modelName) {
-    this.model = modelName || process.env.AMNESHIA_OPENAI_MODEL || "gpt-4o-mini";
-    this.baseUrl = process.env.AMNESHIA_OPENAI_BASE_URL || "https://api.openai.com/v1";
-  }
-  async call(messages) {
-    if (!this.apiKey) return "";
-    try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({ model: this.model, messages })
-      });
-      if (!response.ok) throw new Error(`OpenAI API error: ${response.statusText}`);
-      const data = await response.json();
-      return data.choices[0].message.content;
-    } catch (e) {
-      return "";
-    }
-  }
-  async synthesize(newContent, contextObservations) {
-    const prompt = contextObservations ? `Context: ${contextObservations.join("\n")}
-
-New Content: ${newContent}
-
-Synthesize and provide tags.` : newContent;
-    const response = await this.call([{ role: "user", content: prompt }]);
-    return response ? { content: response, tags: [] } : { content: newContent, tags: [] };
-  }
-  async summarize(observations) {
-    const response = await this.call([{ role: "user", content: `Summarize:
-${observations.join("\n")}` }]);
-    return response || observations.join("\n");
-  }
-  async deduplicate(observations) {
-    const response = await this.call([{ role: "user", content: `Deduplicate:
-${observations.join("\n")}` }]);
-    return response ? response.split("\n") : Array.from(new Set(observations));
-  }
-  async chat(messages) {
-    return this.call(messages);
-  }
-};
-
-// src/ai/index.ts
-var activeProvider = new NoOpProvider();
-function setAIProvider(providerName, modelName) {
-  switch (providerName.toLowerCase()) {
-    case "9router":
-    case "ninerouter":
-    case "openai":
-      activeProvider = new OpenAIProvider(modelName);
-      break;
-    case "ollama":
-      activeProvider = new OllamaProvider();
-      break;
-    default:
-      activeProvider = new NoOpProvider();
-      break;
-  }
-  return activeProvider;
-}
-function getAIProvider() {
-  const envProvider = process.env.AMNESHIA_AI_PROVIDER;
-  if (envProvider && activeProvider.name === "none") {
-    setAIProvider(envProvider);
-  }
-  return activeProvider;
-}
-
 // src/graph.ts
 var KnowledgeGraph = class {
   constructor(database, dualWriteSync) {
@@ -1213,27 +1075,16 @@ var KnowledgeGraph = class {
   }
   async addObservations(inputs) {
     const created = [];
-    const provider = getAIProvider();
     for (const input of inputs) {
       const entity = this.database.getEntityByName(input.entityName);
       if (!entity) {
         continue;
       }
       const observationIds = [];
-      let contextObservations = [];
-      if (provider.name !== "none") {
-        contextObservations = this.database.getObservationsByEntity(entity.id).map((o) => o.content);
-      }
       for (const content of input.contents) {
-        let finalContent = content;
-        if (provider.name !== "none") {
-          const result = await provider.synthesize(content, contextObservations);
-          finalContent = result.content;
-          contextObservations.push(finalContent);
-        }
         const observation = this.database.addObservation(
           entity.id,
-          finalContent,
+          content,
           input.source,
           input.importance ?? "normal",
           1,
@@ -1439,7 +1290,7 @@ import { z as z8 } from "zod";
 // src/tools/core.ts
 import { z } from "zod";
 
-// src/consolidation/contradiction.ts
+// src/maintenance/contradiction.ts
 var NEGATION_PATTERNS = [
   /\bnot\b/i,
   /\bnever\b/i,
@@ -1489,53 +1340,12 @@ function detectRuleBasedContradiction(incomingContent, existingObservations) {
   }
   return { hasContradiction: false };
 }
-async function checkContradiction(incomingContent, entityId, db, useAI = false) {
+async function checkContradiction(incomingContent, entityId, db) {
   const activeObservations = db.getObservationsByEntity(entityId, true);
   if (activeObservations.length === 0) {
     return { hasContradiction: false };
   }
-  const ruleResult = detectRuleBasedContradiction(incomingContent, activeObservations);
-  if (ruleResult.hasContradiction) {
-    return ruleResult;
-  }
-  const provider = getAIProvider();
-  if (useAI && provider.name !== "none") {
-    try {
-      const prompt = `You are a strict contradiction detector for an AI knowledge graph.
-Analyze if the INCOMING FACT directly contradicts any of the EXISTING FACTS for this entity.
-
-EXISTING FACTS:
-${activeObservations.map((o) => `[ID: ${o.id}] ${o.content}`).join("\n")}
-
-INCOMING FACT:
-"${incomingContent}"
-
-If there is a direct factual contradiction, respond with JSON:
-{ "hasContradiction": true, "conflictingId": "ID", "reason": "concise explanation" }
-If there is NO contradiction, respond with:
-{ "hasContradiction": false }`;
-      const response = await provider.chat([
-        { role: "system", content: "You are a precise contradiction detector. Output only valid JSON." },
-        { role: "user", content: prompt }
-      ]);
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.hasContradiction && parsed.conflictingId) {
-          const conflicting = activeObservations.find((o) => o.id === parsed.conflictingId);
-          return {
-            hasContradiction: true,
-            conflictingObservation: conflicting,
-            reason: parsed.reason || "AI detected semantic contradiction",
-            suggestion: `Conflicting fact found: "${conflicting?.content}". Consider superseding it.`
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("AI contradiction detection error:", e);
-    }
-  }
-  return { hasContradiction: false };
+  return detectRuleBasedContradiction(incomingContent, activeObservations);
 }
 
 // src/tools/core.ts
@@ -1574,7 +1384,7 @@ function registerCoreTools(server, graph, db) {
         const observationIds = [];
         const warnings = [];
         for (const fact of facts) {
-          const conflict = await checkContradiction(fact, ent.id, db, false);
+          const conflict = await checkContradiction(fact, ent.id, db);
           if (conflict.hasContradiction) {
             warnings.push({
               fact,
@@ -2044,7 +1854,7 @@ function registerSearchTools(server, graph) {
 // src/tools/lifecycle.ts
 import { z as z6 } from "zod";
 
-// src/consolidation/dedup.ts
+// src/maintenance/dedup.ts
 function getJaccardSimilarity(s1, s2) {
   const words1 = new Set(s1.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean));
   const words2 = new Set(s2.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean));
@@ -2092,7 +1902,7 @@ function findDuplicates(observations, threshold) {
   return duplicates;
 }
 
-// src/consolidation/decay.ts
+// src/maintenance/decay.ts
 var TIER_WEIGHTS = {
   invariant: 1,
   architectural: 0.8,
@@ -2159,27 +1969,23 @@ function applyDecay(db, threshold = 0.1, nowMs = Date.now()) {
   };
 }
 
-// src/consolidation/index.ts
-async function consolidateMemories(graph, db, domain, dryRun = false) {
+// src/maintenance/index.ts
+function runMaintenance(graph, db, domain, dryRun = false) {
   const purgedCount = dryRun ? 0 : graph.cleanupExpired();
   const decayResult = dryRun ? { decayedCount: 0, decayedIds: [] } : applyDecay(db);
   const snapshot = graph.readGraph(domain);
   const entities = snapshot.entities;
   let supersededCount = 0;
   const supersededList = [];
-  const provider = getAIProvider();
   for (const entity of entities) {
     const activeObs = db.getObservationsByEntity(entity.id, true);
     if (activeObs.length < 2) continue;
-    const supersededInEntity = /* @__PURE__ */ new Set();
     const duplicates = findDuplicates(activeObs);
     for (const dup of duplicates) {
-      if (supersededInEntity.has(dup.older.id)) continue;
       if (!dryRun) {
-        db.setSupersedes(dup.older.id, dup.newer.id, "sleep_cycle");
+        db.setSupersedes(dup.older.id, dup.newer.id, "maintenance_dedup");
         db.cascadeInvalidate(dup.older.id);
       }
-      supersededInEntity.add(dup.older.id);
       supersededList.push({
         oldId: dup.older.id,
         newId: dup.newer.id,
@@ -2189,61 +1995,11 @@ async function consolidateMemories(graph, db, domain, dryRun = false) {
       });
       supersededCount++;
     }
-    if (provider.name !== "none") {
-      const remainingObs = activeObs.filter((o) => !supersededInEntity.has(o.id));
-      if (remainingObs.length >= 2) {
-        try {
-          const prompt = `You are an AI analyzing observations for "${entity.name}".
-Identify pairs where a newer observation directly updates, replaces, or conflicts with an older observation.
-DO NOT synthesize or merge facts into a single summary. Only identify which OLDER fact is superseded by which NEWER fact.
-
-Observations:
-${remainingObs.map((o) => `[ID: ${o.id}] (Tier: ${o.authorityTier}) ${o.content}`).join("\n")}
-
-Respond with a JSON array:
-[ { "olderId": "...", "newerId": "...", "reason": "..." } ]
-If no facts supersede each other, return []`;
-          const responseText = await provider.chat([
-            { role: "system", content: "Output only valid JSON." },
-            { role: "user", content: prompt }
-          ]);
-          const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-          if (jsonMatch) {
-            const pairs = JSON.parse(jsonMatch[0]);
-            for (const pair of pairs) {
-              const older = remainingObs.find((o) => o.id === pair.olderId);
-              const newer = remainingObs.find((o) => o.id === pair.newerId);
-              if (older?.authorityTier === "invariant" && newer?.authorityTier !== "invariant") {
-                continue;
-              }
-              if (older && newer && !supersededInEntity.has(older.id)) {
-                if (!dryRun) {
-                  db.setSupersedes(older.id, newer.id, "sleep_cycle");
-                  db.cascadeInvalidate(older.id);
-                }
-                supersededInEntity.add(older.id);
-                supersededList.push({
-                  oldId: older.id,
-                  newId: newer.id,
-                  reason: pair.reason,
-                  oldContent: older.content,
-                  newContent: newer.content
-                });
-                supersededCount++;
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`AI conflict resolution error for ${entity.name}:`, err);
-        }
-      }
-    }
   }
   return {
     purgedCount,
     decayedCount: decayResult.decayedCount,
     supersededCount,
-    consolidatedCount: supersededCount,
     details: {
       purged: [],
       decayed: decayResult.decayedIds,
@@ -2285,16 +2041,16 @@ function registerLifecycleTools(server, graph, db) {
   );
   server.tool(
     "consolidate_memory",
-    "Proactively consolidate entity observations by resolving conflicts, removing duplicate statements, and synthesizing semantic summaries (if AI provider is active).",
+    "Execute deterministic memory maintenance: purges expired ephemeral items, recalculates authority-tier value decay, and deduplicates identical or near-duplicate facts.",
     {
-      domain: z6.string().optional().describe("Filter consolidation to a specific domain (e.g. personal, work)")
+      domain: z6.string().optional().describe("Filter maintenance to a specific domain (e.g. personal, work)")
     },
     async ({ domain }) => {
       try {
-        const result = await consolidateMemories(graph, db, domain);
+        const result = runMaintenance(graph, db, domain);
         return textContent6({ ok: true, result });
       } catch (error) {
-        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to consolidate memories" });
+        return textContent6({ ok: false, error: error instanceof Error ? error.message : "Failed to run memory maintenance" });
       }
     }
   );
@@ -2335,22 +2091,6 @@ function registerUtilityTools(server, graph) {
         return textContent7({ ok: true, result });
       } catch (error) {
         return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
-      }
-    }
-  );
-  server.tool(
-    "configure_ai",
-    "Configure the AI provider for memory synthesis.",
-    {
-      provider: z7.enum(["none", "ollama", "openai", "9router", "ninerouter"]).describe("Active AI provider for memory synthesis"),
-      modelName: z7.string().optional().describe("Optional specific model name for the provider")
-    },
-    async ({ provider, modelName }) => {
-      try {
-        const active = setAIProvider(provider, modelName);
-        return textContent7({ ok: true, provider: active.name });
-      } catch (error) {
-        return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to configure AI" });
       }
     }
   );
@@ -2699,7 +2439,7 @@ storage:
 truth_maintenance:
   auto_cascade: true
   contradiction_detection: true
-consolidation:
+maintenance:
   jaccard_threshold: 0.8
   decay_enabled: true
 `;
@@ -2779,7 +2519,7 @@ async function startServer(options = {}) {
       await transport.handlePostMessage(req, res);
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "2.0.0" });
+      res.json({ status: "ok", name: "amneshia", version: "3.0.0" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
@@ -2808,7 +2548,6 @@ async function startServer(options = {}) {
       db.updateExportTarget(req.params.id, newAutoExport);
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
-    app.post("/api/config/ai", (req, res) => res.json(setAIProvider(req.body.provider, req.body.model)));
     app.post("/api/cleanup", (req, res) => res.json(graph.cleanupExpired()));
     app.post("/api/gc", (_req, res) => res.json({ removed: db.gc() }));
     app.post("/api/reindex", (_req, res) => res.json(dualWrite.reindex()));
@@ -2817,36 +2556,9 @@ async function startServer(options = {}) {
       const ok = db.resolveContradiction(req.params.id, req.body.resolution);
       res.json({ ok });
     });
-    app.post("/api/consolidate", async (req, res, next) => {
-      try {
-        const result = await consolidateMemories(graph, db, req.body?.domain, req.body?.dryRun === true);
-        res.json({ ok: true, result });
-      } catch (error) {
-        next(error);
-      }
-    });
-    app.post("/api/consolidate/approve", async (req, res, next) => {
-      try {
-        const { superseded, synthesized } = req.body;
-        if (Array.isArray(superseded)) {
-          for (const sup of superseded) {
-            db.setSupersedes(sup.oldId, sup.newId, "sleep_cycle");
-          }
-        }
-        if (Array.isArray(synthesized)) {
-          for (const syn of synthesized) {
-            const newObs = db.addObservation(syn.entityId, syn.proposedContent, "synthesis", "high", 1);
-            if (Array.isArray(syn.oldObservationIds)) {
-              for (const oldId of syn.oldObservationIds) {
-                db.setSupersedes(oldId, newObs.id, "sleep_cycle");
-              }
-            }
-          }
-        }
-        res.json({ ok: true });
-      } catch (error) {
-        next(error);
-      }
+    app.post("/api/maintenance", (req, res) => {
+      const result = runMaintenance(graph, db, req.body?.domain, req.body?.dryRun === true);
+      res.json({ ok: true, result });
     });
     const uiPath = path5.join(path5.dirname(fileURLToPath(import.meta.url)), "../dist-ui");
     app.use(express.static(uiPath));

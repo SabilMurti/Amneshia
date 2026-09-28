@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Search,
   Database,
   Network,
-  Moon,
+  Sparkles,
   ShieldAlert,
   FolderSync,
   Layers,
@@ -18,7 +18,7 @@ interface HeaderProps {
   stats: MemoryStats | null;
   refreshStats: () => void;
   onSyncMarkdown: () => void;
-  onConsolidate: () => void;
+  onRunMaintenance: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   stats,
   refreshStats,
   onSyncMarkdown,
-  onConsolidate,
+  onRunMaintenance,
 }) => {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -139,15 +139,15 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Sync MD</span>
         </button>
 
-        {/* Sleep Cycle Button */}
+        {/* Memory Maintenance Button */}
         <button
-          onClick={onConsolidate}
+          onClick={onRunMaintenance}
           type="button"
           className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white px-3.5 py-1.5 rounded-xl font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.97] border border-purple-400/40"
-          title="Trigger Sleep Cycle (Jaccard dedup, value decay, conflict resolution)"
+          title="Run Memory Maintenance (Purge expired, authority decay, deduplicate facts)"
         >
-          <Moon className="w-3.5 h-3.5 text-purple-200 fill-purple-200/30" />
-          <span>Sleep Cycle</span>
+          <Sparkles className="w-3.5 h-3.5 text-purple-200" />
+          <span>Maintain</span>
         </button>
 
         {/* Engine Status Ping */}

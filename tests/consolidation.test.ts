@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseLayer } from '../src/database.js';
 import { KnowledgeGraph } from '../src/graph.js';
 import {
-  consolidateMemories,
+  runMaintenance,
   findDuplicates,
   computeDecayScore,
   evaluateDecay,
   applyDecay,
   detectRuleBasedContradiction,
   cascadeInvalidate,
-} from '../src/consolidation/index.js';
+} from '../src/maintenance/index.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -66,8 +66,8 @@ describe('Memory Consolidation Tests', () => {
     const activeObsBefore = db.getObservationsByEntity(entity.id);
     expect(activeObsBefore.length).toBe(3);
 
-    // 3. Consolidate memories
-    const result = await consolidateMemories(graph, db);
+    // 3. Consolidate memories via deterministic maintenance
+    const result = runMaintenance(graph, db);
 
     expect(result.purgedCount).toBe(1); // 1 ephemeral expired
     expect(result.supersededCount).toBe(1); // 1 duplicate superseded

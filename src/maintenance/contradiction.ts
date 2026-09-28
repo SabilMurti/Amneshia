@@ -1,6 +1,5 @@
 import type { Observation } from '../types.js';
 import type { DatabaseLayer } from '../database/index.js';
-import { getAIProvider } from '../ai/index.js';
 
 export interface ContradictionCheckResult {
   hasContradiction: boolean;
@@ -80,60 +79,13 @@ export function detectRuleBasedContradiction(
 export async function checkContradiction(
   incomingContent: string,
   entityId: string,
-  db: DatabaseLayer,
-  useAI = false
+  db: DatabaseLayer
 ): Promise<ContradictionCheckResult> {
   const activeObservations = db.getObservationsByEntity(entityId, true);
   if (activeObservations.length === 0) {
     return { hasContradiction: false };
   }
 
-  // 1. Fast rule-based detection
-  const ruleResult = detectRuleBasedContradiction(incomingContent, activeObservations);
-  if (ruleResult.hasContradiction) {
-    return ruleResult;
-  }
-
-  // 2. Optional AI check
-  const provider = getAIProvider();
-  if (useAI && provider.name !== 'none') {
-    try {
-      const prompt = `You are a strict contradiction detector for an AI knowledge graph.
-Analyze if the INCOMING FACT directly contradicts any of the EXISTING FACTS for this entity.
-
-EXISTING FACTS:
-${activeObservations.map((o) => `[ID: ${o.id}] ${o.content}`).join('\n')}
-
-INCOMING FACT:
-"${incomingContent}"
-
-If there is a direct factual contradiction, respond with JSON:
-{ "hasContradiction": true, "conflictingId": "ID", "reason": "concise explanation" }
-If there is NO contradiction, respond with:
-{ "hasContradiction": false }`;
-
-      const response = await provider.chat([
-        { role: 'system', content: 'You are a precise contradiction detector. Output only valid JSON.' },
-        { role: 'user', content: prompt },
-      ]);
-
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.hasContradiction && parsed.conflictingId) {
-          const conflicting = activeObservations.find((o) => o.id === parsed.conflictingId);
-          return {
-            hasContradiction: true,
-            conflictingObservation: conflicting,
-            reason: parsed.reason || 'AI detected semantic contradiction',
-            suggestion: `Conflicting fact found: "${conflicting?.content}". Consider superseding it.`,
-          };
-        }
-      }
-    } catch (e) {
-      console.warn('AI contradiction detection error:', e);
-    }
-  }
-
-  return { hasContradiction: false };
+  // Fast, deterministic rule-based detection
+  return detectRuleBasedContradiction(incomingContent, activeObservations);
 }

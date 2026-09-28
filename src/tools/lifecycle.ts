@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database.js';
 import { z } from 'zod';
-import { consolidateMemories } from '../consolidation/index.js';
+import { runMaintenance } from '../maintenance/index.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
@@ -39,16 +39,16 @@ export function registerLifecycleTools(server: McpServer, graph: KnowledgeGraph,
 
   server.tool(
     'consolidate_memory',
-    'Proactively consolidate entity observations by resolving conflicts, removing duplicate statements, and synthesizing semantic summaries (if AI provider is active).',
+    'Execute deterministic memory maintenance: purges expired ephemeral items, recalculates authority-tier value decay, and deduplicates identical or near-duplicate facts.',
     {
-      domain: z.string().optional().describe('Filter consolidation to a specific domain (e.g. personal, work)'),
+      domain: z.string().optional().describe('Filter maintenance to a specific domain (e.g. personal, work)'),
     },
     async ({ domain }) => {
       try {
-        const result = await consolidateMemories(graph, db, domain);
+        const result = runMaintenance(graph, db, domain);
         return textContent({ ok: true, result });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to consolidate memories' });
+        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to run memory maintenance' });
       }
     }
   );

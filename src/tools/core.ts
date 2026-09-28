@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database/index.js';
-import { checkContradiction } from '../consolidation/contradiction.js';
+import { checkContradiction } from '../maintenance/contradiction.js';
 import type { AuthorityTier, ObservationStatus } from '../types.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
@@ -56,7 +56,7 @@ export function registerCoreTools(
 
         for (const fact of facts) {
           // Pre-insertion contradiction check
-          const conflict = await checkContradiction(fact, ent.id, db, false);
+          const conflict = await checkContradiction(fact, ent.id, db);
           if (conflict.hasContradiction) {
             warnings.push({
               fact,
