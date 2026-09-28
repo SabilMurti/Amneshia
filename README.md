@@ -71,7 +71,7 @@ Every observation is tagged with an authority level that dictates its lifecycle 
 
 | Tier | Weight | Inactivity Threshold | Eviction Behavior | Intended Usage |
 |:---|:---:|:---:|:---|:---|
-| `invariant` | `1.0` | **$\infty$** | Never decays | User hard requirements, security rules, immutable architecture constraints. |
+| `invariant` | `1.0` | **∞** | Never decays | User hard requirements, security rules, immutable architecture constraints. |
 | `architectural` | `0.8` | 365 days | Transitions to `decayed` | Framework choices, database schemas, structural API contracts. |
 | `contextual` | `0.5` | 90 days | Transitions to `decayed` | Current working conventions, active versions, environment configs. |
 | `ephemeral` | `0.2` | 7 days / TTL | Hard purged on GC | Scratchpad notes, temporary debug logs, short-lived task state. |
@@ -79,7 +79,7 @@ Every observation is tagged with an authority level that dictates its lifecycle 
 #### Mathematical Decay Scoring
 Decay evaluation runs deterministically during maintenance or GC passes:
 
-$$\text{DecayScore} = w_{\text{tier}} \times \left(1 + \log_{10}(\text{access\_count} + 1)\right) \times \max\left(0, 1 - \frac{\text{days\_inactive}}{\text{max\_days}}\right)$$
+$$\text{DecayScore} = w_{\text{tier}} \times \left(1 + \log_{10}(\text{accessCount} + 1)\right) \times \max\left(0, 1 - \frac{\text{daysInactive}}{\text{maxDays}}\right)$$
 
 Observations where $\text{DecayScore} < 0.1$ are transitioned from `active` to `decayed`, excluding them from active search queries while preserving audit lineage.
 
@@ -87,14 +87,14 @@ Observations where $\text{DecayScore} < 0.1$ are transitioned from `active` to `
 When an agent registers an observation that relies on previous facts, it declares `derived_from: ["<uuid>"]`.
 - If a root observation is marked `superseded` or `invalidated`:
   1. The engine identifies all direct and transitive children via breadth-first search across the dependency graph.
-  2. All descendants transition status: `active` $\to$ `stale`.
+  2. All descendants transition status: `active` → `stale`.
   3. Stale observations are filtered out from default `recall` queries, preventing downstream reasoning errors.
 
 #### Pre-Insertion Contradiction Detection
 Incoming facts pass through a zero-latency semantic filter prior to database insertion:
 1. **Tokenization:** Text is normalized, lowercased, stripped of punctuation, and tokenized into distinct lexemes.
 2. **Polarity Check:** Scanned against explicit negation patterns (`not`, `never`, `no longer`, `instead of`, `deprecated`, `removed`, `disabled`).
-3. **Opposition Evaluation:** If token overlap between an incoming fact and an active fact on the same entity exceeds $\ge 50\%$, and one statement contains negation while the other does not, a contradiction event is recorded in `contradiction_log` and returned as a warning payload to the calling agent.
+3. **Opposition Evaluation:** If token overlap between an incoming fact and an active fact on the same entity exceeds ≥ 50%, and one statement contains negation while the other does not, a contradiction event is recorded in `contradiction_log` and returned as a warning payload to the calling agent.
 
 ---
 
@@ -102,7 +102,7 @@ Incoming facts pass through a zero-latency semantic filter prior to database ins
 
 Amneshia operates a dual-write architecture:
 - **Write Path:** Graph mutations write simultaneously to SQLite and serialize to human-readable Markdown files located in `.amneshia/knowledge/{domain}/{entity}.md`.
-- **Recovery Path:** If the SQLite cache is deleted or desynced, `amneshia reindex` reconstructs the entire FTS5 database directly from the Markdown directory in $< 200\text{ms}$.
+- **Recovery Path:** If the SQLite cache is deleted or desynced, `amneshia reindex` reconstructs the entire FTS5 database directly from the Markdown directory in < 200ms.
 
 #### Sample Entity File (`.amneshia/knowledge/backend/database.md`):
 
