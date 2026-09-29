@@ -1041,12 +1041,22 @@ function exportToMarkdown(graph, forceAll = false) {
 
 // src/graph.ts
 var KnowledgeGraph = class {
+  /**
+   * Initializes the KnowledgeGraph orchestration service.
+   * @param database Database storage layer instance
+   * @param dualWriteSync Optional dual-write markdown synchronization handler
+   */
   constructor(database, dualWriteSync) {
     this.database = database;
     this.dualWriteSync = dualWriteSync;
   }
   database;
   dualWriteSync;
+  /**
+   * Creates one or more named entities in the graph.
+   * @param inputs List of entity definitions to create
+   * @returns Array of created entity records
+   */
   createEntities(inputs) {
     const created = [];
     for (const input of inputs) {
@@ -1059,6 +1069,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return created;
   }
+  /**
+   * Creates directed relationship edges between existing entities.
+   * @param inputs Array of relations to establish
+   * @returns Array of created relation identifiers
+   */
   createRelations(inputs) {
     const created = [];
     for (const input of inputs) {
@@ -1073,6 +1088,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return created;
   }
+  /**
+   * Attaches factual observations to entities.
+   * @param inputs List of observation insertion payloads
+   * @returns Array of mapped entity names and assigned observation UUIDs
+   */
   async addObservations(inputs) {
     const created = [];
     for (const input of inputs) {
@@ -1099,6 +1119,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return created;
   }
+  /**
+   * Deletes entities and their associated observations and relations by name.
+   * @param names List of entity names to delete
+   * @returns Number of entities removed
+   */
   deleteEntities(names) {
     let removed = 0;
     for (const name of names) {
@@ -1111,6 +1136,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return removed;
   }
+  /**
+   * Deletes discrete observations by UUID.
+   * @param ids Observation UUIDs to delete
+   * @returns Count of observations removed
+   */
   deleteObservations(ids) {
     let removed = 0;
     for (const id of ids) {
@@ -1121,6 +1151,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return removed;
   }
+  /**
+   * Deletes relationship edges by UUID.
+   * @param ids Relation UUIDs to delete
+   * @returns Count of relations removed
+   */
   deleteRelations(ids) {
     let removed = 0;
     for (const id of ids) {
@@ -1131,6 +1166,11 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return removed;
   }
+  /**
+   * Updates an observation and executes cascading invalidation if marked stale or invalidated.
+   * @param input Update observation payload
+   * @returns Updated observation record
+   */
   updateObservation(input) {
     const updated = this.database.updateObservation(
       input.observationId,
@@ -1145,6 +1185,13 @@ var KnowledgeGraph = class {
     this.triggerAutoExport();
     return updated;
   }
+  /**
+   * Performs standard FTS5 full-text search against the knowledge graph.
+   * @param query Search query string
+   * @param limit Maximum results to return
+   * @param domain Optional domain filter
+   * @returns Formatted search result
+   */
   searchMemory(query, limit = 20, domain) {
     const filtered = this.database.searchFTS(query, limit * 2).filter((result) => domain ? result.entity.domain === domain : true);
     return {
@@ -1153,6 +1200,13 @@ var KnowledgeGraph = class {
       results: filtered.slice(0, limit)
     };
   }
+  /**
+   * Performs BM25 relevance-ranked FTS5 search excluding invalidated facts.
+   * @param query Search query string
+   * @param limit Maximum results to return
+   * @param domain Optional domain filter
+   * @returns Formatted search result
+   */
   searchRelevantMemory(query, limit = 20, domain) {
     const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => domain ? result.entity.domain === domain : true);
     return {
@@ -1161,6 +1215,14 @@ var KnowledgeGraph = class {
       results: filtered.slice(0, limit)
     };
   }
+  /**
+   * Executes multi-hop GraphRAG traversal to compile rich structured context for an agent.
+   * @param query Search query topic
+   * @param depth Graph hop traversal depth
+   * @param limit Maximum seed entities
+   * @param domain Optional domain filter
+   * @returns Markdown-formatted GraphRAG context document
+   */
   getContext(query, depth = 1, limit = 5, domain) {
     const seeds = this.database.searchFTSRelevant(query, limit).filter((result) => domain ? result.entity.domain === domain : true);
     if (seeds.length === 0) return "No relevant context found.";
@@ -1224,22 +1286,50 @@ var KnowledgeGraph = class {
     }
     return lines.join("\n").trimEnd();
   }
+  /**
+   * Retrieves a full snapshot of the knowledge graph.
+   * @param domain Optional domain filter
+   * @param entityType Optional entity type filter
+   * @returns Graph snapshot with entities, observations, and relations
+   */
   readGraph(domain, entityType) {
     return this.database.readGraph(domain, entityType);
   }
+  /**
+   * Opens specific nodes by entity name, returning their complete subgraphs.
+   * @param names List of entity names to inspect
+   * @returns Graph snapshot for matching nodes
+   */
   openNodes(names) {
     return this.database.openNodes(names);
   }
+  /**
+   * Fetches health metrics and quantitative storage breakdown.
+   * @returns MemoryStats object
+   */
   getStats() {
     return this.database.getStats();
   }
+  /**
+   * Purges expired observations that have passed their TTL.
+   * @returns Count of observations removed
+   */
   cleanupExpired() {
     return this.database.cleanupExpired();
   }
+  /**
+   * Exports memory snapshot to all configured export targets.
+   * @returns Summary of exported targets
+   */
   exportMemory() {
     const targets = this.database.getExportTargets();
     return { exported: targets.length, targets };
   }
+  /**
+   * Manages export targets (list, add, remove, toggle).
+   * @param input Action payload
+   * @returns Target mutation result
+   */
   manageExportTargets(input) {
     if (input.action === "list") {
       return this.database.getExportTargets();
@@ -2432,7 +2522,7 @@ function initAmneshiaProject(targetDir = process.cwd()) {
   fs4.mkdirSync(knowledgeDir, { recursive: true });
   if (!fs4.existsSync(configPath)) {
     const defaultConfig = `# Amneshia v3 Project Configuration
-version: "3.0.1"
+version: "3.0.2"
 storage:
   mode: "local"
   dual_write: true
@@ -2493,7 +2583,7 @@ async function startServer(options = {}) {
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: "Amneshia", version: "3.0.1" });
+  const server = new McpServer({ name: "Amneshia", version: "3.0.2" });
   registerTools(server, graph, db, options.toolProfile);
   const cleanup = async () => {
     process.exit(0);
@@ -2519,7 +2609,7 @@ async function startServer(options = {}) {
       await transport.handlePostMessage(req, res);
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "3.0.1" });
+      res.json({ status: "ok", name: "amneshia", version: "3.0.2" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
@@ -2586,7 +2676,7 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.1").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.2").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").action((dir) => {

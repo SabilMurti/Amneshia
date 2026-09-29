@@ -1,3 +1,9 @@
+/**
+ * @module
+ * MCP tool registration layer for Amneshia.
+ * Registers core agent memory tools (remember, recall, forget, context) and extended admin tools.
+ */
+
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database/index.js';
@@ -10,6 +16,13 @@ import { registerSearchTools } from './search.js';
 import { registerLifecycleTools } from './lifecycle.js';
 import { registerUtilityTools } from './utility.js';
 
+/**
+ * Registers Model Context Protocol (MCP) tools onto an McpServer instance.
+ * @param server Target MCP server instance
+ * @param graph Knowledge graph domain engine
+ * @param db Low-level SQLite database storage layer
+ * @param profile Active tool profile: 'core' (4 tools) or 'full' (all admin/CRUD tools)
+ */
 export function registerTools(
   server: McpServer,
   graph: KnowledgeGraph,
@@ -30,4 +43,5 @@ export function registerTools(
   }
 }
 
+/** Re-exported Zod validation instance for tool schema builders */
 export { z };

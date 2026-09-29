@@ -1,3 +1,9 @@
+/**
+ * @module
+ * Embedded SQLite FTS5 database persistence layer for Amneshia.
+ * Provides ACID transactional storage, BM25 indexing, and DAG dependency queries.
+ */
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -266,6 +272,9 @@ function normalizeArray(value: string[] | undefined): string {
   return JSON.stringify(value ?? []);
 }
 
+/**
+ * SQLite FTS5 database persistence manager for entities, observations, and DAG relations.
+ */
 export class DatabaseLayer {
   private readonly db: Database.Database;
   private readonly dataDir: string;
@@ -965,5 +974,7 @@ export class DatabaseLayer {
   }
 }
 
+/** Alias for DatabaseLayer */
 export const AmneshiaDatabase = DatabaseLayer;
+/** Type alias for DatabaseLayer */
 export type AmneshiaDatabase = DatabaseLayer;

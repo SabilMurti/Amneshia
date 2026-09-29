@@ -54,7 +54,7 @@ export function initAmneshiaProject(targetDir: string = process.cwd()): { dataDi
 
   if (!fs.existsSync(configPath)) {
     const defaultConfig = `# Amneshia v3 Project Configuration
-version: "3.0.1"
+version: "3.0.2"
 storage:
   mode: "local"
   dual_write: true

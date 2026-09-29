@@ -1,34 +1,73 @@
+/**
+ * @module
+ * High-level KnowledgeGraph domain orchestration layer for Amneshia.
+ * Coordinates entity management, observations, relational traversal, and dual-write markdown sync.
+ */
+
 import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
 import type { DualWriteSync } from './storage/index.js';
 
+/**
+ * Input arguments for export target configuration operations.
+ */
 export interface ExportTargetActionInput {
+  /** Target management action to execute */
   action: 'list' | 'add' | 'remove' | 'toggle';
+  /** Target destination name */
   name?: string;
+  /** Filesystem path */
   path?: string;
+  /** Target format */
   format?: string;
+  /** Existing target UUID */
   id?: string;
+  /** Whether auto-export should run on graph mutations */
   autoExport?: boolean;
 }
 
+/**
+ * Search results payload returned by full-text memory queries.
+ */
 export interface SearchMemoryResult {
+  /** The original search query string */
   query: string;
+  /** Maximum match limit requested */
   limit: number;
+  /** Matching entity and observation records */
   results: SearchResult[];
 }
 
+/**
+ * Result payload from executing a manual memory export.
+ */
 export interface ExportMemoryResult {
+  /** Count of exported targets */
   exported: number;
+  /** Target configurations processed */
   targets: ExportTarget[];
 }
 
+/**
+ * Orchestrates knowledge graph operations over the SQLite database layer and dual-write filesystem sync.
+ */
 export class KnowledgeGraph {
+  /**
+   * Initializes the KnowledgeGraph orchestration service.
+   * @param database Database storage layer instance
+   * @param dualWriteSync Optional dual-write markdown synchronization handler
+   */
   constructor(
     private readonly database: DatabaseLayer,
     private readonly dualWriteSync?: DualWriteSync
   ) {}
 
+  /**
+   * Creates one or more named entities in the graph.
+   * @param inputs List of entity definitions to create
+   * @returns Array of created entity records
+   */
   createEntities(inputs: CreateEntityInput[]): Entity[] {
     const created: Entity[] = [];
     for (const input of inputs) {
@@ -42,6 +81,11 @@ export class KnowledgeGraph {
     return created;
   }
 
+  /**
+   * Creates directed relationship edges between existing entities.
+   * @param inputs Array of relations to establish
+   * @returns Array of created relation identifiers
+   */
   createRelations(inputs: CreateRelationInput[]): Array<{ relation: string }> {
     const created: Array<{ relation: string }> = [];
     for (const input of inputs) {
@@ -57,6 +101,11 @@ export class KnowledgeGraph {
     return created;
   }
 
+  /**
+   * Attaches factual observations to entities.
+   * @param inputs List of observation insertion payloads
+   * @returns Array of mapped entity names and assigned observation UUIDs
+   */
   async addObservations(inputs: AddObservationInput[]): Promise<Array<{ entityName: string; observationIds: string[] }>> {
     const created: Array<{ entityName: string; observationIds: string[] }> = [];
 
@@ -86,6 +135,11 @@ export class KnowledgeGraph {
     return created;
   }
 
+  /**
+   * Deletes entities and their associated observations and relations by name.
+   * @param names List of entity names to delete
+   * @returns Number of entities removed
+   */
   deleteEntities(names: string[]): number {
     let removed = 0;
     for (const name of names) {
@@ -99,6 +153,11 @@ export class KnowledgeGraph {
     return removed;
   }
 
+  /**
+   * Deletes discrete observations by UUID.
+   * @param ids Observation UUIDs to delete
+   * @returns Count of observations removed
+   */
   deleteObservations(ids: string[]): number {
     let removed = 0;
     for (const id of ids) {
@@ -110,6 +169,11 @@ export class KnowledgeGraph {
     return removed;
   }
 
+  /**
+   * Deletes relationship edges by UUID.
+   * @param ids Relation UUIDs to delete
+   * @returns Count of relations removed
+   */
   deleteRelations(ids: string[]): number {
     let removed = 0;
     for (const id of ids) {
@@ -121,6 +185,11 @@ export class KnowledgeGraph {
     return removed;
   }
 
+  /**
+   * Updates an observation and executes cascading invalidation if marked stale or invalidated.
+   * @param input Update observation payload
+   * @returns Updated observation record
+   */
   updateObservation(input: UpdateObservationInput): Observation {
     const updated = this.database.updateObservation(
       input.observationId,
@@ -136,6 +205,13 @@ export class KnowledgeGraph {
     return updated;
   }
 
+  /**
+   * Performs standard FTS5 full-text search against the knowledge graph.
+   * @param query Search query string
+   * @param limit Maximum results to return
+   * @param domain Optional domain filter
+   * @returns Formatted search result
+   */
   searchMemory(query: string, limit = 20, domain?: string): SearchMemoryResult {
     const filtered = this.database.searchFTS(query, limit * 2).filter((result) => (domain ? result.entity.domain === domain : true));
     return {
@@ -145,6 +221,13 @@ export class KnowledgeGraph {
     };
   }
 
+  /**
+   * Performs BM25 relevance-ranked FTS5 search excluding invalidated facts.
+   * @param query Search query string
+   * @param limit Maximum results to return
+   * @param domain Optional domain filter
+   * @returns Formatted search result
+   */
   searchRelevantMemory(query: string, limit = 20, domain?: string): SearchMemoryResult {
     const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => (domain ? result.entity.domain === domain : true));
     return {
@@ -153,6 +236,15 @@ export class KnowledgeGraph {
       results: filtered.slice(0, limit),
     };
   }
+
+  /**
+   * Executes multi-hop GraphRAG traversal to compile rich structured context for an agent.
+   * @param query Search query topic
+   * @param depth Graph hop traversal depth
+   * @param limit Maximum seed entities
+   * @param domain Optional domain filter
+   * @returns Markdown-formatted GraphRAG context document
+   */
   getContext(query: string, depth = 1, limit = 5, domain?: string): string {
     const seeds = this.database.searchFTSRelevant(query, limit).filter((result) => (domain ? result.entity.domain === domain : true));
     
@@ -228,28 +320,55 @@ export class KnowledgeGraph {
     return lines.join('\n').trimEnd();
   }
 
-
+  /**
+   * Retrieves a full snapshot of the knowledge graph.
+   * @param domain Optional domain filter
+   * @param entityType Optional entity type filter
+   * @returns Graph snapshot with entities, observations, and relations
+   */
   readGraph(domain?: string, entityType?: string): GraphSnapshot {
     return this.database.readGraph(domain, entityType);
   }
 
+  /**
+   * Opens specific nodes by entity name, returning their complete subgraphs.
+   * @param names List of entity names to inspect
+   * @returns Graph snapshot for matching nodes
+   */
   openNodes(names: string[]): GraphSnapshot {
     return this.database.openNodes(names);
   }
 
+  /**
+   * Fetches health metrics and quantitative storage breakdown.
+   * @returns MemoryStats object
+   */
   getStats(): MemoryStats {
     return this.database.getStats();
   }
 
+  /**
+   * Purges expired observations that have passed their TTL.
+   * @returns Count of observations removed
+   */
   cleanupExpired(): number {
     return this.database.cleanupExpired();
   }
 
+  /**
+   * Exports memory snapshot to all configured export targets.
+   * @returns Summary of exported targets
+   */
   exportMemory(): ExportMemoryResult {
     const targets = this.database.getExportTargets();
     return { exported: targets.length, targets };
   }
 
+  /**
+   * Manages export targets (list, add, remove, toggle).
+   * @param input Action payload
+   * @returns Target mutation result
+   */
   manageExportTargets(input: ExportTargetActionInput): ExportTarget[] | ExportTarget | { removed: boolean } | { id: string; autoExport: boolean } {
     if (input.action === 'list') {
       return this.database.getExportTargets();
