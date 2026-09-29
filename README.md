@@ -27,6 +27,152 @@ It replaces probabilistic, vector-only memory systems with a **deterministic Tru
 
 ---
 
+## ⚡ Quickstart & IDE Setup
+
+### Installation Options
+
+#### Option A: Universal One-Liner (Recommended)
+```bash
+curl -fsSL https://raw.githubusercontent.com/SabilMurti/Amneshia/main/install.sh | bash
+```
+
+#### Option B: GitHub Releases (Direct Tarball — Zero Login Required)
+```bash
+npm install -g https://github.com/SabilMurti/Amneshia/releases/latest/download/amneshia-latest.tgz
+```
+
+#### Option C: JSR (TypeScript / Deno / Bun / Node)
+```bash
+# Add to project via JSR
+npx jsr add @sabilmurti/amneshia
+# or with Bun
+bunx jsr add @sabilmurti/amneshia
+```
+
+#### Option D: GitHub Packages (`npm.pkg.github.com`)
+```bash
+# Add scope registry config to ~/.npmrc (once):
+# @sabilmurti:registry=https://npm.pkg.github.com
+npm install -g @sabilmurti/amneshia
+```
+
+#### Option E: Build from Source
+```bash
+git clone https://github.com/SabilMurti/Amneshia.git
+cd Amneshia
+npm install
+npm run build && npm install -g .
+```
+
+---
+
+### MCP Client Configurations
+
+Add Amneshia to your favorite MCP host configuration:
+
+#### Claude Desktop (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "amneshia": {
+      "command": "amneshia",
+      "args": ["--tool-profile", "core"]
+    }
+  }
+}
+```
+
+#### Cursor (`.cursor/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "amneshia": {
+      "command": "amneshia",
+      "args": ["--tool-profile", "core", "-l"]
+    }
+  }
+}
+```
+*(Passing `-l` or `--local` scopes memory to `.amneshia/` within the active working directory).*
+
+#### Google Antigravity IDE (`mcp_config.json`)
+```json
+{
+  "mcpServers": {
+    "amneshia": {
+      "command": "amneshia",
+      "args": ["--tool-profile", "core"]
+    }
+  }
+}
+```
+
+#### Windsurf (`mcp_config.json`)
+```json
+{
+  "mcpServers": {
+    "amneshia": {
+      "command": "amneshia",
+      "args": ["--tool-profile", "core", "-l"]
+    }
+  }
+}
+```
+
+#### VS Code (Roo Code / Cline / Continue)
+```json
+{
+  "mcpServers": {
+    "amneshia": {
+      "command": "amneshia",
+      "args": ["--tool-profile", "core"]
+    }
+  }
+}
+```
+
+---
+
+### 30-Second Verification
+
+```bash
+# 1. Initialize local repository knowledge graph
+amneshia init
+
+# 2. View knowledge graph statistics
+amneshia stats
+
+# 3. Launch interactive 3D Web Dashboard (runs on http://localhost:3457)
+amneshia serve
+```
+
+---
+
+## 📑 Table of Contents
+
+- [The Problem with Existing Agent Memory](#the-problem-with-existing-agent-memory)
+  - [1. The "LLM-in-LLM" Antipattern](#1-the-llm-in-llm-antipattern)
+  - [2. State Invalidation Failure in Vector Databases](#2-state-invalidation-failure-in-vector-databases)
+  - [3. Opaque Storage Lock-in](#3-opaque-storage-lock-in)
+- [Architectural Comparison: MCP Memory Ecosystem](#architectural-comparison-mcp-memory-ecosystem)
+- [Core Systems Deep Dive](#core-systems-deep-dive)
+  - [1. Truth Maintenance System (TMS)](#1-truth-maintenance-system-tms)
+    - [Authority Tiers](#authority-tiers)
+    - [Mathematical Decay Scoring](#mathematical-decay-scoring)
+    - [Cascading Invalidation DAG](#cascading-invalidation-dag)
+    - [Pre-Insertion Contradiction Detection](#pre-insertion-contradiction-detection)
+  - [2. Dual-Write Storage: Markdown-as-Truth](#2-dual-write-storage-markdown-as-truth)
+  - [3. Tool Surface & JSON-RPC Schemas](#3-tool-surface--json-rpc-schemas)
+- [3D Web Dashboard (Port 3457)](#3d-web-dashboard-port-3457)
+- [Agent System Rules & Prompt Presets](#agent-system-rules--prompt-presets)
+- [CLI Reference](#cli-reference)
+- [Verified Test Suite](#verified-test-suite)
+- [Design Non-Goals & Architectural Boundaries](#design-non-goals--architectural-boundaries)
+- [Contributing & Community](#contributing--community)
+- [License](#license)
+
+---
+
 ## The Problem with Existing Agent Memory
 
 Modern agent memory implementations fall into three flawed paradigms:
@@ -221,86 +367,6 @@ amneshia serve --port 3457
 
 ---
 
-## Quickstart & IDE Setup
-
-### Installation
-
-#### Option A: Universal One-Liner (Recommended)
-```bash
-curl -fsSL https://raw.githubusercontent.com/SabilMurti/Amneshia/main/install.sh | bash
-```
-
-#### Option B: GitHub Releases (Direct Tarball — Zero Login Required)
-```bash
-npm install -g https://github.com/SabilMurti/Amneshia/releases/latest/download/amneshia-latest.tgz
-```
-
-#### Option C: JSR (TypeScript / Deno / Bun / Node)
-```bash
-# Add to project via JSR
-npx jsr add @sabilmurti/amneshia
-# or with Bun
-bunx jsr add @sabilmurti/amneshia
-```
-
-#### Option D: GitHub Packages (`npm.pkg.github.com`)
-```bash
-# Add scope registry config to ~/.npmrc (once):
-# @sabilmurti:registry=https://npm.pkg.github.com
-npm install -g @sabilmurti/amneshia
-```
-
-#### Option E: Build from Source
-```bash
-git clone https://github.com/SabilMurti/Amneshia.git
-cd Amneshia
-npm install
-npm run build && npm install -g .
-```
-
-### Client Configuration
-
-Add Amneshia to your MCP host configuration:
-
-#### Claude Desktop (`claude_desktop_config.json`)
-```json
-{
-  "mcpServers": {
-    "amneshia": {
-      "command": "amneshia",
-      "args": ["--tool-profile", "core"]
-    }
-  }
-}
-```
-
-#### Cursor (`.cursor/mcp.json`)
-```json
-{
-  "mcpServers": {
-    "amneshia": {
-      "command": "amneshia",
-      "args": ["--tool-profile", "core", "-l"]
-    }
-  }
-}
-```
-*(Passing `-l` or `--local` scopes memory to `.amneshia/` within the active working directory).*
-
-#### Antigravity / Windsurf (`mcp_config.json`)
-```json
-{
-  "mcpServers": {
-    "amneshia": {
-      "command": "amneshia",
-      "args": ["--tool-profile", "core"]
-    }
-  }
-}
-```
-
----
-
 ## Agent System Rules & Prompt Presets
 
 To ensure your coding agents (Cursor, Claude Code, Windsurf, Antigravity) actively read, persist, and maintain project memory throughout their lifecycle without human prompting, add this preset rule block to your project configuration (e.g. `.cursor/rules/amneshia.mdc`, `.cursorrules`, `CLAUDE.md`, `.windsurfrules`, or `AGENTS.md`):
@@ -329,7 +395,7 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
   4. **Verification & Test Outcomes:** Exact test suites run, number of passing assertions, and edge cases handled.
   5. **Architectural Guardrails:** Traps, caveats, and conventions that future agents must follow to avoid regressions.
 - **Example Call:**
-  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default. Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand, preventing terminal background job suspensions. Verified with curl /api/stats (200 OK) and 27/27 vitest assertions passing.", category: "architecture", entity_name: "amneshia", importance: 9, tags: ["networking", "dashboard", "cli"])`
+  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default. Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand, preventing terminal background job suspensions. Verified with curl /api/stats (200 OK) and 30/30 vitest assertions passing.", category: "architecture", entity_name: "amneshia", importance: 9, tags: ["networking", "dashboard", "cli"])`
 
 ## 4. Soft Invalidation Over Deletion
 - **Never Leave Stale Memory:** If a prior decision, dependency, or file path is deprecated or replaced, call `forget(observation_id: "<id>", reason: "<why it is deprecated>")`.
@@ -376,10 +442,11 @@ $ npm test
  ✓ tests/consolidation.test.ts (5 tests)
  ✓ tests/tools.test.ts (4 tests)
  ✓ tests/api.test.ts (3 tests)
+ ✓ tests/cli.test.ts (3 tests)
 
- Test Files  6 passed (6)
-      Tests  27 passed (27)
-   Duration  1.61s
+ Test Files  7 passed (7)
+      Tests  30 passed (30)
+   Duration  2.65s
 ```
 
 ---
