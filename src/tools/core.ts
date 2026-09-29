@@ -21,7 +21,7 @@ export function registerCoreTools(
   // 1. remember: High-level store with auto-upsert and pre-insertion contradiction check
   server.tool(
     'remember',
-    'Store knowledge facts for an entity. Automatically creates the entity if missing, detects contradictions with existing facts, sets authority tiers, and records logical dependencies.',
+    'Store one or more factual observations under an entity in the knowledge graph. Automatically creates the entity if missing, evaluates pre-insertion contradiction detection against existing facts, assigns authority tiers, and records logical dependencies.\n\nWHEN TO USE:\n- Use "remember" to record new knowledge, user preferences, architectural decisions, or verified facts.\n- DO NOT use to invalidate or delete outdated facts — use "forget" instead.\n- DO NOT use to query memory — use "recall" or "context" instead.\n\nCONTRADICTION & RETURN BEHAVIOR:\n- Evaluates semantic opposition. If a contradiction is detected, a warning is returned and recorded in the audit log while persisting the fact.\n- Returns JSON containing { ok: true, entity, domain, tier, observationIds, contradictionWarnings }.',
     {
       entity: z.string().min(1).describe('Entity name (e.g. "React Architecture", "Sabil Murti")'),
       facts: z.array(z.string().min(1)).min(1).describe('List of facts/observations to remember'),
@@ -111,7 +111,7 @@ export function registerCoreTools(
   // 2. recall: Smart search with token budget and progressive disclosure
   server.tool(
     'recall',
-    'Smart memory recall. Searches facts using FTS5 BM25, tracks access for decay scoring, optionally traverses graph neighbors, and enforces a strict token budget.',
+    'Search memory observations and facts matching keywords or concepts using SQLite FTS5 BM25. Enforces a strict token budget to prevent context window overflow.\n\nWHEN TO USE:\n- Use "recall" for focused keyword search, retrieving specific past facts, or when under a strict token budget.\n- DO NOT use for exploring structural, multi-hop entity relationships — use "context" instead.\n\nRETURNS:\n- JSON object containing matched entities, facts with authority tiers and statuses, estimated tokens used, and truncation flag.',
     {
       query: z.string().min(1).describe('Query text to search across facts and entities'),
       token_budget: z.number().int().positive().optional().describe('Maximum tokens to return (default: 2000)'),
@@ -206,7 +206,7 @@ export function registerCoreTools(
   // 3. forget: Targeted removal with soft/hard delete and cascading invalidation
   server.tool(
     'forget',
-    'Forget an entity or specific observation. Supports soft invalidation (status: "invalidated"), hard permanent delete, and cascading invalidation of derived downstream facts.',
+    'Invalidate or permanently remove an entity or a specific observation UUID. Supports soft invalidation, hard permanent deletion, and automatic cascading invalidation of dependent facts.\n\nWHEN TO USE:\n- Use "forget" when a fact is superseded, contradicted, or deprecated.\n- Prefers soft invalidation (hard=false) to preserve audit trails. Use hard=true only when permanently expunging sensitive data.\n- DO NOT use to update a fact with new info — use "remember" with updated content.\n\nPERMISSIONS & FAILURE BEHAVIOR:\n- Operates locally on SQLite storage. Returns an error if the target entity name or UUID is not found in the database.\n- Returns JSON containing { ok: true, type, targetId/entity, mode, cascadedStaleCount }.',
     {
       target: z.string().min(1).describe('Entity name OR observation UUID to forget'),
       hard: z.boolean().optional().describe('true = permanent delete from database; false = mark invalidated (default)'),
@@ -286,7 +286,7 @@ export function registerCoreTools(
   // 4. context: GraphRAG multi-hop relational retrieval
   server.tool(
     'context',
-    'Multi-hop GraphRAG context retrieval. Finds seed entities matching query via FTS5 BM25 and traverses outward N hops, returning compressed relational markdown.',
+    'Traverse the knowledge graph starting from query seed entities outward up to N hops using GraphRAG relational discovery.\n\nWHEN TO USE:\n- Use "context" when you need holistic, multi-hop relational knowledge around an entity (e.g. architecture, connections, dependencies).\n- DO NOT use for simple keyword search or strict token-budget lookups — use "recall" instead.\n\nRETURNS:\n- Formatted relational Markdown document detailing seed entities, their attributes, active observations, and outward relation links.',
     {
       query: z.string().min(1).describe('Search query for starting seeds'),
       depth: z.number().int().min(0).max(4).optional().describe('Traversal depth (default: 1)'),
