@@ -13,6 +13,12 @@ Embedded SQLite FTS5 • Markdown-as-Truth • Cascading Invalidation • Model 
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/dashboard-3d-universe.png" alt="Amneshia 3D Neural Universe Knowledge Graph" width="100%" />
+</p>
+
+---
+
 ## Technical Summary
 
 Amneshia is a local-first memory engine for AI coding agents (Claude Desktop, Cursor, Antigravity, Windsurf) implementing the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). 
@@ -353,13 +359,24 @@ MCP Toolset (Core Profile)
 
 Amneshia ships with a zero-dependency web dashboard built with React 18, Vite, and Three.js ForceGraph, pre-compiled into `dist-ui/`:
 
-- **Neural Universe (3D/2D):** Force-directed spatial graph layout of all entities and typed edges, color-coded by architectural domain.
-- **Memory Inspector:** Table view filterable by Authority Tier (`invariant`, `architectural`, `contextual`, `ephemeral`) and status (`active`, `stale`, `decayed`, `superseded`).
-- **Contradiction HUD:** Direct UI to inspect detected factual contradictions and resolve them (`override`, `kept_both`, `rejected`).
-- **Storage Diagnostics:** Database statistics, table sizes, and one-click triggers for `reindex`, `maintenance`, and `gc`.
+### 🌌 3D Neural Universe View
+Force-directed spatial graph layout of all entities and typed edges, color-coded by architectural domain with real-time neural physics controls (repulsion force, synapse distance, and domain filtering).
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-3d-universe.png" alt="Amneshia 3D Neural Universe Knowledge Graph" width="100%" />
+</p>
+
+### 🔍 Memory Inspector & Truth Maintenance View
+Granular observation inspector filterable by Authority Tier (`invariant`, `architectural`, `contextual`, `ephemeral`) and DAG status (`active`, `stale`, `invalidated`, `superseded`). Supports observation auditing, access counter inspection, conflict resolution, and one-click Markdown sync.
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-memory-inspector.png" alt="Amneshia Memory Inspector & Truth Maintenance" width="100%" />
+</p>
+
+### Launching the Dashboard
 
 ```bash
-# Launch dashboard
+# Launch server with dashboard on port 3457
 amneshia serve --port 3457
 
 # Open in browser: http://localhost:3457
