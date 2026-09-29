@@ -1,0 +1,140 @@
+name: Amneshia Multi-Channel Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v3.0.0)'
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-build:
+    name: Test & Build Release Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js (v22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Test Suite
+        run: npm test
+
+      - name: Build Engine (TSUP)
+        run: npm run build
+
+      - name: Build Dashboard (Vite)
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+
+      - name: Package Release Tarball
+        run: |
+          # Package npm tarball
+          TARBALL_NAME=$(npm pack)
+          echo "PACKED_TARBALL=${TARBALL_NAME}" >> $GITHUB_ENV
+          cp "${TARBALL_NAME}" amneshia-latest.tgz
+          sha256sum "${TARBALL_NAME}" amneshia-latest.tgz > SHA256SUMS
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: |
+            dist/
+            dist-ui/
+            *.tgz
+            SHA256SUMS
+          retention-days: 1
+
+  publish-github-packages:
+    name: Publish to GitHub Packages
+    needs: validate-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+
+      - name: Setup Node.js for GitHub Packages
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@sabilmurti'
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-jsr:
+    name: Publish to JSR (jsr.io)
+    needs: validate-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for JSR OIDC authentication
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+
+      - name: Publish to JSR
+        run: npx -y jsr publish --allow-slow-types
+
+  publish-github-release:
+    name: Publish GitHub Release & Assets
+    needs: validate-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          files: |
+            *.tgz
+            SHA256SUMS
+            install.sh
+          generate_release_notes: true
+          draft: false
+          prerelease: false

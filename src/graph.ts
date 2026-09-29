@@ -1,4 +1,4 @@
-import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames } from './types.js';
+import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
 import type { DualWriteSync } from './storage/index.js';
@@ -121,7 +121,7 @@ export class KnowledgeGraph {
     return removed;
   }
 
-  updateObservation(input: UpdateObservationInput) {
+  updateObservation(input: UpdateObservationInput): Observation {
     const updated = this.database.updateObservation(
       input.observationId,
       input.newContent,

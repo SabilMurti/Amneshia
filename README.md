@@ -4,8 +4,10 @@
 Embedded SQLite FTS5 • Markdown-as-Truth • Cascading Invalidation • Model Context Protocol (MCP)
 
 [![Release](https://img.shields.io/badge/version-v3.0.0-6d28d9.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/releases)
+[![JSR](https://jsr.io/badges/@sabilmurti/amneshia)](https://jsr.io/@sabilmurti/amneshia)
+[![GitHub Packages](https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github)](https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/vitest-27%20passed%20(100%25)-059669.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/actions)
+[![Tests](https://img.shields.io/badge/vitest-30%20passed%20(100%25)-059669.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/actions)
 [![MCP](https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square)](https://modelcontextprotocol.io)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square)](tsconfig.json)
 
@@ -223,15 +225,36 @@ amneshia serve --port 3457
 
 ### Installation
 
+#### Option A: Universal One-Liner (Recommended)
 ```bash
-# Global install directly from GitHub:
-npm install -g github:SabilMurti/Amneshia
+curl -fsSL https://raw.githubusercontent.com/SabilMurti/Amneshia/main/install.sh | bash
+```
 
-# Or clone and build from source:
+#### Option B: GitHub Releases (Direct Tarball — Zero Login Required)
+```bash
+npm install -g https://github.com/SabilMurti/Amneshia/releases/latest/download/amneshia-latest.tgz
+```
+
+#### Option C: JSR (TypeScript / Deno / Bun / Node)
+```bash
+# Add to project via JSR
+npx jsr add @sabilmurti/amneshia
+# or with Bun
+bunx jsr add @sabilmurti/amneshia
+```
+
+#### Option D: GitHub Packages (`npm.pkg.github.com`)
+```bash
+# Add scope registry config to ~/.npmrc (once):
+# @sabilmurti:registry=https://npm.pkg.github.com
+npm install -g @sabilmurti/amneshia
+```
+
+#### Option E: Build from Source
+```bash
 git clone https://github.com/SabilMurti/Amneshia.git
 cd Amneshia
 npm install
-cd dashboard && npm install && npm run build && cd ..
 npm run build && npm install -g .
 ```
 
