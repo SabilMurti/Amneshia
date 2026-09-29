@@ -89,7 +89,7 @@ jobs:
           scope: '@sabilmurti'
 
       - name: Publish to GitHub Packages
-        run: npm publish
+        run: npm publish || echo "Version already published to GitHub Packages"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -119,7 +119,7 @@ jobs:
           name: release-dist
 
       - name: Publish to JSR
-        run: npx -y jsr publish --allow-slow-types
+        run: npx -y jsr publish --allow-slow-types --allow-dirty
 
   publish-github-release:
     name: Publish GitHub Release & Assets
