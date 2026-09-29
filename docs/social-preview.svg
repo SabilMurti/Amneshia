@@ -200,44 +200,72 @@
     <g transform="translate(0, 230)">
       <!-- Pill 1: SQLite FTS5 -->
       <g transform="translate(0, 0)">
-        <rect x="0" y="0" width="165" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#38bdf8" font-family="monospace" font-size="12" font-weight="700">⚡ &lt;1ms BM25 Search</text>
+        <rect x="0" y="0" width="160" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+        <g transform="translate(12, 9.5)">
+          <path d="M 8 1 L 2 8 L 7 8 L 6 14 L 13 6 L 8 6 Z" fill="#38bdf8"/>
+        </g>
+        <text x="32" y="21.5" fill="#38bdf8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">&lt;1ms BM25 Search</text>
       </g>
 
       <!-- Pill 2: Markdown as Truth -->
-      <g transform="translate(177, 0)">
+      <g transform="translate(172, 0)">
         <rect x="0" y="0" width="170" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#34d399" font-family="monospace" font-size="12" font-weight="700">📁 Markdown-as-Truth</text>
+        <g transform="translate(12, 9.5)">
+          <path d="M 2 3 C 2 2.45 2.45 2 3 2 L 6 2 C 6.55 2 7 2.45 7.4 3 L 8.6 4.5 C 8.9 4.8 9.3 5 9.7 5 L 13 5 C 13.55 5 14 5.45 14 6 L 14 11 C 14 11.55 13.55 12 13 12 L 3 12 C 2.45 12 2 11.55 2 11 Z" fill="#34d399"/>
+        </g>
+        <text x="32" y="21.5" fill="#34d399" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">Markdown-as-Truth</text>
       </g>
 
       <!-- Pill 3: Cascading Invalidation -->
-      <g transform="translate(359, 0)">
-        <rect x="0" y="0" width="180" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#f43f5e" font-family="monospace" font-size="12" font-weight="700">🛡️ Cascading Invalidation</text>
+      <g transform="translate(354, 0)">
+        <rect x="0" y="0" width="200" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+        <g transform="translate(12, 9.5)">
+          <path d="M 7.5 1.5 L 2.5 3.5 L 2.5 7.5 C 2.5 10.5 4.5 12.8 7.5 13.8 C 10.5 12.8 12.5 10.5 12.5 7.5 L 12.5 3.5 Z" fill="#f43f5e"/>
+        </g>
+        <text x="32" y="21.5" fill="#f43f5e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">Cascading Invalidation</text>
       </g>
 
       <!-- Pill 4: 85% Token Reduction -->
       <g transform="translate(0, 46)">
-        <rect x="0" y="0" width="185" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#fbbf24" font-family="monospace" font-size="12" font-weight="700">🧠 -85% Schema Tokens</text>
+        <rect x="0" y="0" width="175" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+        <g transform="translate(12, 9.5)">
+          <rect x="3.5" y="3.5" width="8" height="8" rx="1.5" fill="none" stroke="#fbbf24" stroke-width="1.3"/>
+          <circle cx="7.5" cy="7.5" r="1.5" fill="#fbbf24"/>
+          <line x1="5.5" y1="1" x2="5.5" y2="3.5" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="9.5" y1="1" x2="9.5" y2="3.5" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="5.5" y1="11.5" x2="5.5" y2="14" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="9.5" y1="11.5" x2="9.5" y2="14" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="1" y1="5.5" x2="3.5" y2="5.5" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="1" y1="9.5" x2="3.5" y2="9.5" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="11.5" y1="5.5" x2="14" y2="5.5" stroke="#fbbf24" stroke-width="1.2"/>
+          <line x1="11.5" y1="9.5" x2="14" y2="9.5" stroke="#fbbf24" stroke-width="1.2"/>
+        </g>
+        <text x="32" y="21.5" fill="#fbbf24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">-85% Schema Tokens</text>
       </g>
 
       <!-- Pill 5: 3D Universe -->
-      <g transform="translate(197, 46)">
-        <rect x="0" y="0" width="185" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#c084fc" font-family="monospace" font-size="12" font-weight="700">🌌 3D Neural Universe</text>
+      <g transform="translate(187, 46)">
+        <rect x="0" y="0" width="175" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+        <g transform="translate(12, 9.5)">
+          <path d="M 7.5 1 Q 8 5.5 12.5 7.5 Q 8 9.5 7.5 14 Q 7 9.5 2.5 7.5 Q 7 5.5 7.5 1 Z" fill="#c084fc"/>
+        </g>
+        <text x="32" y="21.5" fill="#c084fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">3D Neural Universe</text>
       </g>
 
       <!-- Pill 6: Zero Cloud -->
-      <g transform="translate(394, 46)">
-        <rect x="0" y="0" width="145" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
-        <text x="14" y="21" fill="#a1a1aa" font-family="monospace" font-size="12" font-weight="700">🔒 100% Local / MIT</text>
+      <g transform="translate(374, 46)">
+        <rect x="0" y="0" width="165" height="34" rx="8" fill="#18181b" stroke="#3f3f46" stroke-width="1"/>
+        <g transform="translate(12, 9.5)">
+          <rect x="3" y="6" width="9" height="7" rx="1.5" fill="#a1a1aa"/>
+          <path d="M 5 6 L 5 4.5 C 5 3.1 6.1 2 7.5 2 C 8.9 2 10 3.1 10 4.5 L 10 6" fill="none" stroke="#a1a1aa" stroke-width="1.3" stroke-linecap="round"/>
+        </g>
+        <text x="32" y="21.5" fill="#a1a1aa" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600">100% Local / MIT</text>
       </g>
     </g>
 
     <!-- Bottom Footer Meta -->
     <g transform="translate(0, 360)">
-      <text x="0" y="0" fill="#64748b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600">
+      <text x="0" y="0" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="600">
         curl -fsSL https://raw.githubusercontent.com/SabilMurti/Amneshia/main/install.sh | bash
       </text>
     </g>
