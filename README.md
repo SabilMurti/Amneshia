@@ -3,7 +3,7 @@
 **Deterministic, Git-Native Knowledge Graph & Truth Maintenance Engine for AI Agents.**  
 Embedded SQLite FTS5 • Markdown-as-Truth • Cascading Invalidation • Model Context Protocol (MCP)
 
-[![Release](https://img.shields.io/badge/version-v3.0.0-6d28d9.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/releases)
+[![Release](https://img.shields.io/badge/version-v3.0.1-6d28d9.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/releases)
 [![JSR](https://jsr.io/badges/@sabilmurti/amneshia)](https://jsr.io/@sabilmurti/amneshia)
 [![GitHub Packages](https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github)](https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square)](LICENSE)

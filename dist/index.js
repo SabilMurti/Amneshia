@@ -2432,7 +2432,7 @@ function initAmneshiaProject(targetDir = process.cwd()) {
   fs4.mkdirSync(knowledgeDir, { recursive: true });
   if (!fs4.existsSync(configPath)) {
     const defaultConfig = `# Amneshia v3 Project Configuration
-version: "3.0.0"
+version: "3.0.1"
 storage:
   mode: "local"
   dual_write: true
@@ -2493,7 +2493,7 @@ async function startServer(options = {}) {
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: "Amneshia", version: "3.0.0" });
+  const server = new McpServer({ name: "Amneshia", version: "3.0.1" });
   registerTools(server, graph, db, options.toolProfile);
   const cleanup = async () => {
     process.exit(0);
@@ -2519,7 +2519,7 @@ async function startServer(options = {}) {
       await transport.handlePostMessage(req, res);
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "3.0.0" });
+      res.json({ status: "ok", name: "amneshia", version: "3.0.1" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
@@ -2586,7 +2586,7 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.1").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").action((dir) => {

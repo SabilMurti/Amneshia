@@ -13,7 +13,7 @@ const program = new Command();
 program
   .name('amneshia')
   .description('🧠 Amneshia v3 — Git-native knowledge graph for AI agents with truth maintenance')
-  .version('3.0.0')
+  .version('3.0.1')
   .option('--data-dir <path>', 'Custom data directory')
   .option('-l, --local', 'Use local repository directory (.amneshia) instead of global ~/.amneshia')
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')

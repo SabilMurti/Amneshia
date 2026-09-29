@@ -26,7 +26,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: 'Amneshia', version: '3.0.0' });
+  const server = new McpServer({ name: 'Amneshia', version: '3.0.1' });
   registerTools(server, graph, db, options.toolProfile);
 
   const cleanup = async () => {
@@ -57,7 +57,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '3.0.0' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.0.1' });
     });
 
     app.get('/api/graph', (req, res) => res.json(graph.readGraph(req.query.domain as string)));
