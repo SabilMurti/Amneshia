@@ -1,0 +1,12 @@
+# Smithery configuration for Amneshia
+# https://smithery.ai/docs/config
+
+startCommand:
+  type: stdio
+  config:
+    command: npx
+    args:
+      - -y
+      - github:SabilMurti/Amneshia
+      - --tool-profile
+      - core

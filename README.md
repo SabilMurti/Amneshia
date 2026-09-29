@@ -1,15 +1,25 @@
-# Amneshia
+<p align="center">
+  <a href="https://github.com/SabilMurti/Amneshia">
+    <img src="docs/logo.svg" alt="Amneshia Logo" width="160" />
+  </a>
+</p>
 
-**Deterministic, Git-Native Knowledge Graph & Truth Maintenance Engine for AI Agents.**  
-Embedded SQLite FTS5 • Markdown-as-Truth • Cascading Invalidation • Model Context Protocol (MCP)
+<h1 align="center">Amneshia</h1>
 
-[![Release](https://img.shields.io/badge/version-v3.0.2-6d28d9.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/releases)
-[![JSR](https://jsr.io/badges/@sabilmurti/amneshia)](https://jsr.io/@sabilmurti/amneshia)
-[![GitHub Packages](https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github)](https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia)
-[![License: MIT](https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/vitest-30%20passed%20(100%25)-059669.svg?style=flat-square)](https://github.com/SabilMurti/Amneshia/actions)
-[![MCP](https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square)](https://modelcontextprotocol.io)
-[![TypeScript](https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square)](tsconfig.json)
+<p align="center">
+  <strong>Deterministic, Git-Native Knowledge Graph &amp; Truth Maintenance Engine for AI Agents.</strong><br>
+  Embedded SQLite FTS5 • Markdown-as-Truth • Cascading Invalidation • Model Context Protocol (MCP)
+</p>
+
+<p align="center">
+  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.0.2-6d28d9.svg?style=flat-square" alt="Release" /></a>
+  <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-30%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square" alt="MCP" /></a>
+  <a href="tsconfig.json"><img src="https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square" alt="TypeScript" /></a>
+</p>
 
 ---
 

@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#2e1065" stop-opacity="0.7"/>
+      <stop offset="45%" stop-color="#180d36" stop-opacity="0.9"/>
+      <stop offset="85%" stop-color="#09090b" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#09090b" stop-opacity="1"/>
+    </radialGradient>
+
+    <!-- Celestial Bloom behind the star -->
+    <radialGradient id="starBloom" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.45"/>
+      <stop offset="35%" stop-color="#9333ea" stop-opacity="0.25"/>
+      <stop offset="70%" stop-color="#6b21a8" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#6b21a8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glowing Vector Gradients -->
+    <linearGradient id="hatGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6d28d9"/>
+      <stop offset="30%" stop-color="#8b5cf6"/>
+      <stop offset="70%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#f5f3ff"/>
+      <stop offset="80%" stop-color="#e9d5ff"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+
+    <linearGradient id="latticeGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.7"/>
+      <stop offset="50%" stop-color="#a855f7" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <!-- Unclipped Wide Glow Filters -->
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur1"/>
+      <feGaussianBlur stdDeviation="12" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="starGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="10" result="blur1"/>
+      <feGaussianBlur stdDeviation="22" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="512" height="512" rx="96" fill="#09090b"/>
+  <rect width="512" height="512" rx="96" fill="url(#bgGlow)"/>
+
+  <!-- Logo Graphics Group (Shifted down with generous headroom to prevent any glow clipping) -->
+  <g transform="translate(0, 24)">
+    
+    <!-- Ambient Radial Halo behind the Star (Prevents hard edge cutoff) -->
+    <circle cx="340" cy="85" r="90" fill="url(#starBloom)" />
+
+    <!-- Outer Brim / Infinity Orbit (The Witch Hat Brim & Knowledge Loop) -->
+    <path d="M 140 310 C 100 325, 120 365, 200 360 C 260 355, 310 320, 360 325 C 410 330, 420 370, 360 375 C 280 380, 220 330, 140 310 Z" 
+          fill="none" 
+          stroke="url(#hatGrad)" 
+          stroke-width="7" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"
+          filter="url(#neonGlow)" />
+
+    <!-- Hat Cone Silhouette / Knowledge Graph Facets -->
+    <path d="M 175 330 C 205 280, 230 210, 275 140 C 295 110, 320 92, 340 85 C 330 115, 315 155, 315 200 C 315 250, 335 290, 350 330" 
+          fill="none" 
+          stroke="url(#hatGrad)" 
+          stroke-width="6.5" 
+          stroke-linecap="round"
+          filter="url(#neonGlow)" />
+
+    <!-- Internal Knowledge Graph Neural Edges (Lattice) -->
+    <g stroke="url(#latticeGrad)" stroke-width="2.5" opacity="0.9">
+      <line x1="175" y1="330" x2="225" y2="305" />
+      <line x1="225" y1="305" x2="200" y2="250" />
+      <line x1="175" y1="330" x2="200" y2="250" />
+      
+      <line x1="200" y1="250" x2="250" y2="230" />
+      <line x1="225" y1="305" x2="270" y2="285" />
+      <line x1="250" y1="230" x2="270" y2="285" />
+      
+      <line x1="270" y1="285" x2="330" y2="295" />
+      <line x1="270" y1="285" x2="310" y2="245" />
+      <line x1="250" y1="230" x2="310" y2="245" />
+      <line x1="330" y1="295" x2="350" y2="330" />
+      <line x1="310" y1="245" x2="330" y2="295" />
+      
+      <line x1="200" y1="250" x2="235" y2="185" />
+      <line x1="250" y1="230" x2="235" y2="185" />
+      <line x1="235" y1="185" x2="275" y2="175" />
+      <line x1="250" y1="230" x2="275" y2="175" />
+      <line x1="310" y1="245" x2="275" y2="175" />
+      <line x1="310" y1="245" x2="315" y2="200" />
+      
+      <line x1="275" y1="175" x2="275" y2="140" />
+      <line x1="275" y1="175" x2="315" y2="200" />
+      <line x1="275" y1="140" x2="310" y2="135" />
+      <line x1="315" y1="200" x2="310" y2="135" />
+      <line x1="275" y1="140" x2="340" y2="85" />
+      <line x1="310" y1="135" x2="340" y2="85" />
+
+      <!-- Brim nodes connections -->
+      <line x1="140" y1="310" x2="175" y2="330" />
+      <line x1="225" y1="305" x2="200" y2="360" />
+      <line x1="270" y1="285" x2="200" y2="360" />
+      <line x1="330" y1="295" x2="360" y2="325" />
+      <line x1="350" y1="330" x2="360" y2="375" />
+    </g>
+
+    <!-- Graph Nodes (Glowing Synaptic Spheres) -->
+    <g fill="#ffffff" filter="url(#neonGlow)">
+      <circle cx="140" cy="310" r="5" fill="#c084fc"/>
+      <circle cx="200" cy="360" r="6" fill="#a855f7"/>
+      <circle cx="175" cy="330" r="6" fill="#e9d5ff"/>
+      <circle cx="225" cy="305" r="7.5" fill="#ffffff"/>
+      <circle cx="200" cy="250" r="6.5" fill="#e9d5ff"/>
+      <circle cx="270" cy="285" r="8" fill="#ffffff"/>
+      <circle cx="250" cy="230" r="7.5" fill="#f5f3ff"/>
+      <circle cx="235" cy="185" r="6" fill="#e9d5ff"/>
+      <circle cx="275" cy="175" r="7" fill="#ffffff"/>
+      <circle cx="310" cy="245" r="7" fill="#e9d5ff"/>
+      <circle cx="330" cy="295" r="6" fill="#c084fc"/>
+      <circle cx="350" cy="330" r="5.5" fill="#a855f7"/>
+      <circle cx="360" cy="325" r="5" fill="#c084fc"/>
+      <circle cx="360" cy="375" r="5" fill="#9333ea"/>
+      <circle cx="275" cy="140" r="6" fill="#f5f3ff"/>
+      <circle cx="310" cy="135" r="6" fill="#e9d5ff"/>
+      <circle cx="315" cy="200" r="6.5" fill="#c084fc"/>
+    </g>
+
+    <!-- The Wandering Astral Star (Tip of the Hat / Truth Star) -->
+    <!-- Beautiful 4-Point Star Flare with Smooth Falloff -->
+    <g transform="translate(340, 85)" filter="url(#starGlow)">
+      <!-- Outer soft diamond glow -->
+      <path d="M 0 -36 Q 3 -6, 26 0 Q 3 6, 0 36 Q -3 6, -26 0 Q -3 -6, 0 -36 Z" 
+            fill="url(#starGrad)" 
+            opacity="0.85"/>
+      <!-- Inner core sharp star -->
+      <path d="M 0 -22 Q 2 -3, 16 0 Q 2 3, 0 22 Q -2 3, -16 0 Q -2 -3, 0 -22 Z" 
+            fill="#ffffff"/>
+      <!-- Center radiant pinpoint -->
+      <circle cx="0" cy="0" r="4.5" fill="#ffffff"/>
+    </g>
+
+    <!-- Brand Typography Subtitle -->
+    <text x="256" y="425" 
+          text-anchor="middle" 
+          fill="#f8fafc" 
+          font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Outfit', sans-serif" 
+          font-size="28" 
+          font-weight="800" 
+          letter-spacing="9px">AMNESHIA</text>
+    
+    <text x="256" y="455" 
+          text-anchor="middle" 
+          fill="#a78bfa" 
+          font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'JetBrains Mono', sans-serif" 
+          font-size="11.5" 
+          font-weight="600" 
+          letter-spacing="3.5px">AI KNOWLEDGE GRAPH</text>
+  </g>
+</svg>
