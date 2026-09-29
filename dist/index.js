@@ -2494,7 +2494,7 @@ async function startServer(options = {}) {
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
   const server = new McpServer({ name: "Amneshia", version: "3.0.0" });
-  registerTools(server, graph, db);
+  registerTools(server, graph, db, options.toolProfile);
   const cleanup = async () => {
     process.exit(0);
   };
@@ -2586,7 +2586,9 @@ async function startServer(options = {}) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", parseInt, 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false);
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+  await runDefault();
+});
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").action((dir) => {
   const targetDir = dir ? path6.resolve(dir) : process.cwd();
   const { dataDir, knowledgeDir } = initAmneshiaProject(targetDir);
@@ -2669,7 +2671,7 @@ program.command("stats").description("Display knowledge graph statistics and hea
   console.log("");
   db.close();
 });
-program.command("serve").description("Start the HTTP Web Dashboard server").option("-p, --port <number>", "Port number", parseInt, 3457).option("-l, --local", "Use local repository").action(async (cmdOpts) => {
+program.command("serve").description("Start the HTTP Web Dashboard server").option("-p, --port <number>", "Port number", (val) => parseInt(val, 10), 3457).option("-l, --local", "Use local repository").action(async (cmdOpts) => {
   const isLocal = cmdOpts.local || program.opts().local;
   const port = cmdOpts.port || program.opts().port || 3457;
   await startServer({ local: isLocal, http: true, port, stdio: false });
@@ -2708,9 +2710,7 @@ async function runDefault() {
     port: options.port
   });
 }
-var knownSubcommands = ["init", "reindex", "sync", "gc", "stats", "serve", "help"];
-var hasSubcommand = process.argv.slice(2).some((arg) => knownSubcommands.includes(arg));
-program.parse(process.argv);
-if (!hasSubcommand) {
-  void runDefault();
-}
+await program.parseAsync(process.argv).catch((err) => {
+  console.error("[Amneshia] Fatal error:", err);
+  process.exit(1);
+});

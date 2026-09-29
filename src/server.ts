@@ -27,7 +27,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
   const server = new McpServer({ name: 'Amneshia', version: '3.0.0' });
-  registerTools(server, graph, db);
+  registerTools(server, graph, db, options.toolProfile);
 
   const cleanup = async () => {
     process.exit(0);

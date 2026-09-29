@@ -19,9 +19,12 @@ program
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')
   .option('--http', 'Enable HTTP/SSE server mode', true)
   .option('--no-dashboard', 'Disable HTTP Web Dashboard server')
-  .option('-p, --port <number>', 'Dashboard port number', parseInt, 3457)
+  .option('-p, --port <number>', 'Dashboard port number', (val) => parseInt(val, 10), 3457)
   .option('-b, --background', 'Run server in background daemon mode', false)
-  .option('-d, --daemon', 'Alias for --background', false);
+  .option('-d, --daemon', 'Alias for --background', false)
+  .action(async () => {
+    await runDefault();
+  });
 
 // Subcommand: init
 program
@@ -137,7 +140,7 @@ program
 program
   .command('serve')
   .description('Start the HTTP Web Dashboard server')
-  .option('-p, --port <number>', 'Port number', parseInt, 3457)
+  .option('-p, --port <number>', 'Port number', (val) => parseInt(val, 10), 3457)
   .option('-l, --local', 'Use local repository')
   .action(async (cmdOpts) => {
     const isLocal = cmdOpts.local || program.opts().local;
@@ -198,13 +201,9 @@ async function runDefault(): Promise<void> {
   });
 }
 
-// Parse args or run default
-const knownSubcommands = ['init', 'reindex', 'sync', 'gc', 'stats', 'serve', 'help'];
-const hasSubcommand = process.argv.slice(2).some((arg) => knownSubcommands.includes(arg));
-
-program.parse(process.argv);
-
-if (!hasSubcommand) {
-  void runDefault();
-}
+// Parse arguments and execute
+await program.parseAsync(process.argv).catch((err) => {
+  console.error('[Amneshia] Fatal error:', err);
+  process.exit(1);
+});
 
