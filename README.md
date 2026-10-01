@@ -40,6 +40,9 @@ It replaces probabilistic, vector-only memory systems with a **deterministic Tru
 - **Markdown-as-Truth (`.amneshia/knowledge/`):** All entities and observations mirror directly to version-controlled Markdown files with YAML frontmatter. Auditable via `git diff` and reviewable in Pull Requests.
 - **Truth Maintenance & Cascading Invalidation:** Derived facts track their premises via directed acyclic graphs (`derived_from: [parent_id]`). When a premise is revoked or updated, dependent conclusions automatically transition from `active` to `stale`.
 - **Pre-Insertion Contradiction Detection:** Evaluates incoming facts against active entity records for polar opposition and explicit replacements, rejecting or logging conflicts before graph corruption occurs.
+- **Self-Hostable Git-Native Cloud Sync:** Decentralized cross-device memory synchronization using Git remotes (GitHub private repo, GitLab, Gitea, or self-hosted Git server) with automatic SQLite FTS5 reindexing.
+- **Universal Memory Export:** Export full or filtered knowledge graphs into standalone SQLite databases (`.db`), Markdown bundle directories with catalog indexes, or structured JSON.
+- **Local-Memory Project Adoption:** Seamlessly adopt, migrate, or cherry-pick accumulated global memories (`~/.amneshia`) into workspace projects (`.amneshia`) with deduplication and contradiction checks.
 - **Lean Context Budget (85% Reduction):** Default 4-tool surface (`remember`, `recall`, `forget`, `context`) reduces prompt schema consumption from ~5,400 tokens to ~800 tokens.
 
 ---
@@ -400,17 +403,22 @@ amneshia serve --port 3457
 To ensure your coding agents (Cursor, Claude Code, Windsurf, Antigravity) actively read, persist, and maintain project memory throughout their lifecycle without human prompting, add this preset rule block to your project configuration (e.g. `.cursor/rules/amneshia.mdc`, `.cursorrules`, `CLAUDE.md`, `.windsurfrules`, or `AGENTS.md`):
 
 ````markdown
-# Long-Term Memory Directives (Amneshia Engine)
+# Long-Term Memory Directives (Amneshia v3 Engine)
 
-You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 long-term memory engine with a deterministic Truth Maintenance DAG. You MUST adhere to the following memory lifecycle for every coding task:
+You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 long-term memory engine with a deterministic Truth Maintenance DAG and Git-native cloud synchronization. You MUST adhere to the following memory lifecycle for every coding task:
 
 ## 1. Pre-Flight Retrieval (Start of Every Session & Task)
-- **Mandatory Recall:** Before writing code, planning refactors, or suggesting libraries, ALWAYS query Amneshia using `recall(query: "<topic/keyword>")` or inspect project context via `context(categories: ["architecture", "preference"])`.
+- **Mandatory Recall:** Before writing code, planning refactors, or suggesting libraries, ALWAYS query Amneshia:
+  `recall({ query: "<topic/keyword>", token_budget: 1000 })` or inspect project context via `context({ domain: "<domain>" })`.
 - **Never Guess Conventions:** Verify past architectural decisions, repository quirks, coding styles, and active credentials before scaffolding.
 
-## 2. In-Flight Execution & Authority Hierarchy
-- **Authority Levels:** Amneshia enforces strict tiers: `system` (3) > `user` (2) > `agent` (1).
-- **No Overwriting User Directives:** As an agent, your writes default to `agent` authority. Never try to supersede or contradict user-defined decisions without explicit user consent.
+## 2. In-Flight Execution & Authority Tiers
+- **Authority Levels:** Amneshia v3 enforces 4 strict authority tiers:
+  - `invariant`: Immutable truths, user constraints, security rules, and permanent architectural decisions (never decays).
+  - `architectural`: Framework choices, core database schemas, and API contracts (365 days retention).
+  - `contextual`: Working conventions, active configurations, and environment state (90 days retention, default for agent observations).
+  - `ephemeral`: Scratchpad notes, temporary debug logs, and short-lived session context (7 days TTL).
+- **No Overwriting Invariants:** As an agent, your writes default to `contextual` authority. Never try to supersede or contradict user-defined invariant decisions without explicit user consent.
 - **Contradiction Alerts:** If `remember` returns a contradiction alert (e.g. conflicting framework version or competing state library), halt and clarify with the user.
 
 ## 3. Post-Flight Persistence (End of Every Completed Task — Exhaustive & Detailed)
@@ -423,14 +431,32 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
   4. **Verification & Test Outcomes:** Exact test suites run, number of passing assertions, and edge cases handled.
   5. **Architectural Guardrails:** Traps, caveats, and conventions that future agents must follow to avoid regressions.
 - **Example Call:**
-  `remember(content: "Dashboard port changed to 3457 to prevent conflicts with Vite default. Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand, preventing terminal background job suspensions. Verified with curl /api/stats (200 OK) and 30/30 vitest assertions passing.", category: "architecture", entity_name: "amneshia", importance: 9, tags: ["networking", "dashboard", "cli"])`
+  ```json
+  {
+    "name": "remember",
+    "arguments": {
+      "entity": "Web Dashboard Architecture",
+      "facts": [
+        "[Context & Rationale] Dashboard port changed to 3457 to prevent conflicts with Vite default 5173.",
+        "[Technical Implementation] Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand.",
+        "[Operational Parameters] Web Dashboard runs on http://localhost:3457. CLI: amneshia serve -p 3457.",
+        "[Verification & Test Outcomes] Verified with curl /api/stats (200 OK) and 49/49 vitest assertions passing.",
+        "[Architectural Guardrails & Gotchas] Stdio mode must be false when spawning daemon to avoid terminal SIGTTOU suspension."
+      ],
+      "tier": "architectural",
+      "domain": "project:amneshia"
+    }
+  }
+  ```
 
 ## 4. Soft Invalidation Over Deletion
-- **Never Leave Stale Memory:** If a prior decision, dependency, or file path is deprecated or replaced, call `forget(observation_id: "<id>", reason: "<why it is deprecated>")`.
+- **Never Leave Stale Memory:** If a prior decision, dependency, or file path is deprecated or replaced, call `forget`:
+  `forget({ target: "<observation-id>", hard: false, cascade: true })`
 - Amneshia automatically marks the node as `stale`/`invalidated` in the DAG while preserving audit lineage.
 
-## 5. Dual-Write Transparency
-- All stored memories are dual-written to `.amneshia/knowledge/**/*.md`. You may inspect or commit these files directly with git.
+## 5. Dual-Write Transparency & Cloud Sync
+- All stored memories are dual-written to `.amneshia/knowledge/{domain}/{entity}.md`. You may inspect or commit these files directly with git.
+- To synchronize across multiple devices, run `amneshia cloud sync`.
 ````
 
 ---
