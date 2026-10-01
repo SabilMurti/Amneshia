@@ -10,7 +10,10 @@ import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { startServer } from './server.js';
 import { DatabaseLayer } from './database/index.js';
-import { initAmneshiaProject, resolveStorageConfig, DualWriteSync } from './storage/index.js';
+import { initAmneshiaProject, resolveStorageConfig, DualWriteSync, adoptMemory } from './storage/index.js';
+import { MemoryExporter, type ExportFormat } from './export/index.js';
+import { setupGitRemote, getCloudStatus, cloudPull, cloudPush, cloudSync } from './cloud/index.js';
+import type { AuthorityTier } from './types.js';
 
 const program = new Command();
 
@@ -34,7 +37,9 @@ program
 program
   .command('init [dir]')
   .description('Initialize a local .amneshia/ knowledge graph repository')
-  .action((dir) => {
+  .option('-d, --adopt-domain <domain>', 'Automatically adopt global entities belonging to this domain')
+  .option('-a, --adopt-all', 'Automatically adopt all global memory entities into this project')
+  .action(async (dir, cmdOpts) => {
     const targetDir = dir ? path.resolve(dir) : process.cwd();
     const { dataDir, knowledgeDir } = initAmneshiaProject(targetDir);
     console.log(`[Amneshia] Initialized local repository:`);
@@ -42,6 +47,28 @@ program
     console.log(`  - Knowledge Markdown:  ${knowledgeDir}`);
     console.log(`  - Config File:         ${path.join(dataDir, 'config.yaml')}`);
     console.log(`  - Cache .gitignore:    ${path.join(dataDir, '.gitignore')}`);
+
+    if (cmdOpts.adoptDomain || cmdOpts.adoptAll) {
+      console.log(`\n[Amneshia] Adopting memories from global storage (~/.amneshia)...`);
+      try {
+        const adoptRes = await adoptMemory({
+          targetDataDir: dataDir,
+          domain: cmdOpts.adoptDomain,
+          all: cmdOpts.adoptAll,
+        });
+        console.log(`[Amneshia] Adoption complete:`);
+        console.log(`  - Entities Adopted:     ${adoptRes.entitiesAdopted.length} [${adoptRes.entitiesAdopted.join(', ')}]`);
+        console.log(`  - Observations Adopted: ${adoptRes.observationsAdopted}`);
+        console.log(`  - Relations Adopted:    ${adoptRes.relationsAdopted}`);
+        console.log(`  - Skipped Duplicates:   ${adoptRes.skippedDuplicates}`);
+        if (adoptRes.contradictionWarnings.length > 0) {
+          console.warn(`  - Contradiction Warnings: ${adoptRes.contradictionWarnings.length}`);
+        }
+      } catch (err: any) {
+        console.warn(`[Amneshia] Adoption warning: ${err.message}`);
+      }
+    }
+
     console.log(`\nReady! Track your markdown files with git, and commit knowledge directly.`);
   });
 
@@ -150,6 +177,232 @@ program
     const isLocal = cmdOpts.local || program.opts().local;
     const port = cmdOpts.port || program.opts().port || 3457;
     await startServer({ local: isLocal, http: true, port, stdio: false });
+  });
+
+// Subcommand: export
+program
+  .command('export <output>')
+  .description('Export memory knowledge graph to SQLite (.db), Markdown bundle, or JSON')
+  .option('-f, --format <format>', 'Export format: sqlite, markdown, json', 'sqlite')
+  .option('-d, --domain <domain>', 'Filter by domain name')
+  .option('-e, --entity <entities...>', 'Filter by specific entity names')
+  .option('-t, --tier <tier>', 'Filter by minimum authority tier (agent, user, system)')
+  .option('-q, --query <query>', 'Filter observations using FTS5 search query')
+  .option('-l, --local', 'Export from local project repository (.amneshia) instead of global')
+  .action(async (output, cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+
+    const validFormats: ExportFormat[] = ['sqlite', 'markdown', 'json'];
+    const format = (cmdOpts.format || 'sqlite').toLowerCase() as ExportFormat;
+    if (!validFormats.includes(format)) {
+      console.error(`[Amneshia] Invalid export format: "${cmdOpts.format}". Allowed: ${validFormats.join(', ')}`);
+      db.close();
+      process.exit(1);
+    }
+
+    const tiers: AuthorityTier[] | undefined = cmdOpts.tier
+      ? [cmdOpts.tier.toLowerCase() as AuthorityTier]
+      : undefined;
+
+    const exporter = new MemoryExporter(db);
+    console.log(`[Amneshia] Exporting knowledge graph (${config.mode.toUpperCase()} mode) to ${output}...`);
+    try {
+      const result = await exporter.export(format, output, {
+        domain: cmdOpts.domain,
+        entities: cmdOpts.entity,
+        tiers,
+        query: cmdOpts.query,
+      });
+
+      console.log(`\n✅ Amneshia Export Complete:`);
+      console.log(`  - Format:       ${result.format.toUpperCase()}`);
+      console.log(`  - Destination:  ${result.outputPath}`);
+      console.log(`  - Entities:     ${result.entitiesCount}`);
+      console.log(`  - Observations: ${result.observationsCount}`);
+      console.log(`  - Relations:    ${result.relationsCount}`);
+    } catch (err: any) {
+      console.error(`[Amneshia] Export failed: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
+  });
+
+// Subcommand: adopt
+program
+  .command('adopt')
+  .description('Adopt accumulated memories from global storage (~/.amneshia) into current local project')
+  .option('-d, --domain <domain>', 'Filter global entities by domain')
+  .option('-e, --entity <entities...>', 'Filter global entities by names')
+  .option('-a, --all', 'Adopt all entities from global storage')
+  .option('--dry-run', 'Preview adoption without modifying local project')
+  .option('--move', 'Remove adopted observations from source storage after copying')
+  .option('-s, --source <path>', 'Custom source data directory (defaults to ~/.amneshia)')
+  .option('-t, --target <path>', 'Custom target data directory (defaults to ./.amneshia)')
+  .action(async (cmdOpts) => {
+    try {
+      console.log(`[Amneshia] Starting memory adoption...`);
+      const result = await adoptMemory({
+        sourceDataDir: cmdOpts.source,
+        targetDataDir: cmdOpts.target,
+        domain: cmdOpts.domain,
+        entities: cmdOpts.entity,
+        all: cmdOpts.all,
+        dryRun: cmdOpts.dryRun,
+        move: cmdOpts.move,
+      });
+
+      console.log(`\n${result.dryRun ? '🔍 [DRY RUN] ' : '✅ '}Amneshia Adoption Summary:`);
+      console.log(`  - Source:               ${result.sourceDir}`);
+      console.log(`  - Target:               ${result.targetDir}`);
+      console.log(`  - Entities Adopted:     ${result.entitiesAdopted.length} ${result.entitiesAdopted.length > 0 ? `[${result.entitiesAdopted.join(', ')}]` : ''}`);
+      console.log(`  - Observations Adopted: ${result.observationsAdopted}`);
+      console.log(`  - Relations Adopted:    ${result.relationsAdopted}`);
+      console.log(`  - Skipped Duplicates:   ${result.skippedDuplicates}`);
+
+      if (result.contradictionWarnings.length > 0) {
+        console.warn(`\n⚠️  Contradiction Warnings (${result.contradictionWarnings.length}):`);
+        for (const warn of result.contradictionWarnings) {
+          console.warn(`    - Entity "${warn.entity}": ${warn.fact} (${warn.reason})`);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Amneshia] Adoption failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// Subcommand: cloud
+const cloudCmd = program
+  .command('cloud')
+  .description('Git-native cross-device synchronization for Amneshia knowledge');
+
+cloudCmd
+  .command('setup <remoteUrl>')
+  .description('Initialize or link a Git remote repository for cloud knowledge sync')
+  .option('-b, --branch <branch>', 'Target git branch', 'main')
+  .option('-l, --local', 'Use local repository (.amneshia) instead of global')
+  .action(async (remoteUrl, cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    try {
+      console.log(`[Amneshia] Setting up Git-native cloud sync at: ${config.knowledgeDir}`);
+      const res = await setupGitRemote(config.knowledgeDir, remoteUrl, cmdOpts.branch);
+      console.log(`\n✅ Cloud Remote Configured:`);
+      console.log(`  - Knowledge Dir: ${config.knowledgeDir}`);
+      console.log(`  - Remote URL:    ${res.remoteUrl}`);
+      console.log(`  - Branch:        ${res.branch}`);
+      console.log(`\nNext steps: Run "amneshia cloud push" or "amneshia cloud sync" to sync knowledge.`);
+    } catch (err: any) {
+      console.error(`[Amneshia] Cloud setup failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCmd
+  .command('status')
+  .description('Check cloud sync status, branch info, and uncommitted knowledge changes')
+  .option('-l, --local', 'Use local repository')
+  .action(async (cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    try {
+      const status = await getCloudStatus(config.knowledgeDir);
+      console.log(`\n🧠 Amneshia Cloud Status (${config.mode.toUpperCase()} mode):`);
+      console.log(`-----------------------------------------------`);
+      console.log(`  Initialized:     ${status.initialized ? 'Yes' : 'No'}`);
+      console.log(`  Knowledge Dir:   ${status.knowledgeDir}`);
+      console.log(`  Remote URL:      ${status.remoteUrl ?? '(None - run "amneshia cloud setup <url>")'}`);
+      console.log(`  Branch:          ${status.branch}`);
+      console.log(`  Clean:           ${status.clean ? 'Yes' : 'Has uncommitted changes'}`);
+      console.log(`  Last Synced At:  ${status.lastSyncAt ?? 'Never'}`);
+      if (status.uncommittedFiles.length > 0) {
+        console.log(`\n  Uncommitted Changes (${status.uncommittedFiles.length}):`);
+        for (const file of status.uncommittedFiles) {
+          console.log(`    - ${file}`);
+        }
+      }
+      console.log('');
+    } catch (err: any) {
+      console.error(`[Amneshia] Cloud status check failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCmd
+  .command('pull')
+  .description('Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index')
+  .option('-b, --branch <branch>', 'Branch to pull from', 'main')
+  .option('-l, --local', 'Use local repository')
+  .action(async (cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+    try {
+      console.log(`[Amneshia] Pulling from cloud remote into ${config.knowledgeDir}...`);
+      const result = await cloudPull(config.knowledgeDir, db, cmdOpts.branch);
+      console.log(`\n✅ Knowledge Pulled & Reindexed:`);
+      console.log(`  - Entities Reindexed:     ${result.reindex.entities}`);
+      console.log(`  - Observations Reindexed: ${result.reindex.observations}`);
+      console.log(`  - Relations Reindexed:    ${result.reindex.relations}`);
+    } catch (err: any) {
+      console.error(`[Amneshia] Cloud pull failed: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
+  });
+
+cloudCmd
+  .command('push')
+  .description('Commit and push local knowledge markdown changes to Git remote')
+  .option('-m, --message <message>', 'Custom commit message')
+  .option('-b, --branch <branch>', 'Branch to push to', 'main')
+  .option('-l, --local', 'Use local repository')
+  .action(async (cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    try {
+      console.log(`[Amneshia] Pushing knowledge to cloud remote...`);
+      const result = await cloudPush(config.knowledgeDir, cmdOpts.message, cmdOpts.branch);
+      console.log(`\n✅ Cloud Push Complete:`);
+      console.log(`  - Status:  ${result.message}`);
+      if (result.commitHash) {
+        console.log(`  - Commit:  ${result.commitHash}`);
+      }
+    } catch (err: any) {
+      console.error(`[Amneshia] Cloud push failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCmd
+  .command('sync')
+  .description('Atomic bidirectional sync: pull remote changes, reindex, and push local changes')
+  .option('-b, --branch <branch>', 'Target git branch', 'main')
+  .option('-l, --local', 'Use local repository')
+  .action(async (cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+    try {
+      console.log(`[Amneshia] Running bidirectional cloud sync on ${config.knowledgeDir}...`);
+      const result = await cloudSync(config.knowledgeDir, db, cmdOpts.branch);
+      console.log(`\n✅ Cloud Sync Successful (${result.syncedAt}):`);
+      console.log(`  - Reindexed Entities:     ${result.pull.reindex.entities}`);
+      console.log(`  - Reindexed Observations: ${result.pull.reindex.observations}`);
+      console.log(`  - Push Status:            ${result.push.message}`);
+      if (result.push.commitHash) {
+        console.log(`  - Commit Hash:            ${result.push.commitHash}`);
+      }
+    } catch (err: any) {
+      console.error(`[Amneshia] Cloud sync failed: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
   });
 
 // Default server launch

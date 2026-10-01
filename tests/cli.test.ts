@@ -16,9 +16,11 @@ describe('CLI Integration Tests', () => {
     const { stdout } = await execFileAsync('node', [entryPoint, '--help']);
     expect(stdout).toContain('Usage: amneshia [options] [command]');
     expect(stdout).toContain('--tool-profile <profile>');
-    expect(stdout).toContain('Commands:');
-    expect(stdout).toContain('init [dir]');
+    expect(stdout).toContain('init [options] [dir]');
     expect(stdout).toContain('serve [options]');
+    expect(stdout).toContain('export [options] <output>');
+    expect(stdout).toContain('adopt [options]');
+    expect(stdout).toContain('cloud');
   });
 
   it('should run stats command successfully', async () => {
@@ -26,5 +28,17 @@ describe('CLI Integration Tests', () => {
     expect(stdout).toContain('Amneshia Knowledge Graph Stats');
     expect(stdout).toContain('Total Entities:');
     expect(stdout).toContain('Total Observations:');
+  });
+
+  it('should run adopt --dry-run without modifying state', async () => {
+    const { stdout } = await execFileAsync('node', [entryPoint, 'adopt', '--dry-run', '--all']);
+    expect(stdout).toContain('DRY RUN');
+    expect(stdout).toContain('Amneshia Adoption Summary');
+  });
+
+  it('should run cloud status command', async () => {
+    const { stdout } = await execFileAsync('node', [entryPoint, 'cloud', 'status']);
+    expect(stdout).toContain('Amneshia Cloud Status');
+    expect(stdout).toContain('Initialized:');
   });
 });

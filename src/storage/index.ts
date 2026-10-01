@@ -16,6 +16,7 @@ import { reindexFromMarkdown, type ReindexResult } from './reindex.js';
 export * from './markdown-store.js';
 export * from './reindex.js';
 export * from './slug.js';
+export * from './adopt.js';
 
 export interface StorageConfig {
   mode: 'global' | 'local';

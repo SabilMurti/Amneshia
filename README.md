@@ -16,7 +16,7 @@
   <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
   <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-30%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-49%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square" alt="MCP" /></a>
   <a href="https://glama.ai/mcp/servers/SabilMurti/Amneshia"><img src="https://glama.ai/mcp/servers/SabilMurti/Amneshia/badges/score.svg" alt="Glama Score" /></a>
   <a href="tsconfig.json"><img src="https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square" alt="TypeScript" /></a>
@@ -441,6 +441,30 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 # Scaffold .amneshia/ directory and .gitignore in current workspace
 amneshia init
 
+# Scaffold local repo and automatically adopt memories from global ~/.amneshia
+amneshia init -d backend          # Adopt specific domain
+amneshia init -a                  # Adopt all global memories
+
+# Adopt / cherry-pick global memories into current project with deduplication
+amneshia adopt -d project:core    # Filter by domain
+amneshia adopt -e "Auth Module"   # Filter by specific entities
+amneshia adopt --dry-run          # Preview migration without modifying target
+amneshia adopt --move             # Move memories (delete from source after copying)
+
+# Universal Memory Export (SQLite, Markdown bundle, or JSON)
+amneshia export memory.db -f sqlite                # Full standalone SQLite database
+amneshia export ./md-export -f markdown            # Markdown directory with index.md catalog
+amneshia export memory.json -f json -d backend     # JSON dump filtered by domain
+amneshia export dump.json -f json -t invariant     # Filter by authority tier
+amneshia export search.json -f json -q "jwt token" # Filter by FTS5 BM25 search query
+
+# Git-Native Cloud Synchronization (Self-Hostable across all devices)
+amneshia cloud setup git@github.com:user/my-memory.git  # Link private Git repository
+amneshia cloud status                                   # Inspect sync health & uncommitted facts
+amneshia cloud pull                                     # Pull remote updates & reindex SQLite FTS5
+amneshia cloud push -m "Synced memory"                  # Commit & push local knowledge
+amneshia cloud sync                                     # Atomic bidirectional pull + push
+
 # Rebuild SQLite FTS5 database from .amneshia/knowledge/ Markdown files
 amneshia reindex
 
@@ -464,17 +488,20 @@ amneshia --background
 ```bash
 $ npm test
 
- ✓ tests/graph.test.ts (2 tests)
  ✓ tests/database.test.ts (8 tests)
- ✓ tests/storage.test.ts (5 tests)
+ ✓ tests/export.test.ts (7 tests)
  ✓ tests/consolidation.test.ts (5 tests)
- ✓ tests/tools.test.ts (4 tests)
+ ✓ tests/adopt.test.ts (6 tests)
  ✓ tests/api.test.ts (3 tests)
- ✓ tests/cli.test.ts (3 tests)
+ ✓ tests/graph.test.ts (2 tests)
+ ✓ tests/storage.test.ts (5 tests)
+ ✓ tests/cloud.test.ts (4 tests)
+ ✓ tests/tools.test.ts (4 tests)
+ ✓ tests/cli.test.ts (5 tests)
 
- Test Files  7 passed (7)
-      Tests  30 passed (30)
-   Duration  2.65s
+ Test Files  10 passed (10)
+      Tests  49 passed (49)
+   Duration  2.34s
 ```
 
 ---
