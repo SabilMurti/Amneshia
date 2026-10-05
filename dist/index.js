@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 // src/index.ts
-import os5 from "os";
-import path9 from "path";
-import fs8 from "fs";
+import os6 from "os";
+import path10 from "path";
+import fs11 from "fs";
 import { spawn } from "child_process";
 import { Command } from "commander";
 
@@ -14,9 +14,9 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 
 // src/database/index.ts
-import fs from "fs";
-import os from "os";
-import path from "path";
+import fs3 from "fs";
+import os2 from "os";
+import path2 from "path";
 import crypto from "crypto";
 import Database from "better-sqlite3";
 
@@ -103,6 +103,16 @@ CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
 CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
 
+CREATE TABLE IF NOT EXISTS observation_embeddings (
+  observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
   entity_name,
   entity_type,
@@ -151,42 +161,420 @@ END;
 // src/database/migrations.ts
 function runMigrations(db) {
   const versionRow = db.pragma("user_version", { simple: true });
-  if (versionRow >= 3) {
-    return;
-  }
-  const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
-  if (tableCheck && tableCheck.count > 0) {
-    const columns = db.pragma("table_info(observations)");
-    const columnNames = new Set(columns.map((c) => c.name));
-    if (!columnNames.has("authority_tier")) {
-      db.exec(
-        "ALTER TABLE observations ADD COLUMN authority_tier TEXT NOT NULL DEFAULT 'contextual' CHECK(authority_tier IN ('invariant', 'architectural', 'contextual', 'ephemeral'))"
-      );
-    }
-    if (!columnNames.has("derived_from")) {
-      db.exec("ALTER TABLE observations ADD COLUMN derived_from TEXT NOT NULL DEFAULT '[]'");
-    }
-    if (!columnNames.has("access_count")) {
-      db.exec("ALTER TABLE observations ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!columnNames.has("last_accessed_at")) {
-      db.exec("ALTER TABLE observations ADD COLUMN last_accessed_at TEXT");
-    }
-    if (!columnNames.has("status")) {
-      db.exec(
-        "ALTER TABLE observations ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'invalidated', 'superseded', 'decayed'))"
-      );
+  if (versionRow < 3) {
+    const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
+    if (tableCheck && tableCheck.count > 0) {
+      const columns = db.pragma("table_info(observations)");
+      const columnNames = new Set(columns.map((c) => c.name));
+      if (!columnNames.has("authority_tier")) {
+        db.exec(
+          "ALTER TABLE observations ADD COLUMN authority_tier TEXT NOT NULL DEFAULT 'contextual' CHECK(authority_tier IN ('invariant', 'architectural', 'contextual', 'ephemeral'))"
+        );
+      }
+      if (!columnNames.has("derived_from")) {
+        db.exec("ALTER TABLE observations ADD COLUMN derived_from TEXT NOT NULL DEFAULT '[]'");
+      }
+      if (!columnNames.has("access_count")) {
+        db.exec("ALTER TABLE observations ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!columnNames.has("last_accessed_at")) {
+        db.exec("ALTER TABLE observations ADD COLUMN last_accessed_at TEXT");
+      }
+      if (!columnNames.has("status")) {
+        db.exec(
+          "ALTER TABLE observations ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'invalidated', 'superseded', 'decayed'))"
+        );
+      }
+      try {
+        db.exec("UPDATE observations SET status = 'superseded' WHERE supersedes IS NOT NULL AND status = 'active'");
+      } catch {
+      }
     }
     try {
-      db.exec("UPDATE observations SET status = 'superseded' WHERE supersedes IS NOT NULL AND status = 'active'");
+      db.exec("DROP TABLE IF EXISTS bridge_servers;");
     } catch {
     }
   }
-  try {
-    db.exec("DROP TABLE IF EXISTS bridge_servers;");
-  } catch {
+  if (versionRow < 4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS observation_embeddings (
+        observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+        dimensions INTEGER NOT NULL,
+        vector BLOB NOT NULL,
+        model TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
+    `);
   }
-  db.pragma("user_version = 3");
+  db.pragma("user_version = 4");
+}
+
+// src/search/tokenizer.ts
+import fs from "fs";
+var WordPieceTokenizer = class {
+  vocab = {};
+  unkId = 100;
+  clsId = 101;
+  sepId = 102;
+  padId = 0;
+  maxSeqLength = 128;
+  constructor(vocabOrJsonPath, maxSeqLength = 128) {
+    this.maxSeqLength = maxSeqLength;
+    if (typeof vocabOrJsonPath === "string") {
+      this.loadFromJsonFile(vocabOrJsonPath);
+    } else if (vocabOrJsonPath) {
+      this.vocab = vocabOrJsonPath;
+      this.initSpecialTokens();
+    }
+  }
+  loadFromJsonFile(filePath) {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed.model && parsed.model.vocab) {
+      this.vocab = parsed.model.vocab;
+    } else if (typeof parsed === "object") {
+      this.vocab = parsed;
+    }
+    this.initSpecialTokens();
+  }
+  initSpecialTokens() {
+    if (this.vocab["[UNK]"] !== void 0) this.unkId = this.vocab["[UNK]"];
+    if (this.vocab["[CLS]"] !== void 0) this.clsId = this.vocab["[CLS]"];
+    if (this.vocab["[SEP]"] !== void 0) this.sepId = this.vocab["[SEP]"];
+    if (this.vocab["[PAD]"] !== void 0) this.padId = this.vocab["[PAD]"];
+  }
+  /**
+   * Normalize text by lowercasing and normalizing whitespace.
+   */
+  normalize(text) {
+    return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  }
+  /**
+   * Tokenize an input string into WordPiece token IDs.
+   */
+  tokenize(text) {
+    const normalized = this.normalize(text);
+    const words = normalized.match(/[\w]+|[^\s\w]/g) || [];
+    const tokenIds = [this.clsId];
+    const tokens = ["[CLS]"];
+    for (const word of words) {
+      let start = 0;
+      while (start < word.length) {
+        let end = word.length;
+        let matched = false;
+        while (start < end) {
+          const substr = word.slice(start, end);
+          const piece = start === 0 ? substr : `##${substr}`;
+          if (this.vocab[piece] !== void 0) {
+            tokenIds.push(this.vocab[piece]);
+            tokens.push(piece);
+            start = end;
+            matched = true;
+            break;
+          }
+          end--;
+        }
+        if (!matched) {
+          tokenIds.push(this.unkId);
+          tokens.push("[UNK]");
+          break;
+        }
+        if (tokenIds.length >= this.maxSeqLength - 1) {
+          break;
+        }
+      }
+      if (tokenIds.length >= this.maxSeqLength - 1) {
+        break;
+      }
+    }
+    tokenIds.push(this.sepId);
+    tokens.push("[SEP]");
+    const seqLen = tokenIds.length;
+    const inputIds = new BigInt64Array(seqLen);
+    const attentionMask = new BigInt64Array(seqLen);
+    const tokenTypeIds = new BigInt64Array(seqLen);
+    for (let i = 0; i < seqLen; i++) {
+      inputIds[i] = BigInt(tokenIds[i]);
+      attentionMask[i] = 1n;
+      tokenTypeIds[i] = 0n;
+    }
+    return {
+      inputIds,
+      attentionMask,
+      tokenTypeIds,
+      tokens
+    };
+  }
+};
+
+// src/search/embedder.ts
+import fs2 from "fs";
+import path from "path";
+import os from "os";
+import { createRequire } from "module";
+import { fileURLToPath } from "url";
+import * as ortWeb from "onnxruntime-web";
+var LocalOnnxEmbedder = class _LocalOnnxEmbedder {
+  static DEFAULT_MODEL = "all-MiniLM-L6-v2";
+  static DIMENSIONS = 384;
+  session = null;
+  tokenizer = null;
+  isInitializing = null;
+  backend = "wasm";
+  ort = ortWeb;
+  modelName;
+  modelDir;
+  maxSeqLength;
+  constructor(config) {
+    this.modelName = config?.modelName || _LocalOnnxEmbedder.DEFAULT_MODEL;
+    this.maxSeqLength = config?.maxSeqLength || 128;
+    this.modelDir = config?.modelDir || path.join(os.homedir(), ".amneshia", "models", this.modelName);
+  }
+  getModelName() {
+    return this.modelName;
+  }
+  getDimensions() {
+    return _LocalOnnxEmbedder.DIMENSIONS;
+  }
+  getModelDir() {
+    return this.modelDir;
+  }
+  getBackend() {
+    return this.backend;
+  }
+  /**
+   * Ensure model and tokenizer files exist locally, or download them from HuggingFace.
+   */
+  async ensureModelFiles() {
+    fs2.mkdirSync(this.modelDir, { recursive: true });
+    let modelPath = path.join(this.modelDir, "onnx", "model_quantized.onnx");
+    if (!fs2.existsSync(modelPath)) {
+      modelPath = path.join(this.modelDir, "model_quantized.onnx");
+    }
+    if (!fs2.existsSync(modelPath)) {
+      modelPath = path.join(this.modelDir, "model.onnx");
+    }
+    const tokenizerPath = path.join(this.modelDir, "tokenizer.json");
+    const hasModel = fs2.existsSync(modelPath);
+    const hasTokenizer = fs2.existsSync(tokenizerPath);
+    if (hasModel && hasTokenizer) {
+      return { modelPath, tokenizerPath };
+    }
+    console.log(`[Amneshia Embedder] Downloading ${this.modelName} from HuggingFace Hub...`);
+    if (!hasTokenizer) {
+      const tokenizerUrl = `https://huggingface.co/Xenova/${this.modelName}/resolve/main/tokenizer.json`;
+      console.log(`[Amneshia Embedder] Fetching tokenizer.json...`);
+      const resp = await fetch(tokenizerUrl);
+      if (!resp.ok) throw new Error(`Failed to download tokenizer.json: ${resp.statusText}`);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      fs2.writeFileSync(tokenizerPath, buf);
+    }
+    if (!hasModel) {
+      const targetModelPath = path.join(this.modelDir, "model_quantized.onnx");
+      const modelUrl = `https://huggingface.co/Xenova/${this.modelName}/resolve/main/onnx/model_quantized.onnx`;
+      console.log(`[Amneshia Embedder] Fetching model_quantized.onnx (~23MB)...`);
+      const resp = await fetch(modelUrl);
+      if (!resp.ok) throw new Error(`Failed to download model_quantized.onnx: ${resp.statusText}`);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      fs2.writeFileSync(targetModelPath, buf);
+      modelPath = targetModelPath;
+    }
+    console.log(`[Amneshia Embedder] Model files verified at ${this.modelDir}`);
+    return { modelPath, tokenizerPath };
+  }
+  /**
+   * Initialize ONNX session and tokenizer.
+   * Prioritizes native onnxruntime-node on PC environments for maximum C++ AVX/GPU throughput.
+   * Gracefully falls back to onnxruntime-web WASM SIMD for Termux / mobile userspace.
+   */
+  async init() {
+    if (this.session && this.tokenizer) return;
+    if (this.isInitializing) return this.isInitializing;
+    this.isInitializing = (async () => {
+      const { modelPath, tokenizerPath } = await this.ensureModelFiles();
+      const isAndroid = process.platform === "android" || Boolean(process.env.TERMUX_VERSION);
+      let loadedOrt = null;
+      let selectedBackend = "wasm";
+      if (!isAndroid) {
+        try {
+          const nodeOrt = await import("onnxruntime-node");
+          loadedOrt = nodeOrt.default || nodeOrt;
+          selectedBackend = "native";
+        } catch {
+        }
+      }
+      if (!loadedOrt) {
+        loadedOrt = ortWeb;
+        selectedBackend = "wasm";
+        try {
+          const req = createRequire(import.meta.url);
+          const ortEntry = req.resolve("onnxruntime-web");
+          loadedOrt.env.wasm.wasmPaths = path.dirname(ortEntry) + "/";
+        } catch {
+          try {
+            const currentDir = path.dirname(fileURLToPath(import.meta.url));
+            const candidate = path.join(currentDir, "..", "node_modules", "onnxruntime-web", "dist") + "/";
+            if (fs2.existsSync(candidate)) {
+              loadedOrt.env.wasm.wasmPaths = candidate;
+            } else {
+              loadedOrt.env.wasm.wasmPaths = path.join(process.cwd(), "node_modules", "onnxruntime-web", "dist") + "/";
+            }
+          } catch {
+            loadedOrt.env.wasm.wasmPaths = path.join(process.cwd(), "node_modules", "onnxruntime-web", "dist") + "/";
+          }
+        }
+        loadedOrt.env.wasm.numThreads = 1;
+      }
+      this.ort = loadedOrt;
+      this.backend = selectedBackend;
+      this.tokenizer = new WordPieceTokenizer(tokenizerPath, this.maxSeqLength);
+      this.session = await this.ort.InferenceSession.create(modelPath);
+    })();
+    try {
+      await this.isInitializing;
+    } finally {
+      this.isInitializing = null;
+    }
+  }
+  /**
+   * Generate 384-dimensional normalized vector embedding for an input string.
+   */
+  async embed(text) {
+    await this.init();
+    if (!this.session || !this.tokenizer) {
+      throw new Error("Embedder session not initialized.");
+    }
+    const { inputIds, attentionMask, tokenTypeIds } = this.tokenizer.tokenize(text);
+    const seqLen = inputIds.length;
+    const feeds = {
+      input_ids: new this.ort.Tensor("int64", inputIds, [1, seqLen]),
+      attention_mask: new this.ort.Tensor("int64", attentionMask, [1, seqLen]),
+      token_type_ids: new this.ort.Tensor("int64", tokenTypeIds, [1, seqLen])
+    };
+    const results = await this.session.run(feeds);
+    const lastHidden = results.last_hidden_state;
+    const rawData = lastHidden.cpuData || lastHidden.data;
+    const dim = _LocalOnnxEmbedder.DIMENSIONS;
+    const pooled = new Float32Array(dim);
+    let activeTokenCount = 0;
+    for (let i = 0; i < seqLen; i++) {
+      if (attentionMask[i] === 1n) {
+        activeTokenCount++;
+        const tokenOffset = i * dim;
+        for (let d = 0; d < dim; d++) {
+          pooled[d] += rawData[tokenOffset + d];
+        }
+      }
+    }
+    if (activeTokenCount > 0) {
+      for (let d = 0; d < dim; d++) {
+        pooled[d] /= activeTokenCount;
+      }
+    }
+    let norm = 0;
+    for (let d = 0; d < dim; d++) {
+      norm += pooled[d] * pooled[d];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 1e-12) {
+      for (let d = 0; d < dim; d++) {
+        pooled[d] /= norm;
+      }
+    }
+    return pooled;
+  }
+  /**
+   * Batch embedding generation.
+   * On PC: Parallel chunking with configurable concurrency for fast multi-core inference.
+   * On Termux: Sequential execution to prevent Android Low Memory Killer (LMK) eviction.
+   */
+  async embedBatch(texts, concurrency = 8) {
+    await this.init();
+    const results = new Array(texts.length);
+    const isMobile = process.platform === "android" || Boolean(process.env.TERMUX_VERSION);
+    const limit = isMobile ? 1 : Math.max(1, concurrency);
+    if (limit === 1) {
+      for (let i = 0; i < texts.length; i++) {
+        results[i] = await this.embed(texts[i]);
+      }
+      return results;
+    }
+    for (let i = 0; i < texts.length; i += limit) {
+      const chunk = texts.slice(i, i + limit);
+      const chunkEmbeddings = await Promise.all(chunk.map((t) => this.embed(t)));
+      for (let j = 0; j < chunkEmbeddings.length; j++) {
+        results[i + j] = chunkEmbeddings[j];
+      }
+    }
+    return results;
+  }
+  /**
+   * Cosine similarity between two L2-normalized float vectors.
+   * Since vectors are normalized, cosine similarity is simply the dot product.
+   */
+  static cosineSimilarity(a, b) {
+    let dot = 0;
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+      dot += a[i] * b[i];
+    }
+    return dot;
+  }
+};
+
+// src/search/hybrid.ts
+function fuseRRF(lexicalResults, semanticResults, options) {
+  const k = options?.k || 60;
+  const limit = options?.limit || 20;
+  const entityMap = /* @__PURE__ */ new Map();
+  lexicalResults.forEach((item, index) => {
+    const rank = index + 1;
+    const rrfContrib = 1 / (k + rank);
+    entityMap.set(item.entity.id, {
+      entity: item.entity,
+      observations: [...item.observations],
+      matchedContent: item.matchedContent,
+      lexicalRank: rank,
+      rrfScore: rrfContrib,
+      matchType: "lexical"
+    });
+  });
+  semanticResults.forEach((item, index) => {
+    const rank = index + 1;
+    const rrfContrib = 1 / (k + rank);
+    const existing = entityMap.get(item.entity.id);
+    if (existing) {
+      existing.rrfScore += rrfContrib;
+      existing.semanticRank = rank;
+      existing.semanticSimilarity = item.similarity;
+      existing.matchType = "hybrid";
+      const existingObsIds = new Set(existing.observations.map((o) => o.id));
+      for (const obs of item.observations) {
+        if (!existingObsIds.has(obs.id)) {
+          existing.observations.push(obs);
+          existingObsIds.add(obs.id);
+        }
+      }
+    } else {
+      entityMap.set(item.entity.id, {
+        entity: item.entity,
+        observations: [...item.observations],
+        matchedContent: item.matchedContent,
+        semanticRank: rank,
+        semanticSimilarity: item.similarity,
+        rrfScore: rrfContrib,
+        matchType: "semantic"
+      });
+    }
+  });
+  const sorted = Array.from(entityMap.values()).sort((a, b) => b.rrfScore - a.rrfScore);
+  return sorted.slice(0, limit).map((match) => ({
+    entity: match.entity,
+    observations: match.observations,
+    matchedContent: match.matchedContent,
+    rank: match.rrfScore
+  }));
 }
 
 // src/database/index.ts
@@ -197,10 +585,10 @@ function uuid() {
   return crypto.randomUUID();
 }
 function homedirDataDir() {
-  return path.join(os.homedir(), ".amneshia");
+  return path2.join(os2.homedir(), ".amneshia");
 }
 function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
+  fs3.mkdirSync(dir, { recursive: true });
 }
 function toAllowedAgents(value) {
   if (!value) return [];
@@ -422,7 +810,7 @@ var DatabaseLayer = class {
   constructor(dataDir) {
     this.dataDir = dataDir ?? homedirDataDir();
     ensureDir(this.dataDir);
-    const databasePath = path.join(this.dataDir, "memory.db");
+    const databasePath = path2.join(this.dataDir, "memory.db");
     this.db = new Database(databasePath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
@@ -438,15 +826,15 @@ var DatabaseLayer = class {
   }
   ensureDefaultExportTargets() {
     try {
-      const defaultPath = path.join(os.homedir(), ".amneshia", "export", "MEMORY.md");
-      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(defaultPath);
+      const defaultPath = path2.join(os2.homedir(), ".amneshia", "export", "MEMORY.md");
+      const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?").get("Memory Default", defaultPath);
       if (check1.count === 0) {
-        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", defaultPath, "markdown", 1);
+        this.db.prepare("INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", defaultPath, "markdown", 1);
       }
-      const projectPath = path.join(process.cwd(), "MEMORY.md");
-      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE path = ?").get(projectPath);
+      const projectPath = path2.join(process.cwd(), "MEMORY.md");
+      const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?").get("Amneshia Project", projectPath);
       if (check2.count === 0) {
-        this.db.prepare("INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", projectPath, "markdown", 1);
+        this.db.prepare("INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", projectPath, "markdown", 1);
       }
     } catch (e) {
       console.error("Failed to configure default export targets:", e);
@@ -588,6 +976,18 @@ var DatabaseLayer = class {
       insertAccessLog: this.db.prepare("INSERT INTO access_log (id, entity_id, observation_id, accessed_at) VALUES (?, ?, ?, ?)"),
       incrementAccess: this.db.prepare(
         "UPDATE observations SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?"
+      ),
+      upsertEmbedding: this.db.prepare(
+        "INSERT OR REPLACE INTO observation_embeddings (observation_id, dimensions, vector, model, created_at) VALUES (?, ?, ?, ?, ?)"
+      ),
+      getEmbedding: this.db.prepare(
+        "SELECT vector, dimensions, model FROM observation_embeddings WHERE observation_id = ?"
+      ),
+      getAllEmbeddings: this.db.prepare(
+        "SELECT oe.observation_id, oe.vector, o.entity_id, o.content, o.status, o.authority_tier FROM observation_embeddings oe JOIN observations o ON oe.observation_id = o.id WHERE oe.model = ?"
+      ),
+      getUnembeddedObservations: this.db.prepare(
+        "SELECT o.id, o.entity_id, o.content FROM observations o LEFT JOIN observation_embeddings oe ON o.id = oe.observation_id AND oe.model = ? WHERE oe.observation_id IS NULL AND o.status != 'invalidated' AND o.status != 'decayed'"
       )
     };
   }
@@ -859,6 +1259,76 @@ var DatabaseLayer = class {
     const cleaned = stripStopWords(query);
     return this.searchFTS(cleaned, limit, includeInactive);
   }
+  saveObservationEmbedding(observationId, vector, model = LocalOnnxEmbedder.DEFAULT_MODEL) {
+    const buffer = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+    this.statements.upsertEmbedding.run(observationId, vector.length, buffer, model, nowIso());
+  }
+  getObservationEmbedding(observationId) {
+    const row = this.statements.getEmbedding.get(observationId);
+    if (!row) return null;
+    return new Float32Array(row.vector.buffer, row.vector.byteOffset, row.dimensions);
+  }
+  getUnembeddedObservations(model = LocalOnnxEmbedder.DEFAULT_MODEL) {
+    return this.statements.getUnembeddedObservations.all(model);
+  }
+  clearEmbeddings(model) {
+    if (model) {
+      this.db.prepare("DELETE FROM observation_embeddings WHERE model = ?").run(model);
+    } else {
+      this.db.prepare("DELETE FROM observation_embeddings").run();
+    }
+  }
+  searchVector(queryVector, limit = 20, model = LocalOnnxEmbedder.DEFAULT_MODEL, minSimilarity = 0.25) {
+    const rows = this.statements.getAllEmbeddings.all(model);
+    const scored = [];
+    const dim = queryVector.length;
+    for (const r of rows) {
+      if (r.status === "invalidated" || r.status === "decayed") continue;
+      const v = new Float32Array(r.vector.buffer, r.vector.byteOffset, dim);
+      let dot = 0;
+      for (let i = 0; i < dim; i++) {
+        dot += queryVector[i] * v[i];
+      }
+      if (dot >= minSimilarity) {
+        scored.push({ row: r, similarity: dot });
+      }
+    }
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const topScored = scored.slice(0, limit);
+    const results = [];
+    for (const item of topScored) {
+      const entityRow = this.getEntityRowById(item.row.entity_id);
+      if (!entityRow) continue;
+      const entity = toEntity(entityRow);
+      const obs = this.getObservationsByEntity(entity.id).filter((o) => o.id === item.row.observation_id);
+      results.push({
+        entity,
+        observations: obs,
+        matchedContent: item.row.content,
+        similarity: item.similarity
+      });
+    }
+    return results;
+  }
+  async searchHybrid(query, options) {
+    const limit = options?.limit || 20;
+    const lexicalResults = this.searchFTSRelevant(query, limit * 2);
+    try {
+      const embedder = options?.embedder ?? new LocalOnnxEmbedder();
+      const queryVector = await embedder.embed(query);
+      const semanticResults = this.searchVector(queryVector, limit * 2, embedder.getModelName(), options?.minSimilarity ?? 0.2);
+      let fused = fuseRRF(lexicalResults, semanticResults, { limit, k: 60 });
+      if (options?.domain) {
+        fused = fused.filter((r) => r.entity.domain === options.domain);
+      }
+      return fused.slice(0, limit);
+    } catch {
+      if (options?.domain) {
+        return lexicalResults.filter((r) => r.entity.domain === options.domain).slice(0, limit);
+      }
+      return lexicalResults.slice(0, limit);
+    }
+  }
   readGraph(domain, entityType, statusFilter) {
     const rows = this.statements.readGraphEntities.all(domain ?? null, domain ?? null, entityType ?? null, entityType ?? null);
     const entities = rows.map((row) => {
@@ -959,8 +1429,8 @@ var DatabaseLayer = class {
 };
 
 // src/export/markdown.ts
-import fs2 from "fs";
-import path2 from "path";
+import fs4 from "fs";
+import path3 from "path";
 function groupTitle(entityType) {
   const normalized = entityType.trim().toLowerCase();
   if (normalized === "person" || normalized === "people") return "People";
@@ -1017,7 +1487,7 @@ function resolveTargetPath(targetPath) {
   if (targetPath.endsWith(".md")) {
     return targetPath;
   }
-  return path2.join(targetPath, "MEMORY.md");
+  return path3.join(targetPath, "MEMORY.md");
 }
 function exportToMarkdown(graph, forceAll = false) {
   const targets = graph.manageExportTargets({ action: "list" });
@@ -1029,8 +1499,8 @@ function exportToMarkdown(graph, forceAll = false) {
     if (!forceAll && !target.autoExport) continue;
     try {
       const outputPath = resolveTargetPath(target.path);
-      fs2.mkdirSync(path2.dirname(outputPath), { recursive: true });
-      fs2.writeFileSync(outputPath, markdown, "utf8");
+      fs4.mkdirSync(path3.dirname(outputPath), { recursive: true });
+      fs4.writeFileSync(outputPath, markdown, "utf8");
       writes.push({ target: target.name, path: outputPath });
     } catch (error) {
       console.warn(`Export target "${target.name}" failed:`, error instanceof Error ? error.message : error);
@@ -1532,7 +2002,7 @@ function registerCoreTools(server, graph, db) {
     },
     async ({ query, token_budget = 2e3, domain, depth = 0 }) => {
       try {
-        const rawResults = db.searchFTSRelevant(query, 20);
+        const rawResults = await db.searchHybrid(query, { limit: 20, domain });
         const filtered = domain ? rawResults.filter((r) => r.entity.domain === domain) : rawResults;
         const results = [];
         let currentTokens = 0;
@@ -2175,9 +2645,9 @@ function registerUtilityTools(server, graph) {
       format: z7.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
       id: z7.string().optional().describe("Export target id when removing a destination")
     },
-    async ({ action, name, path: path10, format, id }) => {
+    async ({ action, name, path: path11, format, id }) => {
       try {
-        const result = graph.manageExportTargets({ action, name, path: path10, format, id });
+        const result = graph.manageExportTargets({ action, name, path: path11, format, id });
         return textContent7({ ok: true, result });
       } catch (error) {
         return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
@@ -2200,17 +2670,17 @@ function registerTools(server, graph, db, profile = "full") {
 }
 
 // src/server.ts
-import path6 from "path";
-import { fileURLToPath } from "url";
+import path7 from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/storage/index.ts
-import fs5 from "fs";
-import os3 from "os";
-import path5 from "path";
+import fs7 from "fs";
+import os4 from "os";
+import path6 from "path";
 
 // src/storage/markdown-store.ts
-import fs3 from "fs";
-import path3 from "path";
+import fs5 from "fs";
+import path4 from "path";
 
 // src/storage/slug.ts
 function toSlug(text) {
@@ -2390,38 +2860,38 @@ function parseEntityMarkdown(content) {
 function getEntityFilePath(knowledgeDir, domain, name) {
   const domainSlug = toSlug(domain);
   const nameSlug = toSlug(name);
-  return path3.join(knowledgeDir, domainSlug, `${nameSlug}.md`);
+  return path4.join(knowledgeDir, domainSlug, `${nameSlug}.md`);
 }
 function saveEntityMarkdown(knowledgeDir, entity, observations, relations) {
   const filePath = getEntityFilePath(knowledgeDir, entity.domain, entity.name);
-  const dir = path3.dirname(filePath);
-  fs3.mkdirSync(dir, { recursive: true });
+  const dir = path4.dirname(filePath);
+  fs5.mkdirSync(dir, { recursive: true });
   const content = serializeEntity(entity, observations, relations);
-  fs3.writeFileSync(filePath, content, "utf-8");
+  fs5.writeFileSync(filePath, content, "utf-8");
   return filePath;
 }
 function deleteEntityMarkdown(knowledgeDir, domain, name) {
   const filePath = getEntityFilePath(knowledgeDir, domain, name);
-  if (fs3.existsSync(filePath)) {
-    fs3.unlinkSync(filePath);
+  if (fs5.existsSync(filePath)) {
+    fs5.unlinkSync(filePath);
     return true;
   }
   return false;
 }
 function loadAllEntityMarkdowns(knowledgeDir) {
-  if (!fs3.existsSync(knowledgeDir)) {
+  if (!fs5.existsSync(knowledgeDir)) {
     return [];
   }
   const results = [];
   function scan(dir) {
-    const entries = fs3.readdirSync(dir, { withFileTypes: true });
+    const entries = fs5.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = path3.join(dir, entry.name);
+      const fullPath = path4.join(dir, entry.name);
       if (entry.isDirectory()) {
         scan(fullPath);
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
         try {
-          const content = fs3.readFileSync(fullPath, "utf-8");
+          const content = fs5.readFileSync(fullPath, "utf-8");
           const parsed = parseEntityMarkdown(content);
           results.push(parsed);
         } catch (e) {
@@ -2497,23 +2967,23 @@ function reindexFromMarkdown(knowledgeDir, db) {
 }
 
 // src/storage/adopt.ts
-import fs4 from "fs";
-import path4 from "path";
-import os2 from "os";
+import fs6 from "fs";
+import path5 from "path";
+import os3 from "os";
 async function adoptMemory(options = {}) {
-  const sourceDir = path4.resolve(options.sourceDataDir ?? path4.join(os2.homedir(), ".amneshia"));
-  const targetDir = path4.resolve(options.targetDataDir ?? path4.join(process.cwd(), ".amneshia"));
+  const sourceDir = path5.resolve(options.sourceDataDir ?? path5.join(os3.homedir(), ".amneshia"));
+  const targetDir = path5.resolve(options.targetDataDir ?? path5.join(process.cwd(), ".amneshia"));
   const dryRun = options.dryRun ?? false;
   const isMove = options.move ?? false;
-  if (!fs4.existsSync(sourceDir)) {
+  if (!fs6.existsSync(sourceDir)) {
     throw new Error(`Source Amneshia directory not found: ${sourceDir}`);
   }
   if (!dryRun) {
-    fs4.mkdirSync(path4.join(targetDir, "knowledge"), { recursive: true });
+    fs6.mkdirSync(path5.join(targetDir, "knowledge"), { recursive: true });
   }
   const sourceDb = new DatabaseLayer(sourceDir);
   const targetDb = dryRun ? null : new DatabaseLayer(targetDir);
-  const targetDualWrite = dryRun ? null : new DualWriteSync(path4.join(targetDir, "knowledge"), targetDb);
+  const targetDualWrite = dryRun ? null : new DualWriteSync(path5.join(targetDir, "knowledge"), targetDb);
   try {
     const sourceSnapshot = sourceDb.readGraph(options.domain);
     const targetEntitiesFilter = options.entities?.map((e) => e.trim().toLowerCase());
@@ -2621,7 +3091,7 @@ async function adoptMemory(options = {}) {
       }
     }
     if (isMove && !dryRun) {
-      const sourceDualWrite = new DualWriteSync(path4.join(sourceDir, "knowledge"), sourceDb);
+      const sourceDualWrite = new DualWriteSync(path5.join(sourceDir, "knowledge"), sourceDb);
       for (const sourceEntity of candidates) {
         sourceDb.deleteEntity(sourceEntity.id);
         sourceDualWrite.removeEntity(sourceEntity.domain, sourceEntity.name);
@@ -2639,30 +3109,30 @@ async function adoptMemory(options = {}) {
 // src/storage/index.ts
 function resolveStorageConfig(forceLocal = false) {
   const cwd = process.cwd();
-  const localAmneshiaDir = path5.join(cwd, ".amneshia");
-  if (forceLocal || fs5.existsSync(localAmneshiaDir)) {
+  const localAmneshiaDir = path6.join(cwd, ".amneshia");
+  if (forceLocal || fs7.existsSync(localAmneshiaDir)) {
     return {
       mode: "local",
       dataDir: localAmneshiaDir,
-      knowledgeDir: path5.join(localAmneshiaDir, "knowledge")
+      knowledgeDir: path6.join(localAmneshiaDir, "knowledge")
     };
   }
-  const globalDir = path5.join(os3.homedir(), ".amneshia");
+  const globalDir = path6.join(os4.homedir(), ".amneshia");
   return {
     mode: "global",
     dataDir: globalDir,
-    knowledgeDir: path5.join(globalDir, "knowledge")
+    knowledgeDir: path6.join(globalDir, "knowledge")
   };
 }
 function initAmneshiaProject(targetDir = process.cwd()) {
-  const dataDir = path5.join(targetDir, ".amneshia");
-  const knowledgeDir = path5.join(dataDir, "knowledge");
-  const configPath = path5.join(dataDir, "config.yaml");
-  const gitignorePath = path5.join(dataDir, ".gitignore");
-  fs5.mkdirSync(knowledgeDir, { recursive: true });
-  if (!fs5.existsSync(configPath)) {
+  const dataDir = path6.join(targetDir, ".amneshia");
+  const knowledgeDir = path6.join(dataDir, "knowledge");
+  const configPath = path6.join(dataDir, "config.yaml");
+  const gitignorePath = path6.join(dataDir, ".gitignore");
+  fs7.mkdirSync(knowledgeDir, { recursive: true });
+  if (!fs7.existsSync(configPath)) {
     const defaultConfig = `# Amneshia v3 Project Configuration
-version: "3.0.3"
+version: "3.1.0"
 storage:
   mode: "local"
   dual_write: true
@@ -2673,16 +3143,16 @@ maintenance:
   jaccard_threshold: 0.8
   decay_enabled: true
 `;
-    fs5.writeFileSync(configPath, defaultConfig, "utf-8");
+    fs7.writeFileSync(configPath, defaultConfig, "utf-8");
   }
-  if (!fs5.existsSync(gitignorePath)) {
+  if (!fs7.existsSync(gitignorePath)) {
     const defaultGitignore = `# Amneshia ephemeral SQLite cache (rebuilt automatically from knowledge/)
 *.db
 *.db-wal
 *.db-shm
 *.log
 `;
-    fs5.writeFileSync(gitignorePath, defaultGitignore, "utf-8");
+    fs7.writeFileSync(gitignorePath, defaultGitignore, "utf-8");
   }
   return { dataDir, knowledgeDir };
 }
@@ -2690,7 +3160,7 @@ var DualWriteSync = class {
   constructor(knowledgeDir, database) {
     this.knowledgeDir = knowledgeDir;
     this.database = database;
-    fs5.mkdirSync(this.knowledgeDir, { recursive: true });
+    fs7.mkdirSync(this.knowledgeDir, { recursive: true });
   }
   knowledgeDir;
   database;
@@ -2723,7 +3193,7 @@ async function startServer(options = {}) {
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: "Amneshia", version: "3.0.3" });
+  const server = new McpServer({ name: "Amneshia", version: "3.1.0" });
   registerTools(server, graph, db, options.toolProfile);
   const cleanup = async () => {
     process.exit(0);
@@ -2749,7 +3219,7 @@ async function startServer(options = {}) {
       await transport.handlePostMessage(req, res);
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "3.0.3" });
+      res.json({ status: "ok", name: "amneshia", version: "3.1.0" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
@@ -2790,11 +3260,11 @@ async function startServer(options = {}) {
       const result = runMaintenance(graph, db, req.body?.domain, req.body?.dryRun === true);
       res.json({ ok: true, result });
     });
-    const uiPath = path6.join(path6.dirname(fileURLToPath(import.meta.url)), "../dist-ui");
+    const uiPath = path7.join(path7.dirname(fileURLToPath2(import.meta.url)), "../dist-ui");
     app.use(express.static(uiPath));
     app.use((req, res, next) => {
       if (req.path.startsWith("/api") || req.path === "/sse" || req.path === "/messages") return next();
-      res.sendFile(path6.join(uiPath, "index.html"));
+      res.sendFile(path7.join(uiPath, "index.html"));
     });
     const httpListener = app.listen(options.port || 3457, () => {
       console.error(`[Amneshia] HTTP Dashboard running on http://localhost:${options.port || 3457}`);
@@ -2815,8 +3285,8 @@ async function startServer(options = {}) {
 }
 
 // src/export/exporter.ts
-import fs6 from "fs";
-import path7 from "path";
+import fs8 from "fs";
+import path8 from "path";
 import Database2 from "better-sqlite3";
 function filterMemoryGraph(db, filters) {
   const snapshot = db.readGraph(filters.domain);
@@ -2878,7 +3348,7 @@ var MemoryExporter = class {
    * Export memory graph based on format and output destination.
    */
   async export(format, outputPath, filters = {}) {
-    const resolvedPath = path7.resolve(outputPath);
+    const resolvedPath = path8.resolve(outputPath);
     const filteredData = filterMemoryGraph(this.db, filters);
     let totalObs = 0;
     const uniqueRelIds = /* @__PURE__ */ new Set();
@@ -2911,19 +3381,19 @@ var MemoryExporter = class {
     };
   }
   exportToJson(outputPath, data) {
-    const parentDir = path7.dirname(outputPath);
-    fs6.mkdirSync(parentDir, { recursive: true });
+    const parentDir = path8.dirname(outputPath);
+    fs8.mkdirSync(parentDir, { recursive: true });
     const payload = {
       formatVersion: "3.0.0",
-      version: "3.0.3",
+      version: "3.1.0",
       exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
       entitiesCount: data.length,
       entities: data
     };
-    fs6.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+    fs8.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
   }
   exportToMarkdown(outputDir, data) {
-    fs6.mkdirSync(outputDir, { recursive: true });
+    fs8.mkdirSync(outputDir, { recursive: true });
     for (const ent of data) {
       saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations);
     }
@@ -2942,13 +3412,13 @@ var MemoryExporter = class {
       indexLines.push(`- [${ent.name}](./${domainSlug}/${nameSlug}.md) (${ent.domain} / ${ent.entityType}) \u2014 ${ent.observations.length} observations`);
     }
     indexLines.push("");
-    fs6.writeFileSync(path7.join(outputDir, "index.md"), indexLines.join("\n"), "utf-8");
+    fs8.writeFileSync(path8.join(outputDir, "index.md"), indexLines.join("\n"), "utf-8");
   }
   exportToSqlite(outputPath, data) {
-    const parentDir = path7.dirname(outputPath);
-    fs6.mkdirSync(parentDir, { recursive: true });
-    if (fs6.existsSync(outputPath)) {
-      fs6.unlinkSync(outputPath);
+    const parentDir = path8.dirname(outputPath);
+    fs8.mkdirSync(parentDir, { recursive: true });
+    if (fs8.existsSync(outputPath)) {
+      fs8.unlinkSync(outputPath);
     }
     const exportDb = new Database2(outputPath);
     try {
@@ -3030,9 +3500,9 @@ var MemoryExporter = class {
 };
 
 // src/cloud/git-sync.ts
-import fs7 from "fs";
-import path8 from "path";
-import os4 from "os";
+import fs9 from "fs";
+import path9 from "path";
+import os5 from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 var execFileAsync = promisify(execFile);
@@ -3045,26 +3515,26 @@ async function git(cwd, args) {
   }
 }
 function getCloudConfigPath(knowledgeDir) {
-  return path8.join(path8.dirname(knowledgeDir), "cloud.json");
+  return path9.join(path9.dirname(knowledgeDir), "cloud.json");
 }
 function readCloudConfig(knowledgeDir) {
   const cfgPath = getCloudConfigPath(knowledgeDir);
-  if (!fs7.existsSync(cfgPath)) return null;
+  if (!fs9.existsSync(cfgPath)) return null;
   try {
-    return JSON.parse(fs7.readFileSync(cfgPath, "utf-8"));
+    return JSON.parse(fs9.readFileSync(cfgPath, "utf-8"));
   } catch {
     return null;
   }
 }
 function saveCloudConfig(knowledgeDir, config) {
   const cfgPath = getCloudConfigPath(knowledgeDir);
-  fs7.mkdirSync(path8.dirname(cfgPath), { recursive: true });
-  fs7.writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
+  fs9.mkdirSync(path9.dirname(cfgPath), { recursive: true });
+  fs9.writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
 }
 async function setupGitRemote(knowledgeDir, remoteUrl, branch = "main") {
-  fs7.mkdirSync(knowledgeDir, { recursive: true });
-  const gitDir = path8.join(knowledgeDir, ".git");
-  if (!fs7.existsSync(gitDir)) {
+  fs9.mkdirSync(knowledgeDir, { recursive: true });
+  const gitDir = path9.join(knowledgeDir, ".git");
+  if (!fs9.existsSync(gitDir)) {
     await git(knowledgeDir, ["init", "-b", branch]);
   }
   try {
@@ -3073,9 +3543,9 @@ async function setupGitRemote(knowledgeDir, remoteUrl, branch = "main") {
     await git(knowledgeDir, ["config", "user.name", "Amneshia Agent"]);
     await git(knowledgeDir, ["config", "user.email", "amneshia@local"]);
   }
-  const gitignorePath = path8.join(knowledgeDir, ".gitignore");
-  if (!fs7.existsSync(gitignorePath)) {
-    fs7.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+  const gitignorePath = path9.join(knowledgeDir, ".gitignore");
+  if (!fs9.existsSync(gitignorePath)) {
+    fs9.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
   }
   let hasOrigin = false;
   try {
@@ -3093,11 +3563,37 @@ async function setupGitRemote(knowledgeDir, remoteUrl, branch = "main") {
     branch,
     lastSyncAt: null
   });
+  await setupMergeDriver(knowledgeDir);
   return { success: true, remoteUrl, branch };
 }
+async function setupMergeDriver(knowledgeDir, options) {
+  if (options?.isGlobal) {
+    await git(process.cwd(), ["config", "--global", "merge.amneshia.name", "Amneshia Markdown 3-Way Merge Driver"]);
+    await git(process.cwd(), ["config", "--global", "merge.amneshia.driver", "amneshia cloud merge-driver %O %A %B %P"]);
+    return true;
+  }
+  const gitDir = path9.join(knowledgeDir, ".git");
+  if (!fs9.existsSync(gitDir)) return false;
+  const gitattributesPath = path9.join(knowledgeDir, ".gitattributes");
+  const attrLine = "*.md merge=amneshia";
+  if (!fs9.existsSync(gitattributesPath)) {
+    fs9.writeFileSync(gitattributesPath, `${attrLine}
+`, "utf-8");
+  } else {
+    const content = fs9.readFileSync(gitattributesPath, "utf-8");
+    if (!content.includes("merge=amneshia")) {
+      fs9.appendFileSync(gitattributesPath, `
+${attrLine}
+`, "utf-8");
+    }
+  }
+  await git(knowledgeDir, ["config", "merge.amneshia.name", "Amneshia Markdown 3-Way Merge Driver"]);
+  await git(knowledgeDir, ["config", "merge.amneshia.driver", "amneshia cloud merge-driver %O %A %B %P"]);
+  return true;
+}
 async function getCloudStatus(knowledgeDir) {
-  const gitDir = path8.join(knowledgeDir, ".git");
-  const initialized = fs7.existsSync(gitDir);
+  const gitDir = path9.join(knowledgeDir, ".git");
+  const initialized = fs9.existsSync(gitDir);
   const config = readCloudConfig(knowledgeDir);
   if (!initialized) {
     return {
@@ -3139,18 +3635,32 @@ async function cloudPull(knowledgeDir, db, branch = "main") {
   if (!status.initialized || !status.remoteUrl) {
     throw new Error('Cloud sync not initialized. Run "amneshia cloud setup <remote-url>" first.');
   }
-  const gitignorePath = path8.join(knowledgeDir, ".gitignore");
+  const gitignorePath = path9.join(knowledgeDir, ".gitignore");
   let hadUntrackedGitignore = false;
-  if (fs7.existsSync(gitignorePath)) {
+  if (fs9.existsSync(gitignorePath)) {
     try {
       const { stdout } = await git(knowledgeDir, ["status", "--porcelain", ".gitignore"]);
       if (stdout.includes("??")) {
-        fs7.unlinkSync(gitignorePath);
+        fs9.unlinkSync(gitignorePath);
         hadUntrackedGitignore = true;
       }
     } catch {
     }
   }
+  const gitattributesPath = path9.join(knowledgeDir, ".gitattributes");
+  let hadUntrackedGitattributes = false;
+  if (fs9.existsSync(gitattributesPath)) {
+    try {
+      const { stdout } = await git(knowledgeDir, ["status", "--porcelain", ".gitattributes"]);
+      if (stdout.includes("??")) {
+        fs9.unlinkSync(gitattributesPath);
+        hadUntrackedGitattributes = true;
+      }
+    } catch {
+    }
+  }
+  await git(knowledgeDir, ["config", "merge.amneshia.name", "Amneshia Markdown 3-Way Merge Driver"]);
+  await git(knowledgeDir, ["config", "merge.amneshia.driver", "amneshia cloud merge-driver %O %A %B %P"]);
   let rawOutput = "";
   try {
     const res = await git(knowledgeDir, ["pull", "origin", branch, "--no-rebase"]);
@@ -3159,15 +3669,19 @@ async function cloudPull(knowledgeDir, db, branch = "main") {
     if (err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
       rawOutput = "Remote branch does not exist yet; continuing with local state.";
     } else {
-      if (hadUntrackedGitignore && !fs7.existsSync(gitignorePath)) {
-        fs7.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+      if (hadUntrackedGitignore && !fs9.existsSync(gitignorePath)) {
+        fs9.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+      }
+      if (hadUntrackedGitattributes && !fs9.existsSync(gitattributesPath)) {
+        fs9.writeFileSync(gitattributesPath, "*.md merge=amneshia\n", "utf-8");
       }
       throw err;
     }
   }
-  if (!fs7.existsSync(gitignorePath)) {
-    fs7.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+  if (!fs9.existsSync(gitignorePath)) {
+    fs9.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
   }
+  await setupMergeDriver(knowledgeDir);
   const reindex = reindexFromMarkdown(knowledgeDir, db);
   const cfg = readCloudConfig(knowledgeDir) ?? { remoteUrl: status.remoteUrl, branch, lastSyncAt: null };
   cfg.lastSyncAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -3187,7 +3701,7 @@ async function cloudPush(knowledgeDir, message, branch = "main") {
   const { stdout: statusOut } = await git(knowledgeDir, ["status", "--porcelain"]);
   const hasChanges = statusOut.trim().length > 0;
   if (hasChanges) {
-    const hostname = os4.hostname();
+    const hostname = os5.hostname();
     const timestamp = (/* @__PURE__ */ new Date()).toISOString();
     const commitMsg = message ?? `amneshia(sync): update knowledge graph from ${hostname} (${timestamp})`;
     await git(knowledgeDir, ["commit", "-m", commitMsg]);
@@ -3218,19 +3732,316 @@ async function cloudSync(knowledgeDir, db, branch = "main") {
   };
 }
 
+// src/cloud/merge-driver.ts
+import fs10 from "fs";
+function normalizeContent(content) {
+  return content.trim().replace(/\s+/g, " ").toLowerCase();
+}
+function extractDirectionalRelations(markdown) {
+  const relations = [];
+  const relSectionMatch = markdown.match(/## Relations\r?\n([\s\S]*?)$/i);
+  if (!relSectionMatch) return relations;
+  const lines = relSectionMatch[1].split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- `"));
+  for (const line of lines) {
+    const relMatch = line.match(/^- `(.*?)`\s*(->|<-)\s*(.*)$/);
+    if (relMatch) {
+      relations.push({
+        relationType: relMatch[1].trim(),
+        direction: relMatch[2],
+        targetName: relMatch[3].trim()
+      });
+    }
+  }
+  return relations;
+}
+function serializeParsedEntity(entity) {
+  const frontmatter = [
+    "---",
+    `id: ${JSON.stringify(entity.id || "")}`,
+    `name: ${JSON.stringify(entity.name || "")}`,
+    `type: ${JSON.stringify(entity.entityType || "concept")}`,
+    `domain: ${JSON.stringify(entity.domain || "personal")}`,
+    `visibility: ${JSON.stringify(entity.visibility || "public")}`,
+    `allowed_agents: ${JSON.stringify(entity.allowedAgents ?? [])}`,
+    `created: ${JSON.stringify(entity.createdAt || (/* @__PURE__ */ new Date()).toISOString())}`,
+    `updated: ${JSON.stringify(entity.updatedAt || (/* @__PURE__ */ new Date()).toISOString())}`,
+    "---"
+  ].join("\n");
+  const obsLines = [];
+  for (const obs of entity.observations) {
+    const isInactive = obs.status === "superseded" || obs.status === "invalidated" || obs.status === "decayed";
+    const mainText = `**[${obs.authorityTier}]** ${obs.content}`;
+    const formattedText = isInactive ? `~~${mainText}~~` : mainText;
+    const metaParts = [
+      `id: ${obs.id}`,
+      `confidence: ${obs.confidence}`
+    ];
+    if (obs.derivedFrom && obs.derivedFrom.length > 0) {
+      metaParts.push(`derived_from: [${obs.derivedFrom.join(", ")}]`);
+    }
+    metaParts.push(`status: ${obs.status}`);
+    if (obs.supersedes) {
+      metaParts.push(`superseded_by: ${obs.supersedes}`);
+    }
+    obsLines.push(`- ${formattedText}
+  \`${metaParts.join(" | ")}\``);
+  }
+  const relLines = [];
+  for (const rel of entity.relations) {
+    const dir = rel.direction || "->";
+    relLines.push(`- \`${rel.relationType}\` ${dir} ${rel.targetName}`);
+  }
+  const sections = [frontmatter];
+  sections.push("## Observations\n");
+  if (obsLines.length > 0) {
+    sections.push(obsLines.join("\n\n"));
+  } else {
+    sections.push("_No observations recorded yet._");
+  }
+  sections.push("\n## Relations\n");
+  if (relLines.length > 0) {
+    sections.push(relLines.join("\n"));
+  } else {
+    sections.push("_No relations recorded yet._");
+  }
+  return sections.join("\n") + "\n";
+}
+function tierRank(tier) {
+  switch (tier) {
+    case "invariant":
+      return 4;
+    case "architectural":
+      return 3;
+    case "contextual":
+      return 2;
+    case "ephemeral":
+      return 1;
+    default:
+      return 0;
+  }
+}
+function mergeParsedEntities(base, ours, theirs) {
+  const id = ours.id || theirs.id || (base?.id ?? "");
+  const name = ours.name || theirs.name || (base?.name ?? "");
+  const entityType = theirs.entityType !== base?.entityType ? theirs.entityType : ours.entityType || "concept";
+  const domain = theirs.domain !== base?.domain ? theirs.domain : ours.domain || "personal";
+  const visibility = theirs.visibility !== base?.visibility ? theirs.visibility : ours.visibility || "public";
+  const mergedAgents = Array.from(/* @__PURE__ */ new Set([...ours.allowedAgents ?? [], ...theirs.allowedAgents ?? []]));
+  const createdAt = [ours.createdAt, theirs.createdAt, base?.createdAt].filter(Boolean).sort()[0] || (/* @__PURE__ */ new Date()).toISOString();
+  const updatedAt = [ours.updatedAt, theirs.updatedAt].filter(Boolean).sort().reverse()[0] || (/* @__PURE__ */ new Date()).toISOString();
+  const baseObsById = /* @__PURE__ */ new Map();
+  const baseObsByContent = /* @__PURE__ */ new Map();
+  if (base) {
+    for (const obs of base.observations) {
+      if (obs.id) baseObsById.set(obs.id, obs);
+      baseObsByContent.set(normalizeContent(obs.content), obs);
+    }
+  }
+  const oursObsById = /* @__PURE__ */ new Map();
+  const oursObsByContent = /* @__PURE__ */ new Map();
+  for (const obs of ours.observations) {
+    if (obs.id) oursObsById.set(obs.id, obs);
+    oursObsByContent.set(normalizeContent(obs.content), obs);
+  }
+  const theirsObsById = /* @__PURE__ */ new Map();
+  const theirsObsByContent = /* @__PURE__ */ new Map();
+  for (const obs of theirs.observations) {
+    if (obs.id) theirsObsById.set(obs.id, obs);
+    theirsObsByContent.set(normalizeContent(obs.content), obs);
+  }
+  const candidateObservations = [];
+  const mergeTwoObs = (a, b) => {
+    const higherTier = tierRank(a.authorityTier) >= tierRank(b.authorityTier) ? a.authorityTier : b.authorityTier;
+    const combinedDerived = Array.from(/* @__PURE__ */ new Set([...a.derivedFrom ?? [], ...b.derivedFrom ?? []]));
+    const bestStatus = a.status === "active" || b.status === "active" ? "active" : a.status === "stale" || b.status === "stale" ? "stale" : a.status;
+    return {
+      id: a.id || b.id,
+      content: a.content.length >= b.content.length ? a.content : b.content,
+      authorityTier: higherTier,
+      derivedFrom: combinedDerived,
+      confidence: Math.max(a.confidence ?? 1, b.confidence ?? 1),
+      status: bestStatus,
+      supersedes: a.supersedes || b.supersedes || null
+    };
+  };
+  if (!base) {
+    const seenContent = /* @__PURE__ */ new Set();
+    const all = [...ours.observations, ...theirs.observations];
+    for (const obs of all) {
+      const norm = normalizeContent(obs.content);
+      const counterpart = theirsObsByContent.get(norm) || oursObsByContent.get(norm);
+      if (counterpart && counterpart !== obs) {
+        if (!seenContent.has(norm)) {
+          candidateObservations.push(mergeTwoObs(obs, counterpart));
+          seenContent.add(norm);
+        }
+      } else if (!seenContent.has(norm)) {
+        candidateObservations.push(obs);
+        seenContent.add(norm);
+      }
+    }
+  } else {
+    const processedIds = /* @__PURE__ */ new Set();
+    const processedContent = /* @__PURE__ */ new Set();
+    for (const oObs of ours.observations) {
+      const norm = normalizeContent(oObs.content);
+      const bObs = (oObs.id ? baseObsById.get(oObs.id) : void 0) || baseObsByContent.get(norm);
+      const tObs = (oObs.id ? theirsObsById.get(oObs.id) : void 0) || theirsObsByContent.get(norm);
+      if (!bObs) {
+        if (tObs) {
+          candidateObservations.push(mergeTwoObs(oObs, tObs));
+        } else {
+          candidateObservations.push(oObs);
+        }
+      } else {
+        if (!tObs) {
+          const oursModified = JSON.stringify(oObs) !== JSON.stringify(bObs);
+          if (oursModified) {
+            candidateObservations.push(oObs);
+          }
+        } else {
+          const oursChanged = JSON.stringify(oObs) !== JSON.stringify(bObs);
+          const theirsChanged = JSON.stringify(tObs) !== JSON.stringify(bObs);
+          if (!oursChanged && theirsChanged) {
+            candidateObservations.push(tObs);
+          } else if (oursChanged && !theirsChanged) {
+            candidateObservations.push(oObs);
+          } else if (oursChanged && theirsChanged) {
+            candidateObservations.push(mergeTwoObs(oObs, tObs));
+          } else {
+            candidateObservations.push(oObs);
+          }
+        }
+      }
+      if (oObs.id) processedIds.add(oObs.id);
+      processedContent.add(norm);
+    }
+    for (const tObs of theirs.observations) {
+      const norm = normalizeContent(tObs.content);
+      if (tObs.id && processedIds.has(tObs.id)) continue;
+      if (processedContent.has(norm)) continue;
+      const bObs = (tObs.id ? baseObsById.get(tObs.id) : void 0) || baseObsByContent.get(norm);
+      if (!bObs) {
+        candidateObservations.push(tObs);
+      } else {
+        const theirsModified = JSON.stringify(tObs) !== JSON.stringify(bObs);
+        if (theirsModified) {
+          candidateObservations.push(tObs);
+        }
+      }
+      if (tObs.id) processedIds.add(tObs.id);
+      processedContent.add(norm);
+    }
+  }
+  const dedupedObservations = [];
+  const contentMap = /* @__PURE__ */ new Map();
+  for (const obs of candidateObservations) {
+    const key = normalizeContent(obs.content);
+    const existing = contentMap.get(key);
+    if (!existing) {
+      contentMap.set(key, obs);
+      dedupedObservations.push(obs);
+    } else {
+      const merged = mergeTwoObs(existing, obs);
+      const idx = dedupedObservations.indexOf(existing);
+      if (idx !== -1) {
+        dedupedObservations[idx] = merged;
+        contentMap.set(key, merged);
+      }
+    }
+  }
+  const relKey = (r) => `${r.relationType}::${r.direction || "->"}::${r.targetName.trim().toLowerCase()}`;
+  const baseRelKeys = new Set((base?.relations ?? []).map(relKey));
+  const oursRelMap = new Map((ours.relations ?? []).map((r) => [relKey(r), r]));
+  const theirsRelMap = new Map((theirs.relations ?? []).map((r) => [relKey(r), r]));
+  const mergedRelations = [];
+  const processedRelKeys = /* @__PURE__ */ new Set();
+  for (const [key, rel] of oursRelMap) {
+    if (processedRelKeys.has(key)) continue;
+    if (!baseRelKeys.has(key)) {
+      mergedRelations.push(rel);
+    } else {
+      if (theirsRelMap.has(key)) {
+        mergedRelations.push(rel);
+      }
+    }
+    processedRelKeys.add(key);
+  }
+  for (const [key, rel] of theirsRelMap) {
+    if (processedRelKeys.has(key)) continue;
+    if (!baseRelKeys.has(key)) {
+      mergedRelations.push(rel);
+    }
+    processedRelKeys.add(key);
+  }
+  return {
+    id,
+    name,
+    entityType,
+    domain,
+    visibility,
+    allowedAgents: mergedAgents,
+    createdAt,
+    updatedAt,
+    observations: dedupedObservations,
+    relations: mergedRelations
+  };
+}
+function mergeMarkdownFiles(basePath, oursPath, theirsPath, targetPath) {
+  const destination = targetPath || oursPath;
+  if (!fs10.existsSync(oursPath)) {
+    throw new Error(`Ours file does not exist at: ${oursPath}`);
+  }
+  if (!fs10.existsSync(theirsPath)) {
+    throw new Error(`Theirs file does not exist at: ${theirsPath}`);
+  }
+  const oursRaw = fs10.readFileSync(oursPath, "utf-8");
+  const theirsRaw = fs10.readFileSync(theirsPath, "utf-8");
+  let baseRaw = null;
+  if (basePath && fs10.existsSync(basePath)) {
+    baseRaw = fs10.readFileSync(basePath, "utf-8").trim();
+    if (baseRaw.length === 0) baseRaw = null;
+  }
+  const oursParsed = parseEntityMarkdown(oursRaw);
+  const theirsParsed = parseEntityMarkdown(theirsRaw);
+  const baseParsed = baseRaw ? parseEntityMarkdown(baseRaw) : null;
+  const oursEntity = {
+    ...oursParsed,
+    relations: extractDirectionalRelations(oursRaw)
+  };
+  const theirsEntity = {
+    ...theirsParsed,
+    relations: extractDirectionalRelations(theirsRaw)
+  };
+  const baseEntity = baseParsed ? {
+    ...baseParsed,
+    relations: extractDirectionalRelations(baseRaw)
+  } : null;
+  const merged = mergeParsedEntities(baseEntity, oursEntity, theirsEntity);
+  const serialized = serializeParsedEntity(merged);
+  fs10.writeFileSync(destination, serialized, "utf-8");
+  return {
+    success: true,
+    outputPath: destination,
+    entityName: merged.name,
+    observationsCount: merged.observations.length,
+    relationsCount: merged.relations.length
+  };
+}
+
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.0.3").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.1.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").option("-d, --adopt-domain <domain>", "Automatically adopt global entities belonging to this domain").option("-a, --adopt-all", "Automatically adopt all global memory entities into this project").action(async (dir, cmdOpts) => {
-  const targetDir = dir ? path9.resolve(dir) : process.cwd();
+  const targetDir = dir ? path10.resolve(dir) : process.cwd();
   const { dataDir, knowledgeDir } = initAmneshiaProject(targetDir);
   console.log(`[Amneshia] Initialized local repository:`);
   console.log(`  - Data Directory:      ${dataDir}`);
   console.log(`  - Knowledge Markdown:  ${knowledgeDir}`);
-  console.log(`  - Config File:         ${path9.join(dataDir, "config.yaml")}`);
-  console.log(`  - Cache .gitignore:    ${path9.join(dataDir, ".gitignore")}`);
+  console.log(`  - Config File:         ${path10.join(dataDir, "config.yaml")}`);
+  console.log(`  - Cache .gitignore:    ${path10.join(dataDir, ".gitignore")}`);
   if (cmdOpts.adoptDomain || cmdOpts.adoptAll) {
     console.log(`
 [Amneshia] Adopting memories from global storage (~/.amneshia)...`);
@@ -3256,7 +4067,7 @@ program.command("init [dir]").description("Initialize a local .amneshia/ knowled
 Ready! Track your markdown files with git, and commit knowledge directly.`);
 });
 program.command("reindex").description("Rebuild SQLite FTS5 cache index from markdown files").option("-l, --local", "Reindex local repository in current working directory").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   console.log(`[Amneshia] Reindexing from: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
@@ -3269,7 +4080,7 @@ program.command("reindex").description("Rebuild SQLite FTS5 cache index from mar
   db.close();
 });
 program.command("sync").description("Export all SQLite entities and observations to Markdown-as-Truth files").option("-l, --local", "Sync local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
@@ -3279,7 +4090,7 @@ program.command("sync").description("Export all SQLite entities and observations
   db.close();
 });
 program.command("gc").description("Garbage collect decayed, expired, and invalidated observations").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const expired = db.cleanupExpired();
@@ -3290,7 +4101,7 @@ program.command("gc").description("Garbage collect decayed, expired, and invalid
   db.close();
 });
 program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const stats = db.getStats();
@@ -3332,7 +4143,7 @@ program.command("serve").description("Start the HTTP Web Dashboard server").opti
   await startServer({ local: isLocal, http: true, port, stdio: false });
 });
 program.command("export <output>").description("Export memory knowledge graph to SQLite (.db), Markdown bundle, or JSON").option("-f, --format <format>", "Export format: sqlite, markdown, json", "sqlite").option("-d, --domain <domain>", "Filter by domain name").option("-e, --entity <entities...>", "Filter by specific entity names").option("-t, --tier <tier>", "Filter by minimum authority tier (agent, user, system)").option("-q, --query <query>", "Filter observations using FTS5 search query").option("-l, --local", "Export from local project repository (.amneshia) instead of global").action(async (output, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const validFormats = ["sqlite", "markdown", "json"];
@@ -3398,9 +4209,85 @@ ${result.dryRun ? "\u{1F50D} [DRY RUN] " : "\u2705 "}Amneshia Adoption Summary:`
     process.exit(1);
   }
 });
+program.command("embed").description("Compute local ONNX vector embeddings for all observations for hybrid semantic search").option("-l, --local", "Use local repository (.amneshia)").option("-f, --force", "Force re-embedding of all observations").action(async (cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  const embedder = new LocalOnnxEmbedder();
+  try {
+    console.log(`[Amneshia] Initializing local ONNX embedder (${embedder.getModelName()})...`);
+    await embedder.init();
+    const engineName = embedder.getBackend() === "native" ? "Native C++ (PC Hardware Accelerated)" : "WebAssembly SIMD (Universal / Termux)";
+    console.log(`[Amneshia] Active Inference Engine: ${engineName}`);
+    if (cmdOpts.force) {
+      db.clearEmbeddings(embedder.getModelName());
+    }
+    const pending = db.getUnembeddedObservations(embedder.getModelName());
+    console.log(`[Amneshia] Found ${pending.length} observations needing vector embeddings.`);
+    if (pending.length === 0) {
+      console.log(`\u2705 All observations are already embedded.`);
+      db.close();
+      return;
+    }
+    const start = Date.now();
+    let completed = 0;
+    const isMobile = process.platform === "android" || Boolean(process.env.TERMUX_VERSION);
+    const chunkSize = isMobile ? 5 : 16;
+    for (let i = 0; i < pending.length; i += chunkSize) {
+      const chunk = pending.slice(i, i + chunkSize);
+      const vectors = await Promise.all(chunk.map((item) => embedder.embed(item.content)));
+      for (let j = 0; j < chunk.length; j++) {
+        db.saveObservationEmbedding(chunk[j].id, vectors[j], embedder.getModelName());
+      }
+      completed += chunk.length;
+      process.stdout.write(`\r  Embedding progress: ${completed}/${pending.length} (${Math.round(completed / pending.length * 100)}%)`);
+    }
+    const duration = ((Date.now() - start) / 1e3).toFixed(2);
+    console.log(`
+
+\u2705 Embedding complete: ${completed} observations embedded in ${duration}s.`);
+  } catch (err) {
+    console.error(`
+[Amneshia] Embedding failed: ${err.message}`);
+    db.close();
+    process.exit(1);
+  }
+  db.close();
+});
+program.command("search <query>").description("Search knowledge graph using Hybrid Semantic (FTS5 + ONNX Vector RRF)").option("-d, --domain <domain>", "Filter by domain").option("-l, --local", "Use local repository").option("-n, --limit <number>", "Result limit", (val) => parseInt(val, 10), 10).action(async (query, cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  try {
+    const results = await db.searchHybrid(query, {
+      limit: cmdOpts.limit || 10,
+      domain: cmdOpts.domain
+    });
+    console.log(`
+\u{1F50D} Hybrid Search Results for "${query}" (${results.length} matches):`);
+    console.log(`-------------------------------------------------------------`);
+    if (results.length === 0) {
+      console.log("  No matching memories found.");
+    } else {
+      for (const res of results) {
+        console.log(`
+\u{1F4CC} ${res.entity.name} [${res.entity.domain}] (RRF Score: ${res.rank.toFixed(5)})`);
+        for (const obs of res.observations) {
+          console.log(`   - [${obs.authorityTier}] ${obs.content}`);
+        }
+      }
+    }
+    console.log("");
+  } catch (err) {
+    console.error(`[Amneshia] Search error: ${err.message}`);
+    db.close();
+    process.exit(1);
+  }
+  db.close();
+});
 var cloudCmd = program.command("cloud").description("Git-native cross-device synchronization for Amneshia knowledge");
 cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remote repository for cloud knowledge sync").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository (.amneshia) instead of global").action(async (remoteUrl, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     console.log(`[Amneshia] Setting up Git-native cloud sync at: ${config.knowledgeDir}`);
@@ -3418,7 +4305,7 @@ Next steps: Run "amneshia cloud push" or "amneshia cloud sync" to sync knowledge
   }
 });
 cloudCmd.command("status").description("Check cloud sync status, branch info, and uncommitted knowledge changes").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     const status = await getCloudStatus(config.knowledgeDir);
@@ -3445,7 +4332,7 @@ cloudCmd.command("status").description("Check cloud sync status, branch info, an
   }
 });
 cloudCmd.command("pull").description("Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index").option("-b, --branch <branch>", "Branch to pull from", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   try {
@@ -3464,7 +4351,7 @@ cloudCmd.command("pull").description("Pull latest knowledge updates from Git rem
   db.close();
 });
 cloudCmd.command("push").description("Commit and push local knowledge markdown changes to Git remote").option("-m, --message <message>", "Custom commit message").option("-b, --branch <branch>", "Branch to push to", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     console.log(`[Amneshia] Pushing knowledge to cloud remote...`);
@@ -3481,7 +4368,7 @@ cloudCmd.command("push").description("Commit and push local knowledge markdown c
   }
 });
 cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote changes, reindex, and push local changes").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs8.existsSync(path9.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   try {
@@ -3502,6 +4389,39 @@ cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote cha
   }
   db.close();
 });
+cloudCmd.command("merge-driver <base> <ours> <theirs> [targetPath]").description("Internal 3-way git merge driver for knowledge markdown entities").action((base, ours, theirs, targetPath) => {
+  try {
+    mergeMarkdownFiles(base, ours, theirs, targetPath);
+    process.exit(0);
+  } catch (err) {
+    console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${err.message}`);
+    process.exit(1);
+  }
+});
+cloudCmd.command("setup-driver").description("Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)").option("-g, --global", "Configure globally across all Git repositories (~/.gitconfig)").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
+  const isGlobal = Boolean(cmdOpts.global);
+  const isLocal = cmdOpts.local || program.opts().local || fs11.existsSync(path10.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  try {
+    const success = await setupMergeDriver(config.knowledgeDir, { isGlobal });
+    if (success) {
+      if (isGlobal) {
+        console.log(`
+\u2705 Amneshia 3-Way Git Merge Driver successfully activated globally in ~/.gitconfig!`);
+        console.log(`   Any repository with "*.md merge=amneshia" will now use Amneshia automatically.`);
+      } else {
+        console.log(`
+\u2705 Amneshia 3-Way Git Merge Driver successfully activated for ${config.knowledgeDir}`);
+      }
+    } else {
+      console.error(`[Amneshia] Knowledge directory not initialized with Git. Run "amneshia cloud setup <url>" first.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`[Amneshia] Setup merge driver failed: ${err.message}`);
+    process.exit(1);
+  }
+});
 async function runDefault() {
   const options = program.opts();
   const isBackground = options.background || options.daemon;
@@ -3512,11 +4432,11 @@ async function runDefault() {
       console.error("[Amneshia] Error: Background mode requires dashboard to be enabled.");
       process.exit(1);
     }
-    const logDir = path9.join(os5.homedir(), ".amneshia");
-    fs8.mkdirSync(logDir, { recursive: true });
-    const logFile = path9.join(logDir, "server.log");
-    const out = fs8.openSync(logFile, "a");
-    const err = fs8.openSync(logFile, "a");
+    const logDir = path10.join(os6.homedir(), ".amneshia");
+    fs11.mkdirSync(logDir, { recursive: true });
+    const logFile = path10.join(logDir, "server.log");
+    const out = fs11.openSync(logFile, "a");
+    const err = fs11.openSync(logFile, "a");
     const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d" && arg !== "--background" && arg !== "-b");
     const child = spawn(process.argv[0], [process.argv[1], ...args], {
       detached: true,

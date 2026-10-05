@@ -27,7 +27,7 @@ describe('Amneshia REST API Integration Tests', () => {
     app.use(express.json());
 
     app.get('/health', (_req: Request, res: Response) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '3.0.3' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.1.0' });
     });
 
     app.get('/api/graph', (req: Request, res: Response) => res.json(graph.readGraph(req.query.domain as string | undefined)));
@@ -106,13 +106,13 @@ describe('Amneshia REST API Integration Tests', () => {
     } catch {}
   });
 
-  it('should respond to /health endpoint with version 3.0.3', async () => {
+  it('should respond to /health endpoint with version 3.1.0', async () => {
     const res = await fetch(`http://localhost:${serverPort}/health`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; name: string; version: string };
     expect(body.status).toBe('ok');
     expect(body.name).toBe('amneshia');
-    expect(body.version).toBe('3.0.3');
+    expect(body.version).toBe('3.1.0');
   });
 
   it('should support REST API operations for entities, observations, relations, and stats', async () => {

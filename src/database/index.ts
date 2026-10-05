@@ -28,6 +28,7 @@ import type {
 } from '../types.js';
 import { SCHEMA_SQL } from './schema.js';
 import { runMigrations } from './migrations.js';
+import { fuseRRF, LocalOnnxEmbedder } from '../search/index.js';
 
 interface FtsSearchRow {
   entity_id: string;
@@ -326,6 +327,10 @@ export class DatabaseLayer {
     resolveContradiction: Database.Statement;
     insertAccessLog: Database.Statement;
     incrementAccess: Database.Statement;
+    upsertEmbedding: Database.Statement;
+    getEmbedding: Database.Statement;
+    getAllEmbeddings: Database.Statement;
+    getUnembeddedObservations: Database.Statement;
   };
 
   constructor(dataDir?: string) {
@@ -350,22 +355,22 @@ export class DatabaseLayer {
   private ensureDefaultExportTargets(): void {
     try {
       const defaultPath = path.join(os.homedir(), '.amneshia', 'export', 'MEMORY.md');
-      const check1 = this.db.prepare('SELECT count(*) as count FROM export_targets WHERE path = ?').get(defaultPath) as {
+      const check1 = this.db.prepare('SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?').get('Memory Default', defaultPath) as {
         count: number;
       };
       if (check1.count === 0) {
         this.db
-          .prepare('INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)')
+          .prepare('INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)')
           .run(uuid(), 'Memory Default', defaultPath, 'markdown', 1);
       }
 
       const projectPath = path.join(process.cwd(), 'MEMORY.md');
-      const check2 = this.db.prepare('SELECT count(*) as count FROM export_targets WHERE path = ?').get(projectPath) as {
+      const check2 = this.db.prepare('SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?').get('Amneshia Project', projectPath) as {
         count: number;
       };
       if (check2.count === 0) {
         this.db
-          .prepare('INSERT INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)')
+          .prepare('INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)')
           .run(uuid(), 'Amneshia Project', projectPath, 'markdown', 1);
       }
     } catch (e) {
@@ -509,6 +514,18 @@ export class DatabaseLayer {
       insertAccessLog: this.db.prepare('INSERT INTO access_log (id, entity_id, observation_id, accessed_at) VALUES (?, ?, ?, ?)'),
       incrementAccess: this.db.prepare(
         'UPDATE observations SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?'
+      ),
+      upsertEmbedding: this.db.prepare(
+        'INSERT OR REPLACE INTO observation_embeddings (observation_id, dimensions, vector, model, created_at) VALUES (?, ?, ?, ?, ?)'
+      ),
+      getEmbedding: this.db.prepare(
+        'SELECT vector, dimensions, model FROM observation_embeddings WHERE observation_id = ?'
+      ),
+      getAllEmbeddings: this.db.prepare(
+        'SELECT oe.observation_id, oe.vector, o.entity_id, o.content, o.status, o.authority_tier FROM observation_embeddings oe JOIN observations o ON oe.observation_id = o.id WHERE oe.model = ?'
+      ),
+      getUnembeddedObservations: this.db.prepare(
+        "SELECT o.id, o.entity_id, o.content FROM observations o LEFT JOIN observation_embeddings oe ON o.id = oe.observation_id AND oe.model = ? WHERE oe.observation_id IS NULL AND o.status != 'invalidated' AND o.status != 'decayed'"
       ),
     };
   }
@@ -860,6 +877,108 @@ export class DatabaseLayer {
   searchFTSRelevant(query: string, limit = 20, includeInactive = false): SearchResult[] {
     const cleaned = stripStopWords(query);
     return this.searchFTS(cleaned, limit, includeInactive);
+  }
+
+  saveObservationEmbedding(observationId: string, vector: Float32Array, model = LocalOnnxEmbedder.DEFAULT_MODEL): void {
+    const buffer = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+    this.statements.upsertEmbedding.run(observationId, vector.length, buffer, model, nowIso());
+  }
+
+  getObservationEmbedding(observationId: string): Float32Array | null {
+    const row = this.statements.getEmbedding.get(observationId) as { vector: Buffer; dimensions: number } | undefined;
+    if (!row) return null;
+    return new Float32Array(row.vector.buffer, row.vector.byteOffset, row.dimensions);
+  }
+
+  getUnembeddedObservations(model = LocalOnnxEmbedder.DEFAULT_MODEL): { id: string; entity_id: string; content: string }[] {
+    return this.statements.getUnembeddedObservations.all(model) as { id: string; entity_id: string; content: string }[];
+  }
+
+  clearEmbeddings(model?: string): void {
+    if (model) {
+      this.db.prepare('DELETE FROM observation_embeddings WHERE model = ?').run(model);
+    } else {
+      this.db.prepare('DELETE FROM observation_embeddings').run();
+    }
+  }
+
+  searchVector(
+    queryVector: Float32Array,
+    limit = 20,
+    model = LocalOnnxEmbedder.DEFAULT_MODEL,
+    minSimilarity = 0.25
+  ): { entity: Entity; observations: Observation[]; matchedContent: string; similarity: number }[] {
+    interface EmbeddingRow {
+      observation_id: string;
+      entity_id: string;
+      vector: Buffer;
+      content: string;
+      status: string;
+      authority_tier: string;
+    }
+
+    const rows = this.statements.getAllEmbeddings.all(model) as EmbeddingRow[];
+    const scored: { row: EmbeddingRow; similarity: number }[] = [];
+
+    const dim = queryVector.length;
+    for (const r of rows) {
+      if (r.status === 'invalidated' || r.status === 'decayed') continue;
+      const v = new Float32Array(r.vector.buffer, r.vector.byteOffset, dim);
+      let dot = 0;
+      for (let i = 0; i < dim; i++) {
+        dot += queryVector[i] * v[i];
+      }
+      if (dot >= minSimilarity) {
+        scored.push({ row: r, similarity: dot });
+      }
+    }
+
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const topScored = scored.slice(0, limit);
+
+    const results: { entity: Entity; observations: Observation[]; matchedContent: string; similarity: number }[] = [];
+
+    for (const item of topScored) {
+      const entityRow = this.getEntityRowById(item.row.entity_id);
+      if (!entityRow) continue;
+      const entity = toEntity(entityRow);
+      const obs = this.getObservationsByEntity(entity.id).filter((o) => o.id === item.row.observation_id);
+
+      results.push({
+        entity,
+        observations: obs,
+        matchedContent: item.row.content,
+        similarity: item.similarity,
+      });
+    }
+
+    return results;
+  }
+
+  async searchHybrid(
+    query: string,
+    options?: { limit?: number; domain?: string; minSimilarity?: number; embedder?: LocalOnnxEmbedder }
+  ): Promise<SearchResult[]> {
+    const limit = options?.limit || 20;
+    const lexicalResults = this.searchFTSRelevant(query, limit * 2);
+
+    try {
+      const embedder = options?.embedder ?? new LocalOnnxEmbedder();
+      const queryVector = await embedder.embed(query);
+      const semanticResults = this.searchVector(queryVector, limit * 2, embedder.getModelName(), options?.minSimilarity ?? 0.2);
+
+      let fused = fuseRRF(lexicalResults, semanticResults, { limit, k: 60 });
+      if (options?.domain) {
+        fused = fused.filter((r) => r.entity.domain === options.domain);
+      }
+      return fused.slice(0, limit);
+    } catch {
+      // Fallback seamlessly to lexical FTS5 results if embedding inference is unavailable
+      if (options?.domain) {
+        return lexicalResults.filter((r) => r.entity.domain === options.domain).slice(0, limit);
+      }
+      return lexicalResults.slice(0, limit);
+    }
   }
 
   readGraph(domain?: string, entityType?: string, statusFilter?: ObservationStatus): GraphSnapshot {

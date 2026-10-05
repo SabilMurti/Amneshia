@@ -1,12 +1,14 @@
 {
   "$schema": "https://jsr.io/schema/config-file.v1.json",
   "name": "@sabilmurti/amneshia",
-  "version": "3.0.3",
+  "version": "3.1.0",
   "exports": {
     ".": "./src/index.ts",
     "./tools": "./src/tools/index.ts",
     "./database": "./src/database/index.ts",
     "./graph": "./src/graph.ts",
+    "./search": "./src/search/index.ts",
+    "./cloud": "./src/cloud/index.ts",
     "./types": "./src/types.ts"
   },
   "publish": {

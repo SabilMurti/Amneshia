@@ -128,7 +128,45 @@ export async function setupGitRemote(
     lastSyncAt: null,
   });
 
+  // Automatically activate smart 3-way merge driver for markdown knowledge
+  await setupMergeDriver(knowledgeDir);
+
   return { success: true, remoteUrl, branch };
+}
+
+/**
+ * Setup and activate smart 3-way merge driver in the knowledge repository or globally in ~/.gitconfig.
+ */
+export async function setupMergeDriver(
+  knowledgeDir: string,
+  options?: { isGlobal?: boolean }
+): Promise<boolean> {
+  if (options?.isGlobal) {
+    await git(process.cwd(), ['config', '--global', 'merge.amneshia.name', 'Amneshia Markdown 3-Way Merge Driver']);
+    await git(process.cwd(), ['config', '--global', 'merge.amneshia.driver', 'amneshia cloud merge-driver %O %A %B %P']);
+    return true;
+  }
+
+  const gitDir = path.join(knowledgeDir, '.git');
+  if (!fs.existsSync(gitDir)) return false;
+
+  // 1. Ensure .gitattributes maps *.md to amneshia merge driver
+  const gitattributesPath = path.join(knowledgeDir, '.gitattributes');
+  const attrLine = '*.md merge=amneshia';
+  if (!fs.existsSync(gitattributesPath)) {
+    fs.writeFileSync(gitattributesPath, `${attrLine}\n`, 'utf-8');
+  } else {
+    const content = fs.readFileSync(gitattributesPath, 'utf-8');
+    if (!content.includes('merge=amneshia')) {
+      fs.appendFileSync(gitattributesPath, `\n${attrLine}\n`, 'utf-8');
+    }
+  }
+
+  // 2. Configure git merge driver in repository config
+  await git(knowledgeDir, ['config', 'merge.amneshia.name', 'Amneshia Markdown 3-Way Merge Driver']);
+  await git(knowledgeDir, ['config', 'merge.amneshia.driver', 'amneshia cloud merge-driver %O %A %B %P']);
+
+  return true;
 }
 
 /**
@@ -193,7 +231,7 @@ export async function cloudPull(
     throw new Error('Cloud sync not initialized. Run "amneshia cloud setup <remote-url>" first.');
   }
 
-  // If untracked .gitignore exists locally, temporarily remove it to avoid merge conflicts with remote .gitignore
+  // If untracked .gitignore or .gitattributes exists locally, temporarily remove to avoid merge conflicts with remote
   const gitignorePath = path.join(knowledgeDir, '.gitignore');
   let hadUntrackedGitignore = false;
   if (fs.existsSync(gitignorePath)) {
@@ -206,6 +244,22 @@ export async function cloudPull(
     } catch {}
   }
 
+  const gitattributesPath = path.join(knowledgeDir, '.gitattributes');
+  let hadUntrackedGitattributes = false;
+  if (fs.existsSync(gitattributesPath)) {
+    try {
+      const { stdout } = await git(knowledgeDir, ['status', '--porcelain', '.gitattributes']);
+      if (stdout.includes('??')) {
+        fs.unlinkSync(gitattributesPath);
+        hadUntrackedGitattributes = true;
+      }
+    } catch {}
+  }
+
+  // Ensure merge driver configuration in git config is set before pulling
+  await git(knowledgeDir, ['config', 'merge.amneshia.name', 'Amneshia Markdown 3-Way Merge Driver']);
+  await git(knowledgeDir, ['config', 'merge.amneshia.driver', 'amneshia cloud merge-driver %O %A %B %P']);
+
   let rawOutput = '';
   try {
     const res = await git(knowledgeDir, ['pull', 'origin', branch, '--no-rebase']);
@@ -215,18 +269,22 @@ export async function cloudPull(
     if (err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
       rawOutput = 'Remote branch does not exist yet; continuing with local state.';
     } else {
-      // Restore gitignore if pull failed and it was removed
+      // Restore files if pull failed and they were removed
       if (hadUntrackedGitignore && !fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
+      }
+      if (hadUntrackedGitattributes && !fs.existsSync(gitattributesPath)) {
+        fs.writeFileSync(gitattributesPath, "*.md merge=amneshia\n", 'utf-8');
       }
       throw err;
     }
   }
 
-  // Ensure .gitignore exists after pull
+  // Ensure .gitignore and merge driver (.gitattributes) exist after pull
   if (!fs.existsSync(gitignorePath)) {
     fs.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
   }
+  await setupMergeDriver(knowledgeDir);
 
   // Rebuild SQLite FTS5 index from updated markdown files
   const reindex = reindexFromMarkdown(knowledgeDir, db);

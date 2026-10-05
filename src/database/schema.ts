@@ -80,6 +80,16 @@ CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
 CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
 
+CREATE TABLE IF NOT EXISTS observation_embeddings (
+  observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
   entity_name,
   entity_type,

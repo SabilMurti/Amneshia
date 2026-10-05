@@ -12,7 +12,8 @@ import { startServer } from './server.js';
 import { DatabaseLayer } from './database/index.js';
 import { initAmneshiaProject, resolveStorageConfig, DualWriteSync, adoptMemory } from './storage/index.js';
 import { MemoryExporter, type ExportFormat } from './export/index.js';
-import { setupGitRemote, getCloudStatus, cloudPull, cloudPush, cloudSync } from './cloud/index.js';
+import { setupGitRemote, getCloudStatus, cloudPull, cloudPush, cloudSync, setupMergeDriver, mergeMarkdownFiles } from './cloud/index.js';
+import { LocalOnnxEmbedder } from './search/index.js';
 import type { AuthorityTier } from './types.js';
 
 const program = new Command();
@@ -20,7 +21,7 @@ const program = new Command();
 program
   .name('amneshia')
   .description('🧠 Amneshia v3 — Git-native knowledge graph for AI agents with truth maintenance')
-  .version('3.0.3')
+  .version('3.1.0')
   .option('--data-dir <path>', 'Custom data directory')
   .option('-l, --local', 'Use local repository directory (.amneshia) instead of global ~/.amneshia')
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')
@@ -274,6 +275,105 @@ program
     }
   });
 
+// Subcommand: embed
+program
+  .command('embed')
+  .description('Compute local ONNX vector embeddings for all observations for hybrid semantic search')
+  .option('-l, --local', 'Use local repository (.amneshia)')
+  .option('-f, --force', 'Force re-embedding of all observations')
+  .action(async (cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+    const embedder = new LocalOnnxEmbedder();
+
+    try {
+      console.log(`[Amneshia] Initializing local ONNX embedder (${embedder.getModelName()})...`);
+      await embedder.init();
+
+      const engineName =
+        embedder.getBackend() === 'native'
+          ? 'Native C++ (PC Hardware Accelerated)'
+          : 'WebAssembly SIMD (Universal / Termux)';
+      console.log(`[Amneshia] Active Inference Engine: ${engineName}`);
+
+      if (cmdOpts.force) {
+        db.clearEmbeddings(embedder.getModelName());
+      }
+
+      const pending = db.getUnembeddedObservations(embedder.getModelName());
+      console.log(`[Amneshia] Found ${pending.length} observations needing vector embeddings.`);
+
+      if (pending.length === 0) {
+        console.log(`✅ All observations are already embedded.`);
+        db.close();
+        return;
+      }
+
+      const start = Date.now();
+      let completed = 0;
+      const isMobile = process.platform === 'android' || Boolean(process.env.TERMUX_VERSION);
+      const chunkSize = isMobile ? 5 : 16;
+
+      for (let i = 0; i < pending.length; i += chunkSize) {
+        const chunk = pending.slice(i, i + chunkSize);
+        const vectors = await Promise.all(chunk.map((item) => embedder.embed(item.content)));
+        for (let j = 0; j < chunk.length; j++) {
+          db.saveObservationEmbedding(chunk[j].id, vectors[j], embedder.getModelName());
+        }
+        completed += chunk.length;
+        process.stdout.write(`\r  Embedding progress: ${completed}/${pending.length} (${Math.round((completed / pending.length) * 100)}%)`);
+      }
+
+      const duration = ((Date.now() - start) / 1000).toFixed(2);
+      console.log(`\n\n✅ Embedding complete: ${completed} observations embedded in ${duration}s.`);
+    } catch (err: any) {
+      console.error(`\n[Amneshia] Embedding failed: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
+  });
+
+// Subcommand: search
+program
+  .command('search <query>')
+  .description('Search knowledge graph using Hybrid Semantic (FTS5 + ONNX Vector RRF)')
+  .option('-d, --domain <domain>', 'Filter by domain')
+  .option('-l, --local', 'Use local repository')
+  .option('-n, --limit <number>', 'Result limit', (val) => parseInt(val, 10), 10)
+  .action(async (query, cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+
+    try {
+      const results = await db.searchHybrid(query, {
+        limit: cmdOpts.limit || 10,
+        domain: cmdOpts.domain,
+      });
+
+      console.log(`\n🔍 Hybrid Search Results for "${query}" (${results.length} matches):`);
+      console.log(`-------------------------------------------------------------`);
+      if (results.length === 0) {
+        console.log('  No matching memories found.');
+      } else {
+        for (const res of results) {
+          console.log(`\n📌 ${res.entity.name} [${res.entity.domain}] (RRF Score: ${res.rank.toFixed(5)})`);
+          for (const obs of res.observations) {
+            console.log(`   - [${obs.authorityTier}] ${obs.content}`);
+          }
+        }
+      }
+      console.log('');
+    } catch (err: any) {
+      console.error(`[Amneshia] Search error: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
+  });
+
 // Subcommand: cloud
 const cloudCmd = program
   .command('cloud')
@@ -403,6 +503,47 @@ cloudCmd
       process.exit(1);
     }
     db.close();
+  });
+
+cloudCmd
+  .command('merge-driver <base> <ours> <theirs> [targetPath]')
+  .description('Internal 3-way git merge driver for knowledge markdown entities')
+  .action((base, ours, theirs, targetPath) => {
+    try {
+      mergeMarkdownFiles(base, ours, theirs, targetPath);
+      process.exit(0);
+    } catch (err: any) {
+      console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+cloudCmd
+  .command('setup-driver')
+  .description('Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)')
+  .option('-g, --global', 'Configure globally across all Git repositories (~/.gitconfig)')
+  .option('-l, --local', 'Use local repository')
+  .action(async (cmdOpts) => {
+    const isGlobal = Boolean(cmdOpts.global);
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    try {
+      const success = await setupMergeDriver(config.knowledgeDir, { isGlobal });
+      if (success) {
+        if (isGlobal) {
+          console.log(`\n✅ Amneshia 3-Way Git Merge Driver successfully activated globally in ~/.gitconfig!`);
+          console.log(`   Any repository with "*.md merge=amneshia" will now use Amneshia automatically.`);
+        } else {
+          console.log(`\n✅ Amneshia 3-Way Git Merge Driver successfully activated for ${config.knowledgeDir}`);
+        }
+      } else {
+        console.error(`[Amneshia] Knowledge directory not initialized with Git. Run "amneshia cloud setup <url>" first.`);
+        process.exit(1);
+      }
+    } catch (err: any) {
+      console.error(`[Amneshia] Setup merge driver failed: ${err.message}`);
+      process.exit(1);
+    }
   });
 
 // Default server launch

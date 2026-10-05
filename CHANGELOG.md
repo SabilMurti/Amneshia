@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.0] - 2026-10-05
+
+### 🚀 Highlights
+- **Smart 3-Way Git Merge Driver (`amneshia cloud setup-driver`, `amneshia cloud merge-driver`)**: Eliminates Git merge conflict markers (`<<<<<<< HEAD`) during multi-device synchronization (PC $\leftrightarrow$ Mobile/Termux). Semantically merges YAML frontmatter, deduplicates observation UUIDs and contents, preserves highest authority tiers, and unions directional relations mathematically.
+- **Local ONNX Hybrid Semantic Search**: True hybrid search combining SQLite FTS5 BM25 lexical ranking and dense vector cosine similarity via Reciprocal Rank Fusion (RRF, $k=60$). Uses quantized `all-MiniLM-L6-v2` (384 dimensions) with 100% local inference and zero external API dependencies.
+- **PC-First Dual Architecture with Termux Fallback**: Prioritizes native C++ `onnxruntime-node` with AVX2/AVX-512/GPU acceleration and multi-core parallel batching on PC workstations, while providing a pure WebAssembly SIMD (`onnxruntime-web`) fallback for Android Termux userspace without glibc dependencies.
+
+### 🛠️ Added
+- `src/cloud/merge-driver.ts`: Standalone 3-way semantic Git merge driver for Markdown knowledge files.
+- `src/search/tokenizer.ts`: Pure TypeScript WordPiece tokenizer matching HuggingFace BERT vocabularies.
+- `src/search/embedder.ts`: `LocalOnnxEmbedder` supporting dynamic native/WASM backends and parallel chunking.
+- `src/search/hybrid.ts`: Reciprocal Rank Fusion implementation (`fuseRRF`).
+- `amneshia embed`: CLI command to precompute vector embeddings for all active observations.
+- `amneshia search <query>`: CLI hybrid semantic search command with domain filtering and RRF ranking.
+- `amneshia cloud setup-driver -g, --global`: System-wide Git merge driver activation in `~/.gitconfig` for PC developer workflows.
+- SQLite migration 4 adding `observation_embeddings` table and index.
+
+### 🔄 Changed
+- Upgraded `recall` MCP tool to use `searchHybrid` for unified keyword and semantic context retrieval.
+- Updated cloud pull/sync routines to automatically activate the merge driver and gracefully handle untracked `.gitattributes`.
+
+---
+
 ## [3.0.0] - 2026-09-28
 
 ### 🚀 Highlights

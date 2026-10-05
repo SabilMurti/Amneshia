@@ -126,7 +126,7 @@ export function registerCoreTools(
     },
     async ({ query, token_budget = 2000, domain, depth = 0 }) => {
       try {
-        const rawResults = db.searchFTSRelevant(query, 20);
+        const rawResults = await db.searchHybrid(query, { limit: 20, domain });
         const filtered = domain ? rawResults.filter((r) => r.entity.domain === domain) : rawResults;
 
         const results: Array<{

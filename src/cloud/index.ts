@@ -4,3 +4,4 @@
  */
 
 export * from './git-sync.js';
+export * from './merge-driver.js';

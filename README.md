@@ -12,13 +12,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.0.3-6d28d9.svg?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.1.0-6d28d9.svg?style=flat-square" alt="Release" /></a>
   <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
   <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-49%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-60%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square" alt="MCP" /></a>
-  <a href="https://glama.ai/mcp/servers/SabilMurti/Amneshia"><img src="https://glama.ai/mcp/servers/SabilMurti/Amneshia/badges/score.svg" alt="Glama Score" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia"><img src="https://img.shields.io/badge/search-Local%20ONNX%20%2B%20RRF-8b5cf6.svg?style=flat-square" alt="Search: Local ONNX RRF" /></a>
   <a href="tsconfig.json"><img src="https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square" alt="TypeScript" /></a>
 </p>
 
@@ -40,7 +40,8 @@ It replaces probabilistic, vector-only memory systems with a **deterministic Tru
 - **Markdown-as-Truth (`.amneshia/knowledge/`):** All entities and observations mirror directly to version-controlled Markdown files with YAML frontmatter. Auditable via `git diff` and reviewable in Pull Requests.
 - **Truth Maintenance & Cascading Invalidation:** Derived facts track their premises via directed acyclic graphs (`derived_from: [parent_id]`). When a premise is revoked or updated, dependent conclusions automatically transition from `active` to `stale`.
 - **Pre-Insertion Contradiction Detection:** Evaluates incoming facts against active entity records for polar opposition and explicit replacements, rejecting or logging conflicts before graph corruption occurs.
-- **Self-Hostable Git-Native Cloud Sync:** Decentralized cross-device memory synchronization using Git remotes (GitHub private repo, GitLab, Gitea, or self-hosted Git server) with automatic SQLite FTS5 reindexing.
+- **Self-Hostable Git-Native Cloud Sync & Smart Merge Driver:** Decentralized cross-device memory synchronization using Git remotes with automatic SQLite FTS5 reindexing and a smart 3-way semantic Git merge driver that eliminates `<<<<<<< HEAD` conflict markers across PC and mobile.
+- **Local ONNX Hybrid Semantic Search:** True hybrid search combining SQLite FTS5 BM25 lexical ranking and dense vector cosine similarity via Reciprocal Rank Fusion (RRF, $k=60$). Uses quantized `all-MiniLM-L6-v2` (384 dimensions) with 100% local inference, zero external API dependencies, and dual-mode execution (native C++ AVX/GPU on PC, WebAssembly SIMD on Termux).
 - **Universal Memory Export:** Export full or filtered knowledge graphs into standalone SQLite databases (`.db`), Markdown bundle directories with catalog indexes, or structured JSON.
 - **Local-Memory Project Adoption:** Seamlessly adopt, migrate, or cherry-pick accumulated global memories (`~/.amneshia`) into workspace projects (`.amneshia`) with deduplication and contradiction checks.
 - **Lean Context Budget (85% Reduction):** Default 4-tool surface (`remember`, `recall`, `forget`, `context`) reduces prompt schema consumption from ~5,400 tokens to ~800 tokens.
@@ -410,6 +411,7 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 ## 1. Pre-Flight Retrieval (Start of Every Session & Task)
 - **Mandatory Recall:** Before writing code, planning refactors, or suggesting libraries, ALWAYS query Amneshia:
   `recall({ query: "<topic/keyword>", token_budget: 1000 })` or inspect project context via `context({ domain: "<domain>" })`.
+- **Hybrid Semantic Search:** Amneshia v3.1 leverages Reciprocal Rank Fusion (RRF) combining SQLite FTS5 BM25 lexical ranking with dense vector cosine similarity (via local ONNX `all-MiniLM-L6-v2`). You can query abstract concepts, symptoms, or architectural behaviors without needing exact keyword matches.
 - **Never Guess Conventions:** Verify past architectural decisions, repository quirks, coding styles, and active credentials before scaffolding.
 
 ## 2. In-Flight Execution & Authority Tiers
@@ -440,7 +442,7 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
         "[Context & Rationale] Dashboard port changed to 3457 to prevent conflicts with Vite default 5173.",
         "[Technical Implementation] Modified src/server.ts and src/index.ts to pass stdio: false on serve subcommand.",
         "[Operational Parameters] Web Dashboard runs on http://localhost:3457. CLI: amneshia serve -p 3457.",
-        "[Verification & Test Outcomes] Verified with curl /api/stats (200 OK) and 49/49 vitest assertions passing.",
+        "[Verification & Test Outcomes] Verified with curl /api/stats (200 OK) and 60/60 vitest assertions passing.",
         "[Architectural Guardrails & Gotchas] Stdio mode must be false when spawning daemon to avoid terminal SIGTTOU suspension."
       ],
       "tier": "architectural",
@@ -457,6 +459,16 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 ## 5. Dual-Write Transparency & Cloud Sync
 - All stored memories are dual-written to `.amneshia/knowledge/{domain}/{entity}.md`. You may inspect or commit these files directly with git.
 - To synchronize across multiple devices, run `amneshia cloud sync`.
+
+## 6. Smart 3-Way Git Merge Driver (Zero Conflict Markers)
+- **Multi-Device Synchronization:** When synchronizing memory across machines (e.g. Workstation PC $\leftrightarrow$ Laptop $\leftrightarrow$ Mobile Termux), activate the custom merge driver:
+  `amneshia cloud setup-driver` (or `amneshia cloud setup-driver -g` globally on PC).
+- **Deterministic Reconciliation:** Never manually resolve raw merge conflicts (`<<<<<<< HEAD`) in `.amneshia/knowledge/*.md`. The driver semantically reconciles YAML frontmatter, deduplicates observation UUIDs and contents, preserves highest authority tiers, and unions directional relations mathematically.
+
+## 7. Vector Index Maintenance
+- **Local ONNX Ingestion:** After large Markdown imports or initial repository adoption, ensure 100% semantic coverage by executing:
+  `amneshia embed`
+- Memory embeddings run 100% offline via local ONNX with sub-millisecond SQLite BLOB lookups.
 ````
 
 ---
@@ -489,7 +501,14 @@ amneshia cloud setup git@github.com:user/my-memory.git  # Link private Git repos
 amneshia cloud status                                   # Inspect sync health & uncommitted facts
 amneshia cloud pull                                     # Pull remote updates & reindex SQLite FTS5
 amneshia cloud push -m "Synced memory"                  # Commit & push local knowledge
-amneshia cloud sync                                     # Atomic bidirectional pull + push
+# Smart 3-Way Git Merge Driver (Zero conflict markers across PC and mobile)
+amneshia cloud setup-driver              # Activate driver in knowledge repo (.gitattributes)
+amneshia cloud setup-driver --global     # Activate driver globally in ~/.gitconfig (PC / Workstation)
+
+# Local ONNX Hybrid Semantic Search (FTS5 BM25 + Vector Cosine Similarity via RRF)
+amneshia embed                           # Precompute vector embeddings for active observations
+amneshia embed --force                   # Recompute all vector embeddings from scratch
+amneshia search "Android memory limits"  # Hybrid semantic search with Reciprocal Rank Fusion
 
 # Rebuild SQLite FTS5 database from .amneshia/knowledge/ Markdown files
 amneshia reindex
@@ -506,6 +525,20 @@ amneshia serve -p 3457
 # Launch as a background daemon process
 amneshia --background
 ```
+
+---
+
+## Architecture: PC-First with Seamless Mobile/Termux Fallback
+
+Amneshia is engineered **PC-first** for workstation environments (Linux, macOS, Windows) while guaranteeing 100% functionality in constrained environments like Android Termux:
+
+| Component | PC / Workstation Environment | Android Termux Userspace |
+| :--- | :--- | :--- |
+| **Inference Engine** | `onnxruntime-node` (C++ AVX2/AVX-512/GPU) | `onnxruntime-web` (WebAssembly SIMD) |
+| **Embedding Concurrency** | Multi-core parallel chunking (`concurrency = 16`) | Sequential chunking (`concurrency = 1`, LMK-safe) |
+| **Git Merge Driver** | Global `~/.gitconfig` + `.gitattributes` | Repository-scoped `merge.amneshia.driver` |
+| **FTS5 + Vector DB** | SQLite WAL mode (`64MB` cache, sub-ms queries) | SQLite WAL mode (Bionic libc compliant) |
+| **Dependencies** | Zero native compilation required for portable setup | Zero glibc requirement (pure WebAssembly + TS) |
 
 ---
 

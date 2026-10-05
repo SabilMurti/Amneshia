@@ -28,10 +28,14 @@ Amneshia is a local-first, deterministic knowledge graph and Truth Maintenance S
 | **Reindex** | `src/storage/reindex.ts` | Full SQLite FTS5 database reconstruction from Markdown directory (< 200ms). |
 | **Adoption** | `src/storage/adopt.ts` | Memory adoption engine from global `~/.amneshia` to local `.amneshia`. |
 | **Cloud** | `src/cloud/git-sync.ts` | Git-native remote synchronization (`setup`, `status`, `pull`, `push`, `sync`). |
+| **Merge Driver** | `src/cloud/merge-driver.ts` | Standalone 3-way semantic Git merge driver for Markdown entities. |
+| **Search Engine** | `src/search/hybrid.ts` | Reciprocal Rank Fusion (RRF) combining FTS5 BM25 and dense vector cosine similarity. |
+| **Embedder** | `src/search/embedder.ts` | Local ONNX embedder (`all-MiniLM-L6-v2`) with dual PC native / Termux WASM backend. |
+| **Tokenizer** | `src/search/tokenizer.ts` | Pure TypeScript WordPiece tokenizer matching BERT vocabulary. |
 | **Export** | `src/export/exporter.ts` | Universal memory exporter supporting SQLite (`.db`), Markdown bundle, and JSON. |
 | **Maintenance**| `src/maintenance/contradiction.ts`| Polarity check and token-overlap contradiction evaluator. |
 | **MCP Server** | `src/server.ts` | Stdio and HTTP/SSE MCP server with dashboard web server. |
-| **CLI** | `src/index.ts` | Commander-based CLI entry point (`init`, `reindex`, `stats`, `gc`, `export`, `adopt`, `cloud`, `serve`). |
+| **CLI** | `src/index.ts` | Commander-based CLI entry point (`init`, `reindex`, `stats`, `gc`, `export`, `adopt`, `cloud`, `embed`, `search`, `serve`). |
 
 ---
 
@@ -53,12 +57,16 @@ Amneshia is a local-first, deterministic knowledge graph and Truth Maintenance S
    Use `db.getObservationsByEntity(entityId)` (not `getObservationsForEntity`).
 4. **Git Operations:**
    Always use `execFile('git', args, { cwd })` with safe argument arrays. Never pass raw shell strings to `exec`.
+5. **Dual Architecture (PC-First + Termux):**
+   Prioritize `onnxruntime-node` on PC workstations for hardware SIMD/GPU, while preserving graceful fallback to `onnxruntime-web` (WebAssembly) for Android Termux userspace.
+6. **Smart Git Merge Driver:**
+   Always configure merge driver via `amneshia cloud setup-driver` (`-g` for global PC setup) to prevent merge conflict markers across devices.
 
 ### 3.3. Test & Verification Pipeline
 ```bash
 npm run typecheck    # tsc --noEmit
 npm run build        # tsup src/index.ts --format esm --dts --clean
-npm test             # vitest run (must pass 49/49 tests)
+npm test             # vitest run (must pass 60/60 tests)
 ```
 
 ---
