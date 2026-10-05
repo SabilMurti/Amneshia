@@ -5,23 +5,78 @@ All notable changes to this project will be documented in this file.
 ## [3.1.0] - 2026-10-05
 
 ### 🚀 Highlights
+- **Git-Native Cloud Memory Synchronization (`amneshia cloud`)**: Multi-device memory replication backed by private Git repositories. Features automated upstream tracking, bidirectional `sync`, `pull` with automatic SQLite FTS5 reindexing, and `push` routines for continuous cross-device memory synchronization.
 - **Smart 3-Way Git Merge Driver (`amneshia cloud setup-driver`, `amneshia cloud merge-driver`)**: Eliminates Git merge conflict markers (`<<<<<<< HEAD`) during multi-device synchronization (PC $\leftrightarrow$ Mobile/Termux). Semantically merges YAML frontmatter, deduplicates observation UUIDs and contents, preserves highest authority tiers, and unions directional relations mathematically.
 - **Local ONNX Hybrid Semantic Search**: True hybrid search combining SQLite FTS5 BM25 lexical ranking and dense vector cosine similarity via Reciprocal Rank Fusion (RRF, $k=60$). Uses quantized `all-MiniLM-L6-v2` (384 dimensions) with 100% local inference and zero external API dependencies.
 - **PC-First Dual Architecture with Termux Fallback**: Prioritizes native C++ `onnxruntime-node` with AVX2/AVX-512/GPU acceleration and multi-core parallel batching on PC workstations, while providing a pure WebAssembly SIMD (`onnxruntime-web`) fallback for Android Termux userspace without glibc dependencies.
+- **Universal Memory Export (`amneshia export`)**: Multi-format export engine allowing memory extraction into standalone SQLite databases, structured JSON, or Markdown bundles complete with automated catalog indexes (`INDEX.md`).
+- **Local Project Adoption (`amneshia adopt`)**: Seamless zero-token cherry-picking and migration of global memory (`~/.amneshia`) into per-project scopes (`.amneshia/`) with collision-free Jaccard deduplication and contradiction checks.
 
 ### 🛠️ Added
+- `src/cloud/git-sync.ts`: Git-native cloud synchronization engine (`setup`, `status`, `pull`, `push`, `sync`).
 - `src/cloud/merge-driver.ts`: Standalone 3-way semantic Git merge driver for Markdown knowledge files.
+- `src/export/exporter.ts`: Universal memory exporter supporting SQLite, JSON, and Markdown bundle formats.
+- `src/storage/adopt.ts`: Project memory adoption engine with provenance and contradiction safety.
 - `src/search/tokenizer.ts`: Pure TypeScript WordPiece tokenizer matching HuggingFace BERT vocabularies.
 - `src/search/embedder.ts`: `LocalOnnxEmbedder` supporting dynamic native/WASM backends and parallel chunking.
 - `src/search/hybrid.ts`: Reciprocal Rank Fusion implementation (`fuseRRF`).
+- `amneshia cloud <setup|status|pull|push|sync>`: Subcommands for Git-backed cloud synchronization.
+- `amneshia cloud setup-driver [-g, --global]`: Automated configuration of git merge driver in `.gitattributes` or global `~/.gitconfig`.
+- `amneshia export`: CLI command for multi-format memory export with domain, entity, tier, and FTS5 search filters.
+- `amneshia adopt`: CLI command to adopt global knowledge into local project workspaces.
 - `amneshia embed`: CLI command to precompute vector embeddings for all active observations.
 - `amneshia search <query>`: CLI hybrid semantic search command with domain filtering and RRF ranking.
-- `amneshia cloud setup-driver -g, --global`: System-wide Git merge driver activation in `~/.gitconfig` for PC developer workflows.
 - SQLite migration 4 adding `observation_embeddings` table and index.
 
 ### 🔄 Changed
 - Upgraded `recall` MCP tool to use `searchHybrid` for unified keyword and semantic context retrieval.
 - Updated cloud pull/sync routines to automatically activate the merge driver and gracefully handle untracked `.gitattributes`.
+- Updated `jsr.json` and `package.json` to expose `./cloud` and `./search` subpath exports.
+
+---
+
+## [3.0.3] - 2026-09-29
+
+### 🚀 Highlights
+- **Glama.ai Containerization & Auto-Release Webhook**: Added multi-stage production `Dockerfile` with Node 22 LTS for Glama cloud execution, and connected verified maintainer auto-release webhooks triggered by git tag pushes.
+- **TDQS Grade A MCP Enhancements**: Enhanced MCP tool schemas with strict sibling routing, return type contracts, and comprehensive tool usage guidelines to achieve Top-Developer Quality Score (Grade A).
+
+### 🛠️ Added
+- `Dockerfile`: Multi-stage dist build optimized for Glama cloud containers.
+- `glama.json`: Official server metadata and maintainer definition for Glama.ai registry.
+- `smithery.yaml`: Manifest for Smithery MCP registry discovery.
+- Social preview vector artwork and high-resolution 3D Neural Universe dashboard previews.
+
+### 🔄 Changed
+- Refined MCP tool docstrings in `src/tools/core.ts` with explicit sibling tool recommendations and response schemas.
+
+---
+
+## [3.0.2] - 2026-09-29
+
+### 🚀 Highlights
+- **100% Quality Score on JSR (jsr.io)**: Completed JSR module, entrypoint, and exported symbol documentation across all TypeScript interfaces and classes.
+- **Documentation Restructure**: Revamped `README.md` with streamlined quickstart, comprehensive IDE setup matrices, and architecture guides.
+
+### 🔄 Changed
+- Added full JSDoc comments to `src/index.ts`, `src/types.ts`, and core database/consolidation modules.
+- Streamlined installation instructions for Claude Desktop, Cursor, Windsurf, and Antigravity.
+
+---
+
+## [3.0.1] - 2026-09-29
+
+### 🚀 Highlights
+- **Automated Multi-Channel Release Pipeline**: Automated multi-registry publishing via GitHub Actions (`.github/workflows/release.yml`) targeting JSR (`@sabilmurti/amneshia`), GitHub Packages (`npm.pkg.github.com`), and GitHub Releases.
+- **Server Stdio & CLI Hardening**: Resolved stdio blocking when running `amneshia serve` under MCP clients and fixed port integer coercion in CLI flags.
+
+### 🛠️ Added
+- `.github/workflows/release.yml`: Multi-channel CI/CD with OIDC provenance authentication for JSR and GitHub Packages.
+- Automated release bundle compression (`amneshia-latest.tgz`) and SHA256 checksum generation.
+
+### 🐛 Fixed
+- Fixed commander root action registration to display help correctly when invoked without subcommands.
+- Prevented stdio stream contention in MCP server daemonization.
 
 ---
 
