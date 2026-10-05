@@ -5,9 +5,11 @@ import os from 'node:os';
 import { DatabaseLayer } from '../src/database/index.js';
 import { KnowledgeGraph } from '../src/graph.js';
 import { DualWriteSync } from '../src/storage/index.js';
-import { storeMediaAsset, detectMimeType, computeFileSha256 } from '../src/storage/media-store.js';
+import { storeMediaAsset, detectMimeType, computeFileSha256, findOrphanMediaBlobs, pruneOrphanMediaBlobs, getShardedRelativePath } from '../src/storage/media-store.js';
 import { serializeEntity, parseEntityMarkdown } from '../src/storage/markdown-store.js';
 import { reindexFromMarkdown } from '../src/storage/reindex.js';
+import { MemoryExporter } from '../src/export/index.js';
+import Database from 'better-sqlite3';
 
 describe('Media Memory Engine (Deterministic CAS & Graph Integration)', () => {
   let testDir: string;
@@ -218,6 +220,156 @@ describe('Media Memory Engine (Deterministic CAS & Graph Integration)', () => {
       expect(restoredMedia?.fileName).toBe('sample_voice.ogg');
 
       restoredDb.close();
+    });
+
+    it('updates media asset pointer when re-ingesting under same entity with different file content', async () => {
+      // Ingest version 1
+      const res1 = await graph.rememberMedia({
+        filePath: sampleImagePath,
+        entity: 'Dynamic Document',
+        domain: 'docs',
+        facts: ['Initial photo version of document'],
+      });
+      expect(res1.media.sha256).toBeDefined();
+
+      // Ingest version 2 with different content
+      const res2 = await graph.rememberMedia({
+        filePath: sampleAudioPath,
+        entity: 'Dynamic Document',
+        domain: 'docs',
+        facts: ['Updated audio version of document'],
+      });
+
+      expect(res2.media.sha256).not.toBe(res1.media.sha256);
+
+      // Verify DB entity points to version 2
+      const ent = db.getEntityByName('Dynamic Document');
+      const currentMedia = db.getMediaByEntity(ent!.id);
+      expect(currentMedia?.sha256).toBe(res2.media.sha256);
+      expect(currentMedia?.fileName).toBe('sample_voice.ogg');
+    });
+  });
+
+  describe('Extension Sanitization and CAS Edge Cases', () => {
+    it('handles files without extensions cleanly without trailing dots', () => {
+      const hash = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+      const path1 = getShardedRelativePath(hash, '');
+      expect(path1).toBe(`media/blobs/a1/b2/${hash}`);
+      expect(path1).not.toContain('..');
+      expect(path1.endsWith('.')).toBe(false);
+
+      const path2 = getShardedRelativePath(hash, '.JPEG');
+      expect(path2).toBe(`media/blobs/a1/b2/${hash}.jpeg`);
+    });
+
+    it('sanitizes unsafe characters in extensions', () => {
+      const hash = '1234567890123456789012345678901234567890123456789012345678901234';
+      const safePath = getShardedRelativePath(hash, '.jpg?version=1#tag');
+      expect(safePath).toBe(`media/blobs/12/34/${hash}.jpgversion1tag`);
+    });
+  });
+
+  describe('CAS Orphan Blob Detection & Garbage Collection', () => {
+    it('identifies and prunes unreferenced media blobs and cleans empty dirs', async () => {
+      // 1. Ingest image and audio
+      await graph.rememberMedia({
+        filePath: sampleImagePath,
+        entity: 'Active Image',
+        domain: 'media',
+        facts: ['Active image asset'],
+      });
+      await graph.rememberMedia({
+        filePath: sampleAudioPath,
+        entity: 'Temporary Audio',
+        domain: 'media',
+        facts: ['Audio to be deleted'],
+      });
+
+      const knowledgeDir = path.join(testDir, 'knowledge');
+      const statsBefore = db.getStats();
+      expect(statsBefore.totalMediaAssets).toBe(2);
+
+      // 2. Delete Temporary Audio entity (which CASCADE deletes its media_assets row)
+      const tempAudioEnt = db.getEntityByName('Temporary Audio');
+      db.deleteEntity(tempAudioEnt!.id);
+
+      // 3. Scan for orphans
+      const activeHashes = db.getActiveMediaHashes();
+      expect(activeHashes.size).toBe(1);
+
+      const orphans = findOrphanMediaBlobs(knowledgeDir, activeHashes);
+      expect(orphans.length).toBe(1);
+      expect(fs.existsSync(orphans[0])).toBe(true);
+
+      // 4. Prune orphans via db.pruneOrphanMedia
+      const pruneResult = db.pruneOrphanMedia(knowledgeDir);
+      expect(pruneResult.prunedCount).toBe(1);
+      expect(pruneResult.reclaimedBytes).toBeGreaterThan(0);
+      expect(fs.existsSync(orphans[0])).toBe(false);
+
+      // 5. Active blob still exists
+      const activeEnt = db.getEntityByName('Active Image');
+      const activeMedia = db.getMediaByEntity(activeEnt!.id);
+      const activeBlobPath = path.join(knowledgeDir, activeMedia!.relativePath);
+      expect(fs.existsSync(activeBlobPath)).toBe(true);
+    });
+  });
+
+  describe('Universal Exporter Media Preservation', () => {
+    beforeEach(async () => {
+      await graph.rememberMedia({
+        filePath: sampleImagePath,
+        entity: 'Exportable Photo',
+        domain: 'archive',
+        facts: ['Photo to test exporter media retention.'],
+        tier: 'invariant',
+      });
+    });
+
+    it('exports media assets in JSON format', async () => {
+      const exporter = new MemoryExporter(db);
+      const jsonOut = path.join(testDir, 'export', 'memory.json');
+      const res = await exporter.export('json', jsonOut, { domain: 'archive' });
+      expect(res.entitiesCount).toBe(1);
+
+      const content = JSON.parse(fs.readFileSync(jsonOut, 'utf-8'));
+      expect(content.entities[0].name).toBe('Exportable Photo');
+      expect(content.entities[0].media).toBeDefined();
+      expect(content.entities[0].media.fileName).toBe('sample_photo.jpg');
+      expect(content.entities[0].media.mimeType).toBe('image/jpeg');
+    });
+
+    it('exports media assets in Markdown bundle and copies physical blobs', async () => {
+      const exporter = new MemoryExporter(db);
+      const mdOutDir = path.join(testDir, 'export', 'markdown-bundle');
+      const res = await exporter.export('markdown', mdOutDir, { domain: 'archive' });
+      expect(res.entitiesCount).toBe(1);
+
+      const entityMd = path.join(mdOutDir, 'archive', 'exportable-photo.md');
+      expect(fs.existsSync(entityMd)).toBe(true);
+      const content = fs.readFileSync(entityMd, 'utf-8');
+      expect(content).toContain('media:');
+      expect(content).toContain('sample_photo.jpg');
+
+      // Verify physical blob was copied to export destination
+      const ent = db.getEntityByName('Exportable Photo');
+      const media = db.getMediaByEntity(ent!.id);
+      const copiedBlobPath = path.join(mdOutDir, media!.relativePath);
+      expect(fs.existsSync(copiedBlobPath)).toBe(true);
+    });
+
+    it('exports media assets into SQLite database media_assets table', async () => {
+      const exporter = new MemoryExporter(db);
+      const sqliteOut = path.join(testDir, 'export', 'memory.sqlite');
+      const res = await exporter.export('sqlite', sqliteOut, { domain: 'archive' });
+      expect(res.entitiesCount).toBe(1);
+
+      const exportDb = new Database(sqliteOut);
+      const row = exportDb.prepare('SELECT * FROM media_assets LIMIT 1').get() as any;
+      expect(row).toBeDefined();
+      expect(row.file_name).toBe('sample_photo.jpg');
+      expect(row.mime_type).toBe('image/jpeg');
+      exportDb.close();
     });
   });
 });

@@ -6,9 +6,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import Database from 'better-sqlite3';
 import type { DatabaseLayer } from '../database/index.js';
-import type { AuthorityTier, ObservationStatus, Entity, Observation, RelationWithNames } from '../types.js';
+import type { AuthorityTier, ObservationStatus, Entity, Observation, RelationWithNames, MediaAsset } from '../types.js';
 import { saveEntityMarkdown } from '../storage/markdown-store.js';
 import { toSlug } from '../storage/slug.js';
 import { SCHEMA_SQL } from '../database/schema.js';
@@ -35,6 +36,7 @@ export interface ExportResult {
 export interface FilteredEntityNode extends Entity {
   observations: Observation[];
   relations: RelationWithNames[];
+  media?: MediaAsset | null;
 }
 
 /**
@@ -98,10 +100,13 @@ export function filterMemoryGraph(
       continue;
     }
 
+    const media = db.getMediaByEntity(ent.id);
+
     result.push({
       ...ent,
       observations: filteredObs,
       relations: ent.relations ?? [],
+      media,
     });
   }
 
@@ -176,8 +181,26 @@ export class MemoryExporter {
   private exportToMarkdown(outputDir: string, data: FilteredEntityNode[]): void {
     fs.mkdirSync(outputDir, { recursive: true });
 
+    const possibleKnowledgeDirs = [
+      path.join(this.db.getDataDir(), '..', 'knowledge'),
+      path.join(this.db.getDataDir(), 'knowledge'),
+      path.join(process.cwd(), '.amneshia', 'knowledge'),
+      path.join(os.homedir(), '.amneshia', 'knowledge'),
+    ];
+
     for (const ent of data) {
-      saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations);
+      saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations, ent.media);
+      if (ent.media) {
+        for (const kDir of possibleKnowledgeDirs) {
+          const srcBlob = path.join(kDir, ent.media.relativePath);
+          const destBlob = path.join(outputDir, ent.media.relativePath);
+          if (fs.existsSync(srcBlob) && !fs.existsSync(destBlob)) {
+            fs.mkdirSync(path.dirname(destBlob), { recursive: true });
+            fs.copyFileSync(srcBlob, destBlob);
+            break;
+          }
+        }
+      }
     }
 
     // Generate index.md catalog for the markdown bundle
@@ -234,6 +257,11 @@ export class MemoryExporter {
         VALUES (?, ?, ?, ?, ?)
       `);
 
+      const insertMedia = exportDb.prepare(`
+        INSERT INTO media_assets (id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
       const populateTransaction = exportDb.transaction(() => {
         const entityIds = new Set<string>();
 
@@ -249,6 +277,19 @@ export class MemoryExporter {
             ent.createdAt,
             ent.updatedAt
           );
+
+          if (ent.media) {
+            insertMedia.run(
+              ent.media.id,
+              ent.media.entityId,
+              ent.media.sha256,
+              ent.media.mimeType,
+              ent.media.fileName,
+              ent.media.fileSize,
+              ent.media.relativePath,
+              ent.media.createdAt
+            );
+          }
 
           for (const obs of ent.observations) {
             insertObs.run(

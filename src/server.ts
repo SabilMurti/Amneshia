@@ -88,7 +88,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
     app.post('/api/cleanup', (req, res) => res.json(graph.cleanupExpired()));
-    app.post('/api/gc', (_req, res) => res.json({ removed: db.gc() }));
+    app.post('/api/gc', (_req, res) => {
+      const removed = db.gc();
+      const mediaPrune = db.pruneOrphanMedia(storageConfig.knowledgeDir);
+      res.json({ removed, mediaPrune });
+    });
     app.post('/api/reindex', (_req, res) => res.json(dualWrite.reindex()));
     app.get('/api/contradictions', (req, res) => res.json(db.getContradictions(req.query.entityId as string)));
     app.post('/api/contradictions/:id/resolve', (req, res) => {
@@ -100,8 +104,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.json({ ok: true, result });
     });
 
+    app.get('/api/media', (_req, res) => res.json(db.getAllMediaAssets()));
     app.get('/api/media/by-entity/:entityId', (req, res) => res.json(db.getMediaByEntity(req.params.entityId)));
     app.get('/api/media/by-hash/:sha256', (req, res) => res.json(db.getMediaByHash(req.params.sha256)));
+    app.post('/api/media/prune', (_req, res) => res.json(db.pruneOrphanMedia(storageConfig.knowledgeDir)));
     app.post('/api/media/remember', async (req, res) => {
       try {
         const result = await graph.rememberMedia(req.body);
@@ -112,7 +118,15 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
 
     const mediaDir = path.join(storageConfig.knowledgeDir, 'media');
-    app.use('/media', express.static(mediaDir));
+    app.use(
+      '/media',
+      express.static(mediaDir, {
+        setHeaders: (res) => {
+          res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+        },
+      })
+    );
 
     const uiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../dist-ui');
     app.use(express.static(uiPath));

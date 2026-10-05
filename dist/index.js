@@ -2,7 +2,7 @@
 import "./chunk-73FKUHZS.js";
 
 // src/index.ts
-import os6 from "os";
+import os7 from "os";
 import path12 from "path";
 import fs12 from "fs";
 import { spawn } from "child_process";
@@ -15,10 +15,10 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
 
 // src/database/index.ts
-import fs3 from "fs";
+import fs4 from "fs";
 import os2 from "os";
-import path2 from "path";
-import crypto from "crypto";
+import path3 from "path";
+import crypto2 from "crypto";
 import Database from "better-sqlite3";
 
 // src/database/schema.ts
@@ -592,18 +592,160 @@ function fuseRRF(lexicalResults, semanticResults, options) {
   }));
 }
 
+// src/storage/media-store.ts
+import fs3 from "fs";
+import path2 from "path";
+import crypto from "crypto";
+var MIME_EXTENSIONS = {
+  // Images
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  // Audio
+  ".mp3": "audio/mpeg",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".flac": "audio/flac",
+  ".aac": "audio/aac",
+  // Video
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  // Documents & Text
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".json": "application/json",
+  ".csv": "text/csv"
+};
+function detectMimeType(filePath) {
+  const ext = path2.extname(filePath).toLowerCase();
+  return MIME_EXTENSIONS[ext] || "application/octet-stream";
+}
+function computeFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs3.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", (err) => reject(err));
+  });
+}
+function getShardedRelativePath(sha256, extension) {
+  const tier1 = sha256.slice(0, 2);
+  const tier2 = sha256.slice(2, 4);
+  let safeExt = "";
+  if (extension && extension.trim().length > 0) {
+    const raw = extension.startsWith(".") ? extension : `.${extension}`;
+    safeExt = raw.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  }
+  return path2.posix.join("media", "blobs", tier1, tier2, `${sha256}${safeExt}`);
+}
+async function storeMediaAsset(sourceFilePath, storageRoot) {
+  const resolvedSource = path2.resolve(sourceFilePath);
+  if (!fs3.existsSync(resolvedSource)) {
+    throw new Error(`Media file not found: "${sourceFilePath}"`);
+  }
+  const stat = fs3.statSync(resolvedSource);
+  if (!stat.isFile()) {
+    throw new Error(`Path is not a regular file: "${sourceFilePath}"`);
+  }
+  const fileName = path2.basename(resolvedSource);
+  const ext = path2.extname(resolvedSource).toLowerCase();
+  const mimeType = detectMimeType(resolvedSource);
+  const sha256 = await computeFileSha256(resolvedSource);
+  const relativePath = getShardedRelativePath(sha256, ext);
+  const absoluteDestPath = path2.resolve(storageRoot, relativePath);
+  const destDir = path2.dirname(absoluteDestPath);
+  const relCheck = path2.relative(storageRoot, absoluteDestPath);
+  if (relCheck.startsWith("..") || path2.isAbsolute(relCheck)) {
+    throw new Error(`Path traversal violation detected: destination escapes storage root.`);
+  }
+  fs3.mkdirSync(destDir, { recursive: true });
+  let deduplicated = false;
+  if (fs3.existsSync(absoluteDestPath)) {
+    deduplicated = true;
+  } else {
+    fs3.copyFileSync(resolvedSource, absoluteDestPath);
+  }
+  return {
+    sha256,
+    mimeType,
+    fileName,
+    fileSize: stat.size,
+    relativePath,
+    absolutePath: absoluteDestPath,
+    deduplicated
+  };
+}
+function findOrphanMediaBlobs(storageRoot, activeHashes) {
+  const blobsDir = path2.join(storageRoot, "media", "blobs");
+  if (!fs3.existsSync(blobsDir)) return [];
+  const orphans = [];
+  function scan(dir) {
+    const entries = fs3.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path2.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scan(fullPath);
+      } else if (entry.isFile()) {
+        const base = path2.basename(entry.name);
+        const dotIdx = base.indexOf(".");
+        const fileHash = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+        if (!activeHashes.has(fileHash)) {
+          orphans.push(fullPath);
+        }
+      }
+    }
+  }
+  scan(blobsDir);
+  return orphans;
+}
+function pruneOrphanMediaBlobs(storageRoot, activeHashes) {
+  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes);
+  let reclaimedBytes = 0;
+  let prunedCount = 0;
+  for (const orphanPath of orphans) {
+    try {
+      const stat = fs3.statSync(orphanPath);
+      reclaimedBytes += stat.size;
+      fs3.unlinkSync(orphanPath);
+      prunedCount++;
+      let parent = path2.dirname(orphanPath);
+      for (let i = 0; i < 2; i++) {
+        if (fs3.existsSync(parent) && fs3.readdirSync(parent).length === 0) {
+          fs3.rmdirSync(parent);
+          parent = path2.dirname(parent);
+        } else {
+          break;
+        }
+      }
+    } catch {
+    }
+  }
+  return { prunedCount, reclaimedBytes };
+}
+
 // src/database/index.ts
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 function uuid() {
-  return crypto.randomUUID();
+  return crypto2.randomUUID();
 }
 function homedirDataDir() {
-  return path2.join(os2.homedir(), ".amneshia");
+  return path3.join(os2.homedir(), ".amneshia");
 }
 function ensureDir(dir) {
-  fs3.mkdirSync(dir, { recursive: true });
+  fs4.mkdirSync(dir, { recursive: true });
 }
 function toAllowedAgents(value) {
   if (!value) return [];
@@ -837,7 +979,7 @@ var DatabaseLayer = class {
   constructor(dataDir) {
     this.dataDir = dataDir ?? homedirDataDir();
     ensureDir(this.dataDir);
-    const databasePath = path2.join(this.dataDir, "memory.db");
+    const databasePath = path3.join(this.dataDir, "memory.db");
     this.db = new Database(databasePath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
@@ -853,12 +995,12 @@ var DatabaseLayer = class {
   }
   ensureDefaultExportTargets() {
     try {
-      const defaultPath = path2.join(os2.homedir(), ".amneshia", "export", "MEMORY.md");
+      const defaultPath = path3.join(os2.homedir(), ".amneshia", "export", "MEMORY.md");
       const check1 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?").get("Memory Default", defaultPath);
       if (check1.count === 0) {
         this.db.prepare("INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Memory Default", defaultPath, "markdown", 1);
       }
-      const projectPath = path2.join(process.cwd(), "MEMORY.md");
+      const projectPath = path3.join(process.cwd(), "MEMORY.md");
       const check2 = this.db.prepare("SELECT count(*) as count FROM export_targets WHERE name = ? OR path = ?").get("Amneshia Project", projectPath);
       if (check2.count === 0) {
         this.db.prepare("INSERT OR IGNORE INTO export_targets (id, name, path, format, auto_export) VALUES (?, ?, ?, ?, ?)").run(uuid(), "Amneshia Project", projectPath, "markdown", 1);
@@ -916,6 +1058,9 @@ var DatabaseLayer = class {
       ),
       getMediaByHash: this.db.prepare(
         "SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets WHERE sha256 = ? LIMIT 1"
+      ),
+      getAllMediaAssets: this.db.prepare(
+        "SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets ORDER BY created_at DESC"
       ),
       deleteMediaByEntity: this.db.prepare("DELETE FROM media_assets WHERE entity_id = ?"),
       deleteFtsObservation: this.db.prepare("DELETE FROM memory_fts WHERE observation_id = ?"),
@@ -1212,6 +1357,18 @@ var DatabaseLayer = class {
     const row = this.statements.getMediaByHash.get(sha256);
     return row ? toMediaAsset(row) : null;
   }
+  getAllMediaAssets() {
+    const rows = this.statements.getAllMediaAssets.all();
+    return rows.map(toMediaAsset);
+  }
+  getActiveMediaHashes() {
+    const rows = this.db.prepare("SELECT DISTINCT sha256 FROM media_assets").all();
+    return new Set(rows.map((r) => r.sha256));
+  }
+  pruneOrphanMedia(storageRoot) {
+    const activeHashes = this.getActiveMediaHashes();
+    return pruneOrphanMediaBlobs(storageRoot, activeHashes);
+  }
   deleteMediaByEntity(entityId) {
     const result = this.statements.deleteMediaByEntity.run(entityId);
     return result.changes > 0;
@@ -1507,8 +1664,8 @@ var DatabaseLayer = class {
 };
 
 // src/export/markdown.ts
-import fs4 from "fs";
-import path3 from "path";
+import fs5 from "fs";
+import path4 from "path";
 function groupTitle(entityType) {
   const normalized = entityType.trim().toLowerCase();
   if (normalized === "person" || normalized === "people") return "People";
@@ -1565,7 +1722,7 @@ function resolveTargetPath(targetPath) {
   if (targetPath.endsWith(".md")) {
     return targetPath;
   }
-  return path3.join(targetPath, "MEMORY.md");
+  return path4.join(targetPath, "MEMORY.md");
 }
 function exportToMarkdown(graph, forceAll = false) {
   const targets = graph.manageExportTargets({ action: "list" });
@@ -1577,105 +1734,14 @@ function exportToMarkdown(graph, forceAll = false) {
     if (!forceAll && !target.autoExport) continue;
     try {
       const outputPath = resolveTargetPath(target.path);
-      fs4.mkdirSync(path3.dirname(outputPath), { recursive: true });
-      fs4.writeFileSync(outputPath, markdown, "utf8");
+      fs5.mkdirSync(path4.dirname(outputPath), { recursive: true });
+      fs5.writeFileSync(outputPath, markdown, "utf8");
       writes.push({ target: target.name, path: outputPath });
     } catch (error) {
       console.warn(`Export target "${target.name}" failed:`, error instanceof Error ? error.message : error);
     }
   }
   return writes;
-}
-
-// src/storage/media-store.ts
-import fs5 from "fs";
-import path4 from "path";
-import crypto2 from "crypto";
-var MIME_EXTENSIONS = {
-  // Images
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".avif": "image/avif",
-  ".bmp": "image/bmp",
-  ".ico": "image/x-icon",
-  // Audio
-  ".mp3": "audio/mpeg",
-  ".ogg": "audio/ogg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".flac": "audio/flac",
-  ".aac": "audio/aac",
-  // Video
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mkv": "video/x-matroska",
-  ".mov": "video/quicktime",
-  // Documents & Text
-  ".pdf": "application/pdf",
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".json": "application/json",
-  ".csv": "text/csv"
-};
-function detectMimeType(filePath) {
-  const ext = path4.extname(filePath).toLowerCase();
-  return MIME_EXTENSIONS[ext] || "application/octet-stream";
-}
-function computeFileSha256(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto2.createHash("sha256");
-    const stream = fs5.createReadStream(filePath);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve(hash.digest("hex")));
-    stream.on("error", (err) => reject(err));
-  });
-}
-function getShardedRelativePath(sha256, extension) {
-  const tier1 = sha256.slice(0, 2);
-  const tier2 = sha256.slice(2, 4);
-  const safeExt = extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
-  return path4.posix.join("media", "blobs", tier1, tier2, `${sha256}${safeExt}`);
-}
-async function storeMediaAsset(sourceFilePath, storageRoot) {
-  const resolvedSource = path4.resolve(sourceFilePath);
-  if (!fs5.existsSync(resolvedSource)) {
-    throw new Error(`Media file not found: "${sourceFilePath}"`);
-  }
-  const stat = fs5.statSync(resolvedSource);
-  if (!stat.isFile()) {
-    throw new Error(`Path is not a regular file: "${sourceFilePath}"`);
-  }
-  const fileName = path4.basename(resolvedSource);
-  const ext = path4.extname(resolvedSource).toLowerCase();
-  const mimeType = detectMimeType(resolvedSource);
-  const sha256 = await computeFileSha256(resolvedSource);
-  const relativePath = getShardedRelativePath(sha256, ext);
-  const absoluteDestPath = path4.resolve(storageRoot, relativePath);
-  const destDir = path4.dirname(absoluteDestPath);
-  const relCheck = path4.relative(storageRoot, absoluteDestPath);
-  if (relCheck.startsWith("..") || path4.isAbsolute(relCheck)) {
-    throw new Error(`Path traversal violation detected: destination escapes storage root.`);
-  }
-  fs5.mkdirSync(destDir, { recursive: true });
-  let deduplicated = false;
-  if (fs5.existsSync(absoluteDestPath)) {
-    deduplicated = true;
-  } else {
-    fs5.copyFileSync(resolvedSource, absoluteDestPath);
-  }
-  return {
-    sha256,
-    mimeType,
-    fileName,
-    fileSize: stat.size,
-    relativePath,
-    absolutePath: absoluteDestPath,
-    deduplicated
-  };
 }
 
 // src/graph.ts
@@ -2036,6 +2102,16 @@ var KnowledgeGraph = class {
         fileSize: stored.fileSize,
         relativePath: stored.relativePath
       });
+    } else if (media.sha256 !== stored.sha256) {
+      this.database.deleteMediaByEntity(entity.id);
+      media = this.database.createMediaAsset({
+        entityId: entity.id,
+        sha256: stored.sha256,
+        mimeType: stored.mimeType,
+        fileName: stored.fileName,
+        fileSize: stored.fileSize,
+        relativePath: stored.relativePath
+      });
     }
     const observationIds = [];
     const tier = input.tier ?? "contextual";
@@ -2086,6 +2162,21 @@ var KnowledgeGraph = class {
    */
   getMediaByHash(sha256) {
     return this.database.getMediaByHash(sha256);
+  }
+  /**
+   * Retrieves all registered media assets across the knowledge graph.
+   * @returns Array of MediaAsset records
+   */
+  getAllMedia() {
+    return this.database.getAllMediaAssets();
+  }
+  /**
+   * Scans and purges unreferenced media blobs from CAS storage.
+   * @returns Count of deleted files and reclaimed byte count
+   */
+  pruneOrphanMedia() {
+    const storageRoot = this.getStorageRoot();
+    return this.database.pruneOrphanMedia(storageRoot);
   }
   triggerAutoExport() {
     exportToMarkdown(this);
@@ -2439,6 +2530,16 @@ function registerCoreTools(server, graph, db) {
         }
         let mediaAsset = db.getMediaByEntity(ent.id);
         if (!mediaAsset) {
+          mediaAsset = db.createMediaAsset({
+            entityId: ent.id,
+            sha256: stored.sha256,
+            mimeType: stored.mimeType,
+            fileName: stored.fileName,
+            fileSize: stored.fileSize,
+            relativePath: stored.relativePath
+          });
+        } else if (mediaAsset.sha256 !== stored.sha256) {
+          db.deleteMediaByEntity(ent.id);
           mediaAsset = db.createMediaAsset({
             entityId: ent.id,
             sha256: stored.sha256,
@@ -3680,7 +3781,11 @@ async function startServer(options = {}) {
       res.json({ id: req.params.id, autoExport: newAutoExport });
     });
     app.post("/api/cleanup", (req, res) => res.json(graph.cleanupExpired()));
-    app.post("/api/gc", (_req, res) => res.json({ removed: db.gc() }));
+    app.post("/api/gc", (_req, res) => {
+      const removed = db.gc();
+      const mediaPrune = db.pruneOrphanMedia(storageConfig.knowledgeDir);
+      res.json({ removed, mediaPrune });
+    });
     app.post("/api/reindex", (_req, res) => res.json(dualWrite.reindex()));
     app.get("/api/contradictions", (req, res) => res.json(db.getContradictions(req.query.entityId)));
     app.post("/api/contradictions/:id/resolve", (req, res) => {
@@ -3691,8 +3796,10 @@ async function startServer(options = {}) {
       const result = runMaintenance(graph, db, req.body?.domain, req.body?.dryRun === true);
       res.json({ ok: true, result });
     });
+    app.get("/api/media", (_req, res) => res.json(db.getAllMediaAssets()));
     app.get("/api/media/by-entity/:entityId", (req, res) => res.json(db.getMediaByEntity(req.params.entityId)));
     app.get("/api/media/by-hash/:sha256", (req, res) => res.json(db.getMediaByHash(req.params.sha256)));
+    app.post("/api/media/prune", (_req, res) => res.json(db.pruneOrphanMedia(storageConfig.knowledgeDir)));
     app.post("/api/media/remember", async (req, res) => {
       try {
         const result = await graph.rememberMedia(req.body);
@@ -3702,7 +3809,15 @@ async function startServer(options = {}) {
       }
     });
     const mediaDir = path9.join(storageConfig.knowledgeDir, "media");
-    app.use("/media", express.static(mediaDir));
+    app.use(
+      "/media",
+      express.static(mediaDir, {
+        setHeaders: (res) => {
+          res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+          res.setHeader("X-Content-Type-Options", "nosniff");
+        }
+      })
+    );
     const uiPath = path9.join(path9.dirname(fileURLToPath2(import.meta.url)), "../dist-ui");
     app.use(express.static(uiPath));
     app.use((req, res, next) => {
@@ -3730,6 +3845,7 @@ async function startServer(options = {}) {
 // src/export/exporter.ts
 import fs9 from "fs";
 import path10 from "path";
+import os5 from "os";
 import Database2 from "better-sqlite3";
 function filterMemoryGraph(db, filters) {
   const snapshot = db.readGraph(filters.domain);
@@ -3774,10 +3890,12 @@ function filterMemoryGraph(db, filters) {
     if (filters.query && filteredObs.length === 0 && (!matchingEntityIds || !matchingEntityIds.has(ent.id))) {
       continue;
     }
+    const media = db.getMediaByEntity(ent.id);
     result.push({
       ...ent,
       observations: filteredObs,
-      relations: ent.relations ?? []
+      relations: ent.relations ?? [],
+      media
     });
   }
   return result;
@@ -3837,8 +3955,25 @@ var MemoryExporter = class {
   }
   exportToMarkdown(outputDir, data) {
     fs9.mkdirSync(outputDir, { recursive: true });
+    const possibleKnowledgeDirs = [
+      path10.join(this.db.getDataDir(), "..", "knowledge"),
+      path10.join(this.db.getDataDir(), "knowledge"),
+      path10.join(process.cwd(), ".amneshia", "knowledge"),
+      path10.join(os5.homedir(), ".amneshia", "knowledge")
+    ];
     for (const ent of data) {
-      saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations);
+      saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations, ent.media);
+      if (ent.media) {
+        for (const kDir of possibleKnowledgeDirs) {
+          const srcBlob = path10.join(kDir, ent.media.relativePath);
+          const destBlob = path10.join(outputDir, ent.media.relativePath);
+          if (fs9.existsSync(srcBlob) && !fs9.existsSync(destBlob)) {
+            fs9.mkdirSync(path10.dirname(destBlob), { recursive: true });
+            fs9.copyFileSync(srcBlob, destBlob);
+            break;
+          }
+        }
+      }
     }
     const indexLines = [
       "# Amneshia Knowledge Graph Export Catalog",
@@ -3885,6 +4020,10 @@ var MemoryExporter = class {
         INSERT INTO relations (id, from_entity, to_entity, relation_type, created_at)
         VALUES (?, ?, ?, ?, ?)
       `);
+      const insertMedia = exportDb.prepare(`
+        INSERT INTO media_assets (id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
       const populateTransaction = exportDb.transaction(() => {
         const entityIds = /* @__PURE__ */ new Set();
         for (const ent of data) {
@@ -3899,6 +4038,18 @@ var MemoryExporter = class {
             ent.createdAt,
             ent.updatedAt
           );
+          if (ent.media) {
+            insertMedia.run(
+              ent.media.id,
+              ent.media.entityId,
+              ent.media.sha256,
+              ent.media.mimeType,
+              ent.media.fileName,
+              ent.media.fileSize,
+              ent.media.relativePath,
+              ent.media.createdAt
+            );
+          }
           for (const obs of ent.observations) {
             insertObs.run(
               obs.id,
@@ -3945,7 +4096,7 @@ var MemoryExporter = class {
 // src/cloud/git-sync.ts
 import fs10 from "fs";
 import path11 from "path";
-import os5 from "os";
+import os6 from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
 var execFileAsync = promisify(execFile);
@@ -4144,7 +4295,7 @@ async function cloudPush(knowledgeDir, message, branch = "main") {
   const { stdout: statusOut } = await git(knowledgeDir, ["status", "--porcelain"]);
   const hasChanges = statusOut.trim().length > 0;
   if (hasChanges) {
-    const hostname = os5.hostname();
+    const hostname = os6.hostname();
     const timestamp = (/* @__PURE__ */ new Date()).toISOString();
     const commitMsg = message ?? `amneshia(sync): update knowledge graph from ${hostname} (${timestamp})`;
     await git(knowledgeDir, ["commit", "-m", commitMsg]);
@@ -4532,15 +4683,17 @@ program.command("sync").description("Export all SQLite entities and observations
   console.log(`[Amneshia] Successfully synced ${count} entities to Markdown-as-Truth files!`);
   db.close();
 });
-program.command("gc").description("Garbage collect decayed, expired, and invalidated observations").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
+program.command("gc").description("Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
   const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const expired = db.cleanupExpired();
   const decayed = db.gc();
+  const orphanRes = db.pruneOrphanMedia(config.knowledgeDir);
   console.log(`[Amneshia] Garbage collection complete:`);
-  console.log(`  - Purged Expired:  ${expired}`);
-  console.log(`  - Purged Decayed:  ${decayed}`);
+  console.log(`  - Purged Expired:      ${expired}`);
+  console.log(`  - Purged Decayed:      ${decayed}`);
+  console.log(`  - Pruned Orphan Media: ${orphanRes.prunedCount} (${(orphanRes.reclaimedBytes / 1024).toFixed(1)} KB reclaimed)`);
   db.close();
 });
 program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts) => {
@@ -4729,6 +4882,93 @@ program.command("search <query>").description("Search knowledge graph using Hybr
   }
   db.close();
 });
+var mediaCmd = program.command("media").description("Manage Content-Addressable Storage (CAS) media memory assets");
+mediaCmd.command("list").description("List all registered media assets across the knowledge graph").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  const assets = db.getAllMediaAssets();
+  console.log(`
+\u{1F4F8} Amneshia Media Assets (${assets.length} stored in ${config.mode.toUpperCase()} mode):`);
+  console.log(`--------------------------------------------------------------------------------`);
+  if (assets.length === 0) {
+    console.log("  No media assets found.");
+  } else {
+    for (const asset of assets) {
+      const ent = db.getEntityById(asset.entityId);
+      const entName = ent ? ent.name : asset.entityId;
+      const sizeKb = (asset.fileSize / 1024).toFixed(1);
+      console.log(`\u{1F4CC} Entity: "${entName}" | File: ${asset.fileName} (${asset.mimeType}, ${sizeKb} KB)`);
+      console.log(`   SHA-256: ${asset.sha256}`);
+      console.log(`   Path:    ${asset.relativePath}`);
+      console.log(`   Created: ${asset.createdAt}
+`);
+    }
+  }
+  db.close();
+});
+mediaCmd.command("remember <filePath>").description("Ingest a local media asset with attached facts and relations into CAS").requiredOption("-e, --entity <name>", "Entity name representing this media asset").option("-d, --domain <domain>", "Domain namespace", "personal").option("-f, --fact <facts...>", "Factual observations describing the media").option("-t, --tier <tier>", "Authority tier (invariant, architectural, contextual, ephemeral)", "contextual").option("-r, --relation <relations...>", 'Relationship links in format "relationType:targetEntity"').option("-l, --local", "Use local repository (.amneshia)").action(async (filePath, cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  const sync = new DualWriteSync(config.knowledgeDir, db);
+  const graph = new KnowledgeGraph(db, sync);
+  const facts = cmdOpts.fact ?? [];
+  if (facts.length === 0) {
+    facts.push(`Media asset ${path12.basename(filePath)} ingested into Amneshia CAS.`);
+  }
+  const relations = [];
+  if (cmdOpts.relation) {
+    for (const relStr of cmdOpts.relation) {
+      const colonIdx = relStr.indexOf(":");
+      if (colonIdx > 0) {
+        const relationType = relStr.slice(0, colonIdx).trim();
+        const to = relStr.slice(colonIdx + 1).trim();
+        if (relationType && to) {
+          relations.push({ relationType, to });
+        }
+      }
+    }
+  }
+  try {
+    const resolvedPath = path12.resolve(filePath);
+    console.log(`[Amneshia] Ingesting media: ${resolvedPath}...`);
+    const result = await graph.rememberMedia({
+      filePath: resolvedPath,
+      entity: cmdOpts.entity,
+      domain: cmdOpts.domain,
+      facts,
+      tier: cmdOpts.tier,
+      relations
+    });
+    console.log(`
+\u2705 Media Ingested Successfully:`);
+    console.log(`  - Entity:       ${result.entity.name} [${result.entity.domain}]`);
+    console.log(`  - Media File:   ${result.media.fileName} (${result.media.mimeType}, ${(result.media.fileSize / 1024).toFixed(1)} KB)`);
+    console.log(`  - SHA-256:      ${result.media.sha256}`);
+    console.log(`  - Sharded Path: ${result.media.relativePath}`);
+    console.log(`  - Deduplicated: ${result.deduplicated ? "Yes (reused existing blob)" : "No (new blob stored)"}`);
+    console.log(`  - Observations: ${result.observationIds.length}`);
+    console.log(`  - Relations:    ${result.relations.length}`);
+  } catch (err) {
+    console.error(`[Amneshia] Media ingestion failed: ${err.message}`);
+    db.close();
+    process.exit(1);
+  }
+  db.close();
+});
+mediaCmd.command("prune").description("Purge unreferenced orphan media blobs from CAS storage").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
+  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const config = resolveStorageConfig(isLocal);
+  const db = new DatabaseLayer(config.dataDir);
+  console.log(`[Amneshia] Scanning CAS storage for orphan blobs in ${config.knowledgeDir}...`);
+  const pruneRes = db.pruneOrphanMedia(config.knowledgeDir);
+  console.log(`
+\u2705 Media CAS Pruning Complete:`);
+  console.log(`  - Blobs Removed:  ${pruneRes.prunedCount}`);
+  console.log(`  - Reclaimed Disk: ${(pruneRes.reclaimedBytes / 1024).toFixed(1)} KB`);
+  db.close();
+});
 var cloudCmd = program.command("cloud").description("Git-native cross-device synchronization for Amneshia knowledge");
 cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remote repository for cloud knowledge sync").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository (.amneshia) instead of global").action(async (remoteUrl, cmdOpts) => {
   const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
@@ -4876,7 +5116,7 @@ async function runDefault() {
       console.error("[Amneshia] Error: Background mode requires dashboard to be enabled.");
       process.exit(1);
     }
-    const logDir = path12.join(os6.homedir(), ".amneshia");
+    const logDir = path12.join(os7.homedir(), ".amneshia");
     fs12.mkdirSync(logDir, { recursive: true });
     const logFile = path12.join(logDir, "server.log");
     const out = fs12.openSync(logFile, "a");

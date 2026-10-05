@@ -448,6 +448,16 @@ export class KnowledgeGraph {
         fileSize: stored.fileSize,
         relativePath: stored.relativePath,
       });
+    } else if (media.sha256 !== stored.sha256) {
+      this.database.deleteMediaByEntity(entity.id);
+      media = this.database.createMediaAsset({
+        entityId: entity.id,
+        sha256: stored.sha256,
+        mimeType: stored.mimeType,
+        fileName: stored.fileName,
+        fileSize: stored.fileSize,
+        relativePath: stored.relativePath,
+      });
     }
 
     const observationIds: string[] = [];
@@ -504,6 +514,23 @@ export class KnowledgeGraph {
    */
   getMediaByHash(sha256: string): MediaAsset | null {
     return this.database.getMediaByHash(sha256);
+  }
+
+  /**
+   * Retrieves all registered media assets across the knowledge graph.
+   * @returns Array of MediaAsset records
+   */
+  getAllMedia(): MediaAsset[] {
+    return this.database.getAllMediaAssets();
+  }
+
+  /**
+   * Scans and purges unreferenced media blobs from CAS storage.
+   * @returns Count of deleted files and reclaimed byte count
+   */
+  pruneOrphanMedia(): { prunedCount: number; reclaimedBytes: number } {
+    const storageRoot = this.getStorageRoot();
+    return this.database.pruneOrphanMedia(storageRoot);
   }
 
   private triggerAutoExport() {

@@ -85,7 +85,11 @@ export interface StoredMediaResult {
 export function getShardedRelativePath(sha256: string, extension: string): string {
   const tier1 = sha256.slice(0, 2);
   const tier2 = sha256.slice(2, 4);
-  const safeExt = extension.startsWith('.') ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
+  let safeExt = '';
+  if (extension && extension.trim().length > 0) {
+    const raw = extension.startsWith('.') ? extension : `.${extension}`;
+    safeExt = raw.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+  }
   return path.posix.join('media', 'blobs', tier1, tier2, `${sha256}${safeExt}`);
 }
 
@@ -145,4 +149,71 @@ export async function storeMediaAsset(
     absolutePath: absoluteDestPath,
     deduplicated,
   };
+}
+
+/**
+ * Scans the CAS blobs directory and identifies orphan files not present in the active hashes set.
+ */
+export function findOrphanMediaBlobs(storageRoot: string, activeHashes: Set<string>): string[] {
+  const blobsDir = path.join(storageRoot, 'media', 'blobs');
+  if (!fs.existsSync(blobsDir)) return [];
+
+  const orphans: string[] = [];
+
+  function scan(dir: string): void {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scan(fullPath);
+      } else if (entry.isFile()) {
+        const base = path.basename(entry.name);
+        const dotIdx = base.indexOf('.');
+        const fileHash = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+        if (!activeHashes.has(fileHash)) {
+          orphans.push(fullPath);
+        }
+      }
+    }
+  }
+
+  scan(blobsDir);
+  return orphans;
+}
+
+/**
+ * Prunes unreferenced orphan media blobs from the CAS filesystem.
+ * Returns the count of pruned files and reclaimed bytes.
+ */
+export function pruneOrphanMediaBlobs(
+  storageRoot: string,
+  activeHashes: Set<string>
+): { prunedCount: number; reclaimedBytes: number } {
+  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes);
+  let reclaimedBytes = 0;
+  let prunedCount = 0;
+
+  for (const orphanPath of orphans) {
+    try {
+      const stat = fs.statSync(orphanPath);
+      reclaimedBytes += stat.size;
+      fs.unlinkSync(orphanPath);
+      prunedCount++;
+
+      // Clean up empty parent directories if empty
+      let parent = path.dirname(orphanPath);
+      for (let i = 0; i < 2; i++) {
+        if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
+          fs.rmdirSync(parent);
+          parent = path.dirname(parent);
+        } else {
+          break;
+        }
+      }
+    } catch {
+      // Ignore cleanup error on single file
+    }
+  }
+
+  return { prunedCount, reclaimedBytes };
 }

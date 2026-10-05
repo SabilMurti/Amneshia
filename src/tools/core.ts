@@ -356,6 +356,16 @@ export function registerCoreTools(
             fileSize: stored.fileSize,
             relativePath: stored.relativePath,
           });
+        } else if (mediaAsset.sha256 !== stored.sha256) {
+          db.deleteMediaByEntity(ent.id);
+          mediaAsset = db.createMediaAsset({
+            entityId: ent.id,
+            sha256: stored.sha256,
+            mimeType: stored.mimeType,
+            fileName: stored.fileName,
+            fileSize: stored.fileSize,
+            relativePath: stored.relativePath,
+          });
         }
 
         const tierVal: AuthorityTier = tier ?? 'contextual';

@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { startServer } from './server.js';
 import { DatabaseLayer } from './database/index.js';
+import { KnowledgeGraph } from './graph.js';
 import { initAmneshiaProject, resolveStorageConfig, DualWriteSync, adoptMemory } from './storage/index.js';
 import { MemoryExporter, type ExportFormat } from './export/index.js';
 import { setupGitRemote, getCloudStatus, cloudPull, cloudPush, cloudSync, setupMergeDriver, mergeMarkdownFiles } from './cloud/index.js';
@@ -111,7 +112,7 @@ program
 // Subcommand: gc
 program
   .command('gc')
-  .description('Garbage collect decayed, expired, and invalidated observations')
+  .description('Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs')
   .option('-l, --local', 'Run GC on local repository')
   .action((cmdOpts) => {
     const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
@@ -119,9 +120,11 @@ program
     const db = new DatabaseLayer(config.dataDir);
     const expired = db.cleanupExpired();
     const decayed = db.gc();
+    const orphanRes = db.pruneOrphanMedia(config.knowledgeDir);
     console.log(`[Amneshia] Garbage collection complete:`);
-    console.log(`  - Purged Expired:  ${expired}`);
-    console.log(`  - Purged Decayed:  ${decayed}`);
+    console.log(`  - Purged Expired:      ${expired}`);
+    console.log(`  - Purged Decayed:      ${decayed}`);
+    console.log(`  - Pruned Orphan Media: ${orphanRes.prunedCount} (${(orphanRes.reclaimedBytes / 1024).toFixed(1)} KB reclaimed)`);
     db.close();
   });
 
@@ -372,6 +375,119 @@ program
       db.close();
       process.exit(1);
     }
+    db.close();
+  });
+
+// Subcommand: media
+const mediaCmd = program
+  .command('media')
+  .description('Manage Content-Addressable Storage (CAS) media memory assets');
+
+mediaCmd
+  .command('list')
+  .description('List all registered media assets across the knowledge graph')
+  .option('-l, --local', 'Use local repository (.amneshia)')
+  .action((cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+    const assets = db.getAllMediaAssets();
+
+    console.log(`\n📸 Amneshia Media Assets (${assets.length} stored in ${config.mode.toUpperCase()} mode):`);
+    console.log(`--------------------------------------------------------------------------------`);
+    if (assets.length === 0) {
+      console.log('  No media assets found.');
+    } else {
+      for (const asset of assets) {
+        const ent = db.getEntityById(asset.entityId);
+        const entName = ent ? ent.name : asset.entityId;
+        const sizeKb = (asset.fileSize / 1024).toFixed(1);
+        console.log(`📌 Entity: "${entName}" | File: ${asset.fileName} (${asset.mimeType}, ${sizeKb} KB)`);
+        console.log(`   SHA-256: ${asset.sha256}`);
+        console.log(`   Path:    ${asset.relativePath}`);
+        console.log(`   Created: ${asset.createdAt}\n`);
+      }
+    }
+    db.close();
+  });
+
+mediaCmd
+  .command('remember <filePath>')
+  .description('Ingest a local media asset with attached facts and relations into CAS')
+  .requiredOption('-e, --entity <name>', 'Entity name representing this media asset')
+  .option('-d, --domain <domain>', 'Domain namespace', 'personal')
+  .option('-f, --fact <facts...>', 'Factual observations describing the media')
+  .option('-t, --tier <tier>', 'Authority tier (invariant, architectural, contextual, ephemeral)', 'contextual')
+  .option('-r, --relation <relations...>', 'Relationship links in format "relationType:targetEntity"')
+  .option('-l, --local', 'Use local repository (.amneshia)')
+  .action(async (filePath, cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+    const sync = new DualWriteSync(config.knowledgeDir, db);
+    const graph = new KnowledgeGraph(db, sync);
+
+    const facts: string[] = cmdOpts.fact ?? [];
+    if (facts.length === 0) {
+      facts.push(`Media asset ${path.basename(filePath)} ingested into Amneshia CAS.`);
+    }
+
+    const relations: Array<{ to: string; relationType: string }> = [];
+    if (cmdOpts.relation) {
+      for (const relStr of cmdOpts.relation) {
+        const colonIdx = relStr.indexOf(':');
+        if (colonIdx > 0) {
+          const relationType = relStr.slice(0, colonIdx).trim();
+          const to = relStr.slice(colonIdx + 1).trim();
+          if (relationType && to) {
+            relations.push({ relationType, to });
+          }
+        }
+      }
+    }
+
+    try {
+      const resolvedPath = path.resolve(filePath);
+      console.log(`[Amneshia] Ingesting media: ${resolvedPath}...`);
+      const result = await graph.rememberMedia({
+        filePath: resolvedPath,
+        entity: cmdOpts.entity,
+        domain: cmdOpts.domain,
+        facts,
+        tier: cmdOpts.tier as AuthorityTier,
+        relations,
+      });
+
+      console.log(`\n✅ Media Ingested Successfully:`);
+      console.log(`  - Entity:       ${result.entity.name} [${result.entity.domain}]`);
+      console.log(`  - Media File:   ${result.media.fileName} (${result.media.mimeType}, ${(result.media.fileSize / 1024).toFixed(1)} KB)`);
+      console.log(`  - SHA-256:      ${result.media.sha256}`);
+      console.log(`  - Sharded Path: ${result.media.relativePath}`);
+      console.log(`  - Deduplicated: ${result.deduplicated ? 'Yes (reused existing blob)' : 'No (new blob stored)'}`);
+      console.log(`  - Observations: ${result.observationIds.length}`);
+      console.log(`  - Relations:    ${result.relations.length}`);
+    } catch (err: any) {
+      console.error(`[Amneshia] Media ingestion failed: ${err.message}`);
+      db.close();
+      process.exit(1);
+    }
+    db.close();
+  });
+
+mediaCmd
+  .command('prune')
+  .description('Purge unreferenced orphan media blobs from CAS storage')
+  .option('-l, --local', 'Use local repository (.amneshia)')
+  .action((cmdOpts) => {
+    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
+    const config = resolveStorageConfig(isLocal);
+    const db = new DatabaseLayer(config.dataDir);
+
+    console.log(`[Amneshia] Scanning CAS storage for orphan blobs in ${config.knowledgeDir}...`);
+    const pruneRes = db.pruneOrphanMedia(config.knowledgeDir);
+    console.log(`\n✅ Media CAS Pruning Complete:`);
+    console.log(`  - Blobs Removed:  ${pruneRes.prunedCount}`);
+    console.log(`  - Reclaimed Disk: ${(pruneRes.reclaimedBytes / 1024).toFixed(1)} KB`);
     db.close();
   });
 

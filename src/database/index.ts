@@ -31,6 +31,7 @@ import type {
 import { SCHEMA_SQL } from './schema.js';
 import { runMigrations } from './migrations.js';
 import { fuseRRF, LocalOnnxEmbedder } from '../search/index.js';
+import { pruneOrphanMediaBlobs } from '../storage/media-store.js';
 
 interface FtsSearchRow {
   entity_id: string;
@@ -323,6 +324,7 @@ export class DatabaseLayer {
     insertMediaAsset: Database.Statement;
     getMediaByEntity: Database.Statement;
     getMediaByHash: Database.Statement;
+    getAllMediaAssets: Database.Statement;
     deleteMediaByEntity: Database.Statement;
     deleteFtsObservation: Database.Statement;
     insertFtsObservation: Database.Statement;
@@ -458,6 +460,9 @@ export class DatabaseLayer {
       ),
       getMediaByHash: this.db.prepare(
         'SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets WHERE sha256 = ? LIMIT 1'
+      ),
+      getAllMediaAssets: this.db.prepare(
+        'SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets ORDER BY created_at DESC'
       ),
       deleteMediaByEntity: this.db.prepare('DELETE FROM media_assets WHERE entity_id = ?'),
       deleteFtsObservation: this.db.prepare('DELETE FROM memory_fts WHERE observation_id = ?'),
@@ -802,6 +807,21 @@ export class DatabaseLayer {
   getMediaByHash(sha256: string): MediaAsset | null {
     const row = this.statements.getMediaByHash.get(sha256) as MediaAssetRow | undefined;
     return row ? toMediaAsset(row) : null;
+  }
+
+  getAllMediaAssets(): MediaAsset[] {
+    const rows = this.statements.getAllMediaAssets.all() as MediaAssetRow[];
+    return rows.map(toMediaAsset);
+  }
+
+  getActiveMediaHashes(): Set<string> {
+    const rows = this.db.prepare('SELECT DISTINCT sha256 FROM media_assets').all() as Array<{ sha256: string }>;
+    return new Set(rows.map((r) => r.sha256));
+  }
+
+  pruneOrphanMedia(storageRoot: string): { prunedCount: number; reclaimedBytes: number } {
+    const activeHashes = this.getActiveMediaHashes();
+    return pruneOrphanMediaBlobs(storageRoot, activeHashes);
   }
 
   deleteMediaByEntity(entityId: string): boolean {
