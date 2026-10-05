@@ -125,6 +125,7 @@ export class LocalOnnxEmbedder {
       // 1. Attempt native ONNX runtime on PC (Linux/macOS/Windows)
       if (!isAndroid) {
         try {
+          // @ts-ignore - optional dependency for native PC workstation acceleration
           const nodeOrt = await import('onnxruntime-node');
           loadedOrt = nodeOrt.default || nodeOrt;
           selectedBackend = 'native';

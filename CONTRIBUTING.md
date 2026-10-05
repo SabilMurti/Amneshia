@@ -49,10 +49,13 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
 ## Project Architecture
 
 - **`src/`**: Amneshia v3 Core TypeScript codebase
-  - **`database/`**: SQLite database layer, schema DDL, and migrations
+  - **`cloud/`**: Git-native cloud synchronization engine and 3-way semantic Markdown merge driver
+  - **`database/`**: SQLite database layer, schema DDL, migrations, and vector cosine dot-product indexing
+  - **`export/`**: Universal multi-format exporter (SQLite, JSON, Markdown bundle with catalogs)
   - **`graph/`**: Knowledge graph operations and GraphRAG multi-hop traversal
-  - **`storage/`**: Markdown-as-truth store (`.amneshia/knowledge/`) and FTS5 reindex engine
   - **`maintenance/`**: 100% deterministic Truth Maintenance System (Jaccard dedup, authority decay, cascading invalidation, contradiction detector)
+  - **`search/`**: Local ONNX embedding runtime (`all-MiniLM-L6-v2`), WordPiece tokenizer, and Reciprocal Rank Fusion (RRF)
+  - **`storage/`**: Markdown-as-truth store (`.amneshia/knowledge/`), local project adoption engine, and FTS5 reindex engine
   - **`tools/`**: MCP tool registrations (Core 4 profile vs Full profile)
   - **`server.ts`**: MCP stdio transport + Express HTTP/SSE server (Port 3457)
 - **`dashboard/`**: React 18 + Vite + Tailwind CSS + Three.js 3D ForceGraph web dashboard
@@ -62,13 +65,15 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
 
 ## Core Development Principles ("The Amneshia Way")
 
-1. **Zero External LLM inside the Engine:**
-   Amneshia is called *by* AI agents (Claude, Gemini, GPT). It must NEVER call an LLM inside itself. All conflict resolution, decay, deduplication, and truth maintenance must remain 100% deterministic and execute in sub-milliseconds (< 1ms).
+1. **Zero Generative LLMs inside the Engine:**
+   Amneshia is called *by* AI agents (Claude, Gemini, GPT). It must NEVER invoke a generative LLM inside itself for reasoning, memory synthesis, or conflict resolution. All truth maintenance, conflict resolution, decay, deduplication, and cascade invalidation must remain 100% deterministic and execute in sub-milliseconds (< 1ms). Semantic search embeddings are strictly offline and local (ONNX embedding encoder), with zero cloud AI API dependencies.
 2. **Ground Truth Fidelity:**
    Never mutate or synthesize user observations unexpectedly. What the user/agent writes is preserved with exact integrity.
-3. **Markdown-as-Truth:**
-   Every memory must be human-readable, git-committable, and verifiable via `git diff`.
-4. **Type Safety & Testing:**
+3. **Markdown-as-Truth & Git-Native:**
+   Every memory must be human-readable, git-committable, and verifiable via `git diff`. Cross-device sync relies on deterministic 3-way semantic Git merge drivers rather than probabilistic AI resolution.
+4. **Local-First & Zero External API Leaks:**
+   All search indexing (SQLite FTS5 BM25 + dense ONNX vector embeddings) must execute 100% locally on the host machine (PC workstation or mobile sandbox). No memory payload or query may ever be transmitted to external embedding APIs.
+5. **Type Safety & Testing Rigor:**
    All pull requests must pass TypeScript strict type checking (`npm run typecheck`) and the full Vitest suite (`npm test`).
 
 ---
