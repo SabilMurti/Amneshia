@@ -26,7 +26,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: 'Amneshia', version: '3.1.0' });
+  const server = new McpServer({ name: 'Amneshia', version: '3.2.0' });
   registerTools(server, graph, db, options.toolProfile);
 
   const cleanup = async () => {
@@ -57,7 +57,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '3.1.0' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.2.0' });
     });
 
     app.get('/api/graph', (req, res) => res.json(graph.readGraph(req.query.domain as string)));
@@ -100,10 +100,24 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.json({ ok: true, result });
     });
 
+    app.get('/api/media/by-entity/:entityId', (req, res) => res.json(db.getMediaByEntity(req.params.entityId)));
+    app.get('/api/media/by-hash/:sha256', (req, res) => res.json(db.getMediaByHash(req.params.sha256)));
+    app.post('/api/media/remember', async (req, res) => {
+      try {
+        const result = await graph.rememberMedia(req.body);
+        res.json(result);
+      } catch (err: any) {
+        res.status(400).json({ ok: false, error: err.message });
+      }
+    });
+
+    const mediaDir = path.join(storageConfig.knowledgeDir, 'media');
+    app.use('/media', express.static(mediaDir));
+
     const uiPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../dist-ui');
     app.use(express.static(uiPath));
     app.use((req, res, next) => {
-      if (req.path.startsWith('/api') || req.path === '/sse' || req.path === '/messages') return next();
+      if (req.path.startsWith('/api') || req.path.startsWith('/media') || req.path === '/sse' || req.path === '/messages') return next();
       res.sendFile(path.join(uiPath, 'index.html'));
     });
 

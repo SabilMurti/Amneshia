@@ -14,6 +14,7 @@ import {
 import { reindexFromMarkdown, type ReindexResult } from './reindex.js';
 
 export * from './markdown-store.js';
+export * from './media-store.js';
 export * from './reindex.js';
 export * from './slug.js';
 export * from './adopt.js';
@@ -55,7 +56,7 @@ export function initAmneshiaProject(targetDir: string = process.cwd()): { dataDi
 
   if (!fs.existsSync(configPath)) {
     const defaultConfig = `# Amneshia v3 Project Configuration
-version: "3.1.0"
+version: "3.2.0"
 storage:
   mode: "local"
   dual_write: true
@@ -87,17 +88,23 @@ export class DualWriteSync {
     fs.mkdirSync(this.knowledgeDir, { recursive: true });
   }
 
+  getKnowledgeDir(): string {
+    return this.knowledgeDir;
+  }
+
   syncEntity(entity: Entity): string {
     const observations = this.database.getObservationsByEntity(entity.id);
     const relations = this.database.getRelationsByEntity(entity.id);
-    return saveEntityMarkdown(this.knowledgeDir, entity, observations, relations);
+    const media = this.database.getMediaByEntity(entity.id);
+    return saveEntityMarkdown(this.knowledgeDir, entity, observations, relations, media);
   }
 
   syncAll(): number {
     const snapshot = this.database.readGraph();
     let count = 0;
     for (const entity of snapshot.entities) {
-      saveEntityMarkdown(this.knowledgeDir, entity, entity.observations, entity.relations);
+      const media = this.database.getMediaByEntity(entity.id);
+      saveEntityMarkdown(this.knowledgeDir, entity, entity.observations, entity.relations, media);
       count++;
     }
     return count;

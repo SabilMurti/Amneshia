@@ -1,8 +1,10 @@
+import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database/index.js';
 import { checkContradiction } from '../maintenance/contradiction.js';
+import { storeMediaAsset } from '../storage/media-store.js';
 import type { AuthorityTier, ObservationStatus } from '../types.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
@@ -301,6 +303,130 @@ export function registerCoreTools(
         return textContent({
           ok: false,
           error: error instanceof Error ? error.message : 'Failed to retrieve context',
+        });
+      }
+    }
+  );
+
+  // 5. remember_media: Content-Addressable Storage media ingestion with attached facts and relations
+  server.tool(
+    'remember_media',
+    'Ingest an immutable media asset (image, audio, video, PDF, document) into Content-Addressable Storage (CAS) with SHA-256 deduplication. Automatically creates an entity representing the media, records descriptive observations about what the media depicts or contains, evaluates pre-insertion contradiction detection, establishes semantic relations to other entities, and synchronizes to dual-write Markdown.\n\nWHEN TO USE:\n- Use "remember_media" when you have a local media file (screenshot, photo, voice note, document, diagram) and want to attach structured knowledge, descriptions, or relationships to it.\n- Amneshia handles storage, hashing, and relations deterministically with ZERO LLM overhead.\n- To query media facts later, use "recall" or "context".\n\nRETURNS:\n- JSON containing { ok: true, entity, media: { sha256, mimeType, fileName, fileSize, relativePath, deduplicated }, observationIds, relations, contradictionWarnings }.',
+    {
+      filePath: z.string().min(1).describe('Absolute or workspace-relative path to the source media file on disk'),
+      entity: z.string().min(1).describe('Entity name representing this media item (e.g. "Sabil Murti Profile Picture", "Architecture Diagram v3")'),
+      domain: z.string().optional().describe('Domain namespace (default: "personal")'),
+      facts: z.array(z.string().min(1)).min(1).describe('Factual observations describing the media content, context, or visual elements'),
+      tier: z
+        .enum(['invariant', 'architectural', 'contextual', 'ephemeral'])
+        .optional()
+        .describe('Authority tier for attached observations: invariant, architectural, contextual, ephemeral'),
+      relations: z
+        .array(
+          z.object({
+            to: z.string().min(1).describe('Target entity name to relate to'),
+            relationType: z.string().min(1).describe('Directed relationship type (e.g. "depicts", "belongs_to", "references")'),
+          })
+        )
+        .optional()
+        .describe('Semantic relationships linking this media entity to other entities'),
+    },
+    async ({ filePath, entity, domain, facts, tier, relations }) => {
+      try {
+        const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+        const storageRoot = (graph as any).getStorageRoot ? (graph as any).getStorageRoot() : db.getDataDir();
+        const stored = await storeMediaAsset(resolvedPath, storageRoot);
+
+        let ent = db.getEntityByName(entity);
+        if (!ent) {
+          ent = db.createEntity({
+            name: entity,
+            entityType: 'media',
+            domain: domain ?? 'personal',
+          });
+        }
+
+        let mediaAsset = db.getMediaByEntity(ent.id);
+        if (!mediaAsset) {
+          mediaAsset = db.createMediaAsset({
+            entityId: ent.id,
+            sha256: stored.sha256,
+            mimeType: stored.mimeType,
+            fileName: stored.fileName,
+            fileSize: stored.fileSize,
+            relativePath: stored.relativePath,
+          });
+        }
+
+        const tierVal: AuthorityTier = tier ?? 'contextual';
+        const observationIds: string[] = [];
+        const warnings: Array<{ fact: string; reason: string; conflictingId?: string }> = [];
+
+        for (const fact of facts) {
+          const conflict = await checkContradiction(fact, ent.id, db);
+          if (conflict.hasContradiction) {
+            warnings.push({
+              fact,
+              reason: conflict.reason || 'Semantic clash with existing fact',
+              conflictingId: conflict.conflictingObservation?.id,
+            });
+            if (conflict.conflictingObservation) {
+              db.recordContradiction(
+                'pending',
+                conflict.conflictingObservation.id,
+                ent.id,
+                conflict.reason || 'Polar opposition'
+              );
+            }
+          }
+
+          const obs = db.addObservation(
+            ent.id,
+            fact,
+            'media-ingest',
+            'normal',
+            1.0,
+            undefined,
+            tierVal
+          );
+          observationIds.push(obs.id);
+        }
+
+        const relationsCreated: Array<{ to: string; relationType: string }> = [];
+        if (relations && relations.length > 0) {
+          for (const rel of relations) {
+            const targetEnt = db.getEntityByName(rel.to);
+            if (targetEnt) {
+              db.createRelation(ent.id, targetEnt.id, rel.relationType);
+              relationsCreated.push({ to: targetEnt.name, relationType: rel.relationType });
+            }
+          }
+        }
+
+        // Trigger Markdown dual-write sync
+        (graph as any).triggerAutoExport?.();
+
+        return textContent({
+          ok: true,
+          entity: ent.name,
+          domain: ent.domain,
+          media: {
+            id: mediaAsset.id,
+            sha256: mediaAsset.sha256,
+            mimeType: mediaAsset.mimeType,
+            fileName: mediaAsset.fileName,
+            fileSize: mediaAsset.fileSize,
+            relativePath: mediaAsset.relativePath,
+            deduplicated: stored.deduplicated,
+          },
+          observationIds,
+          relations: relationsCreated,
+          contradictionWarnings: warnings.length > 0 ? warnings : undefined,
+        });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Failed to remember media',
         });
       }
     }

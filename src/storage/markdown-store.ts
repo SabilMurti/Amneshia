@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AuthorityTier, Entity, Observation, ObservationStatus, RelationWithNames } from '../types.js';
+import type { AuthorityTier, Entity, MediaAsset, Observation, ObservationStatus, RelationWithNames } from '../types.js';
 import { toSlug } from './slug.js';
 
 export interface ParsedObservation {
@@ -18,6 +18,14 @@ export interface ParsedRelation {
   targetName: string;
 }
 
+export interface ParsedMarkdownMedia {
+  sha256: string;
+  mimeType: string;
+  fileName: string;
+  fileSize: number;
+  relativePath: string;
+}
+
 export interface ParsedMarkdownEntity {
   id: string;
   name: string;
@@ -29,14 +37,16 @@ export interface ParsedMarkdownEntity {
   updatedAt: string;
   observations: ParsedObservation[];
   relations: ParsedRelation[];
+  media?: ParsedMarkdownMedia;
 }
 
 export function serializeEntity(
   entity: Entity,
   observations: Observation[],
-  relations: RelationWithNames[]
+  relations: RelationWithNames[],
+  media?: MediaAsset | ParsedMarkdownMedia | null
 ): string {
-  const frontmatter = [
+  const frontmatterLines = [
     '---',
     `id: ${JSON.stringify(entity.id)}`,
     `name: ${JSON.stringify(entity.name)}`,
@@ -46,8 +56,19 @@ export function serializeEntity(
     `allowed_agents: ${JSON.stringify(entity.allowedAgents)}`,
     `created: ${JSON.stringify(entity.createdAt)}`,
     `updated: ${JSON.stringify(entity.updatedAt)}`,
-    '---',
-  ].join('\n');
+  ];
+
+  if (media) {
+    frontmatterLines.push('media:');
+    frontmatterLines.push(`  sha256: ${JSON.stringify(media.sha256)}`);
+    frontmatterLines.push(`  mime_type: ${JSON.stringify(media.mimeType)}`);
+    frontmatterLines.push(`  file_name: ${JSON.stringify(media.fileName)}`);
+    frontmatterLines.push(`  file_size: ${media.fileSize}`);
+    frontmatterLines.push(`  relative_path: ${JSON.stringify(media.relativePath)}`);
+  }
+
+  frontmatterLines.push('---');
+  const frontmatter = frontmatterLines.join('\n');
 
   const obsLines: string[] = [];
   for (const obs of observations) {
@@ -81,6 +102,14 @@ export function serializeEntity(
   }
 
   const sections = [frontmatter];
+
+  if (media) {
+    if (media.mimeType.startsWith('image/')) {
+      sections.push(`\n![${media.fileName}](../${media.relativePath})\n`);
+    } else {
+      sections.push(`\n[${media.fileName}](../${media.relativePath}) *(${media.mimeType}, ${media.fileSize} bytes)*\n`);
+    }
+  }
 
   sections.push('## Observations\n');
   if (obsLines.length > 0) {
@@ -133,6 +162,34 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
       allowedAgents = JSON.parse(rawAgents);
     } catch {
       allowedAgents = [];
+    }
+  }
+
+  let media: ParsedMarkdownMedia | undefined;
+  if (frontmatterStr.includes('media:')) {
+    const getMediaField = (field: string): string | null => {
+      const m = frontmatterStr.match(new RegExp(`^[ \\t]+${field}:\\s*(.*)$`, 'm'));
+      if (!m) return null;
+      let val = m[1].trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      return val;
+    };
+    const sha256 = getMediaField('sha256');
+    const mimeType = getMediaField('mime_type');
+    const fileName = getMediaField('file_name');
+    const fileSizeStr = getMediaField('file_size');
+    const relativePath = getMediaField('relative_path');
+
+    if (sha256 && relativePath) {
+      media = {
+        sha256,
+        mimeType: mimeType || 'application/octet-stream',
+        fileName: fileName || path.basename(relativePath),
+        fileSize: fileSizeStr ? parseInt(fileSizeStr, 10) || 0 : 0,
+        relativePath,
+      };
     }
   }
 
@@ -228,6 +285,7 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
     updatedAt,
     observations,
     relations,
+    media,
   };
 }
 
@@ -241,12 +299,13 @@ export function saveEntityMarkdown(
   knowledgeDir: string,
   entity: Entity,
   observations: Observation[],
-  relations: RelationWithNames[]
+  relations: RelationWithNames[],
+  media?: MediaAsset | ParsedMarkdownMedia | null
 ): string {
   const filePath = getEntityFilePath(knowledgeDir, entity.domain, entity.name);
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-  const content = serializeEntity(entity, observations, relations);
+  const content = serializeEntity(entity, observations, relations, media);
   fs.writeFileSync(filePath, content, 'utf-8');
   return filePath;
 }

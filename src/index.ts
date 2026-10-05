@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('amneshia')
   .description('🧠 Amneshia v3 — Git-native knowledge graph for AI agents with truth maintenance')
-  .version('3.1.0')
+  .version('3.2.0')
   .option('--data-dir <path>', 'Custom data directory')
   .option('-l, --local', 'Use local repository directory (.amneshia) instead of global ~/.amneshia')
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')
@@ -141,6 +141,7 @@ program
     console.log(`  Total Entities:       ${stats.totalEntities}`);
     console.log(`  Total Observations:   ${stats.totalObservations}`);
     console.log(`  Total Relations:      ${stats.totalRelations}`);
+    console.log(`  Total Media Assets:   ${stats.totalMediaAssets ?? 0}`);
     console.log(`  Export Targets:       ${stats.totalExportTargets}`);
     console.log(`  Open Contradictions:  ${stats.totalContradictions ?? 0}`);
 
@@ -172,11 +173,11 @@ program
 program
   .command('serve')
   .description('Start the HTTP Web Dashboard server')
-  .option('-p, --port <number>', 'Port number', (val) => parseInt(val, 10), 3457)
+  .option('-p, --port <number>', 'Port number', (val) => parseInt(val, 10))
   .option('-l, --local', 'Use local repository')
   .action(async (cmdOpts) => {
     const isLocal = cmdOpts.local || program.opts().local;
-    const port = cmdOpts.port || program.opts().port || 3457;
+    const port = cmdOpts.port ?? program.opts().port ?? 3457;
     await startServer({ local: isLocal, http: true, port, stdio: false });
   });
 

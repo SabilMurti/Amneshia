@@ -72,6 +72,18 @@ CREATE TABLE IF NOT EXISTS access_log (
   accessed_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS media_assets (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  sha256 TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  relative_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(entity_id, sha256)
+);
+
 CREATE INDEX IF NOT EXISTS idx_obs_entity_status ON observations(entity_id, status);
 CREATE INDEX IF NOT EXISTS idx_obs_authority ON observations(authority_tier);
 CREATE INDEX IF NOT EXISTS idx_obs_status ON observations(status);
@@ -79,6 +91,8 @@ CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
 CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
+CREATE INDEX IF NOT EXISTS idx_media_entity ON media_assets(entity_id);
+CREATE INDEX IF NOT EXISTS idx_media_sha256 ON media_assets(sha256);
 
 CREATE TABLE IF NOT EXISTS observation_embeddings (
   observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,

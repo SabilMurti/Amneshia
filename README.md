@@ -12,11 +12,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.1.0-6d28d9.svg?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.2.0-6d28d9.svg?style=flat-square" alt="Release" /></a>
   <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
   <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-60%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-67%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square" alt="MCP" /></a>
   <a href="https://github.com/SabilMurti/Amneshia"><img src="https://img.shields.io/badge/search-Local%20ONNX%20%2B%20RRF-8b5cf6.svg?style=flat-square" alt="Search: Local ONNX RRF" /></a>
   <a href="tsconfig.json"><img src="https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square" alt="TypeScript" /></a>

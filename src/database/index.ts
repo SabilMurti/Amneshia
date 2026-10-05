@@ -15,9 +15,11 @@ import type {
   AuthorityTier,
   ContradictionLogEntry,
   CreateEntityInput,
+  CreateMediaAssetInput,
   Entity,
   ExportTarget,
   GraphSnapshot,
+  MediaAsset,
   MemoryStats,
   Observation,
   ObservationHistory,
@@ -231,6 +233,30 @@ function toExportTarget(row: ExportTargetRow): ExportTarget {
   };
 }
 
+interface MediaAssetRow {
+  id: string;
+  entity_id: string;
+  sha256: string;
+  mime_type: string;
+  file_name: string;
+  file_size: number;
+  relative_path: string;
+  created_at: string;
+}
+
+function toMediaAsset(row: MediaAssetRow): MediaAsset {
+  return {
+    id: row.id,
+    entityId: row.entity_id,
+    sha256: row.sha256,
+    mimeType: row.mime_type,
+    fileName: row.file_name,
+    fileSize: row.file_size,
+    relativePath: row.relative_path,
+    createdAt: row.created_at,
+  };
+}
+
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'why', 'how',
   'who', 'what', 'which', 'this', 'that', 'these', 'those', 'to', 'of', 'in', 'on', 'at', 'by',
@@ -294,6 +320,10 @@ export class DatabaseLayer {
     createRelation: Database.Statement;
     getRelationsByEntity: Database.Statement;
     deleteRelation: Database.Statement;
+    insertMediaAsset: Database.Statement;
+    getMediaByEntity: Database.Statement;
+    getMediaByHash: Database.Statement;
+    deleteMediaByEntity: Database.Statement;
     deleteFtsObservation: Database.Statement;
     insertFtsObservation: Database.Statement;
     insertFtsEntity: Database.Statement;
@@ -308,6 +338,7 @@ export class DatabaseLayer {
     countObservations: Database.Statement;
     countRelations: Database.Statement;
     countExportTargets: Database.Statement;
+    countMediaAssets: Database.Statement;
     countContradictions: Database.Statement;
     entitiesByType: Database.Statement;
     entitiesByDomain: Database.Statement;
@@ -419,6 +450,16 @@ export class DatabaseLayer {
          ORDER BY r.created_at ASC`
       ),
       deleteRelation: this.db.prepare('DELETE FROM relations WHERE id = ?'),
+      insertMediaAsset: this.db.prepare(
+        'INSERT OR REPLACE INTO media_assets (id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ),
+      getMediaByEntity: this.db.prepare(
+        'SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets WHERE entity_id = ? LIMIT 1'
+      ),
+      getMediaByHash: this.db.prepare(
+        'SELECT id, entity_id, sha256, mime_type, file_name, file_size, relative_path, created_at FROM media_assets WHERE sha256 = ? LIMIT 1'
+      ),
+      deleteMediaByEntity: this.db.prepare('DELETE FROM media_assets WHERE entity_id = ?'),
       deleteFtsObservation: this.db.prepare('DELETE FROM memory_fts WHERE observation_id = ?'),
       insertFtsObservation: this.db.prepare(
         'INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id) VALUES (?, ?, ?, ?, ?)'
@@ -462,6 +503,7 @@ export class DatabaseLayer {
       countObservations: this.db.prepare('SELECT COUNT(*) AS value FROM observations'),
       countRelations: this.db.prepare('SELECT COUNT(*) AS value FROM relations'),
       countExportTargets: this.db.prepare('SELECT COUNT(*) AS value FROM export_targets'),
+      countMediaAssets: this.db.prepare('SELECT COUNT(*) AS value FROM media_assets'),
       countContradictions: this.db.prepare('SELECT COUNT(*) AS value FROM contradiction_log WHERE resolution IS NULL'),
       entitiesByType: this.db.prepare(
         'SELECT entity_type AS key, COUNT(*) AS value FROM entities GROUP BY entity_type ORDER BY entity_type ASC'
@@ -540,6 +582,10 @@ export class DatabaseLayer {
 
   private getObservationRowById(id: string): ObservationRow | undefined {
     return this.statements.getObservationById.get(id) as ObservationRow | undefined;
+  }
+
+  getDataDir(): string {
+    return this.dataDir;
   }
 
   createEntity(input: CreateEntityInput): Entity {
@@ -719,6 +765,47 @@ export class DatabaseLayer {
 
   deleteRelation(id: string): boolean {
     const result = this.statements.deleteRelation.run(id);
+    return result.changes > 0;
+  }
+
+  // --- Media Asset Persistence ---
+
+  createMediaAsset(input: CreateMediaAssetInput): MediaAsset {
+    const asset: MediaAsset = {
+      id: uuid(),
+      entityId: input.entityId,
+      sha256: input.sha256,
+      mimeType: input.mimeType,
+      fileName: input.fileName,
+      fileSize: input.fileSize,
+      relativePath: input.relativePath,
+      createdAt: nowIso(),
+    };
+    this.statements.insertMediaAsset.run(
+      asset.id,
+      asset.entityId,
+      asset.sha256,
+      asset.mimeType,
+      asset.fileName,
+      asset.fileSize,
+      asset.relativePath,
+      asset.createdAt
+    );
+    return asset;
+  }
+
+  getMediaByEntity(entityId: string): MediaAsset | null {
+    const row = this.statements.getMediaByEntity.get(entityId) as MediaAssetRow | undefined;
+    return row ? toMediaAsset(row) : null;
+  }
+
+  getMediaByHash(sha256: string): MediaAsset | null {
+    const row = this.statements.getMediaByHash.get(sha256) as MediaAssetRow | undefined;
+    return row ? toMediaAsset(row) : null;
+  }
+
+  deleteMediaByEntity(entityId: string): boolean {
+    const result = this.statements.deleteMediaByEntity.run(entityId);
     return result.changes > 0;
   }
 
@@ -1026,6 +1113,7 @@ export class DatabaseLayer {
       totalObservations: (this.statements.countObservations.get() as StatsRow).value,
       totalRelations: (this.statements.countRelations.get() as StatsRow).value,
       totalExportTargets: (this.statements.countExportTargets.get() as StatsRow).value,
+      totalMediaAssets: (this.statements.countMediaAssets.get() as StatsRow).value,
       totalContradictions: contradictionCount,
       entitiesByType: Object.fromEntries(entitiesByTypeRows.map((row) => [row.key, row.value])),
       entitiesByDomain: Object.fromEntries(entitiesByDomainRows.map((row) => [row.key, row.value])),

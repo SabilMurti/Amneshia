@@ -4,10 +4,11 @@
  * Coordinates entity management, observations, relational traversal, and dual-write markdown sync.
  */
 
-import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation } from './types.js';
+import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation, MediaAsset, RememberMediaInput } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
 import type { DualWriteSync } from './storage/index.js';
+import { storeMediaAsset } from './storage/media-store.js';
 
 /**
  * Input arguments for export target configuration operations.
@@ -400,6 +401,109 @@ export class KnowledgeGraph {
       return { id: input.id, autoExport: newAutoExport };
     }
     throw new Error(`Invalid action: ${input.action}`);
+  }
+
+  /**
+   * Resolves the primary storage root directory for media CAS.
+   * Prefers the Git-synced knowledgeDir if dual-write sync is active.
+   */
+  getStorageRoot(): string {
+    return this.dualWriteSync ? this.dualWriteSync.getKnowledgeDir() : this.database.getDataDir();
+  }
+
+  /**
+   * Ingests an immutable media asset into Content-Addressable Storage (CAS),
+   * creates or links an entity, persists a media_assets record, attaches descriptive observations,
+   * establishes directed relations, and triggers dual-write sync.
+   * @param input High-level media ingestion payload
+   * @returns Ingestion outcome including entity, media asset, and observation identifiers
+   */
+  async rememberMedia(input: RememberMediaInput): Promise<{
+    ok: boolean;
+    entity: Entity;
+    media: MediaAsset;
+    observationIds: string[];
+    relations: string[];
+    deduplicated: boolean;
+  }> {
+    const storageRoot = this.getStorageRoot();
+    const stored = await storeMediaAsset(input.filePath, storageRoot);
+
+    let entity = this.database.getEntityByName(input.entity);
+    if (!entity) {
+      entity = this.database.createEntity({
+        name: input.entity,
+        entityType: 'media',
+        domain: input.domain ?? 'personal',
+      });
+    }
+
+    let media = this.database.getMediaByEntity(entity.id);
+    if (!media) {
+      media = this.database.createMediaAsset({
+        entityId: entity.id,
+        sha256: stored.sha256,
+        mimeType: stored.mimeType,
+        fileName: stored.fileName,
+        fileSize: stored.fileSize,
+        relativePath: stored.relativePath,
+      });
+    }
+
+    const observationIds: string[] = [];
+    const tier = input.tier ?? 'contextual';
+    for (const fact of input.facts) {
+      const obs = this.database.addObservation(
+        entity.id,
+        fact,
+        'media-ingest',
+        'normal',
+        1.0,
+        undefined,
+        tier
+      );
+      observationIds.push(obs.id);
+    }
+
+    const relationsCreated: string[] = [];
+    if (input.relations && input.relations.length > 0) {
+      for (const rel of input.relations) {
+        const targetEntity = this.database.getEntityByName(rel.to);
+        if (targetEntity) {
+          const createdRel = this.database.createRelation(entity.id, targetEntity.id, rel.relationType);
+          relationsCreated.push(createdRel.id);
+        }
+      }
+    }
+
+    this.triggerAutoExport();
+
+    return {
+      ok: true,
+      entity,
+      media,
+      observationIds,
+      relations: relationsCreated,
+      deduplicated: stored.deduplicated,
+    };
+  }
+
+  /**
+   * Retrieves media asset details associated with an entity.
+   * @param entityId Entity UUID
+   * @returns MediaAsset record or null if not found
+   */
+  getMediaByEntity(entityId: string): MediaAsset | null {
+    return this.database.getMediaByEntity(entityId);
+  }
+
+  /**
+   * Retrieves media asset details by cryptographic SHA-256 hash.
+   * @param sha256 Content digest
+   * @returns MediaAsset record or null if not found
+   */
+  getMediaByHash(sha256: string): MediaAsset | null {
+    return this.database.getMediaByHash(sha256);
   }
 
   private triggerAutoExport() {

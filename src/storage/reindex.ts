@@ -5,6 +5,7 @@ export interface ReindexResult {
   entities: number;
   observations: number;
   relations: number;
+  mediaAssets?: number;
 }
 
 export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): ReindexResult {
@@ -12,8 +13,9 @@ export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): Re
   let entityCount = 0;
   let observationCount = 0;
   let relationCount = 0;
+  let mediaCount = 0;
 
-  // Pass 1: Upsert all entities
+  // Pass 1: Upsert all entities & media assets
   for (const item of parsedEntities) {
     let existing = db.getEntityByName(item.name);
     if (!existing) {
@@ -25,6 +27,21 @@ export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): Re
         allowedAgents: item.allowedAgents,
       });
       entityCount++;
+    }
+
+    if (item.media) {
+      const existingMedia = db.getMediaByEntity(existing.id);
+      if (!existingMedia) {
+        db.createMediaAsset({
+          entityId: existing.id,
+          sha256: item.media.sha256,
+          mimeType: item.media.mimeType,
+          fileName: item.media.fileName,
+          fileSize: item.media.fileSize,
+          relativePath: item.media.relativePath,
+        });
+        mediaCount++;
+      }
     }
   }
 
@@ -76,5 +93,6 @@ export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): Re
     entities: entityCount,
     observations: observationCount,
     relations: relationCount,
+    mediaAssets: mediaCount,
   };
 }

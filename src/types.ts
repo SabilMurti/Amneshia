@@ -178,6 +178,8 @@ export interface MemoryStats {
   totalRelations: number;
   /** Total count of configured export targets */
   totalExportTargets: number;
+  /** Total count of media assets stored in CAS */
+  totalMediaAssets?: number;
   /** Count of open unresolved contradictions */
   totalContradictions?: number;
   /** Breakdown of observations by authority tier */
@@ -359,3 +361,56 @@ export interface ForgetInput {
   /** If true, cascade invalidation to all dependent derived facts */
   cascade?: boolean;
 }
+
+/**
+ * First-class immutable media asset stored in the Content-Addressable Storage (CAS).
+ */
+export interface MediaAsset {
+  /** Unique media asset UUID */
+  id: string;
+  /** Associated entity ID in the knowledge graph */
+  entityId: string;
+  /** SHA-256 cryptographic digest of the raw media content */
+  sha256: string;
+  /** Standard MIME content type (e.g. "image/jpeg", "audio/ogg", "application/pdf") */
+  mimeType: string;
+  /** Original file basename when ingested */
+  fileName: string;
+  /** Physical byte length of the asset */
+  fileSize: number;
+  /** Relative storage path within the .amneshia/ directory tree */
+  relativePath: string;
+  /** ISO-8601 ingestion timestamp */
+  createdAt: string;
+}
+
+/**
+ * Payload for registering a media asset record into the database layer.
+ */
+export interface CreateMediaAssetInput {
+  entityId: string;
+  sha256: string;
+  mimeType: string;
+  fileName: string;
+  fileSize: number;
+  relativePath: string;
+}
+
+/**
+ * High-level MCP input schema for the `remember_media` tool.
+ */
+export interface RememberMediaInput {
+  /** Absolute or workspace-relative path to the source media file on disk */
+  filePath: string;
+  /** Unique entity name representing this media item */
+  entity: string;
+  /** Optional domain namespace */
+  domain?: string;
+  /** Atomic factual observations describing what the media depicts or contains */
+  facts: string[];
+  /** Optional authority tier for attached observations */
+  tier?: AuthorityTier;
+  /** Optional directed relationships connecting this media to other entities */
+  relations?: Array<{ to: string; relationType: string }>;
+}
+

@@ -1,6 +1,6 @@
 {
   "name": "@sabilmurti/amneshia",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "🧠 Git-native knowledge graph for AI agents with truth maintenance, Markdown-as-truth, provenance tracking, and cascading invalidation.",
   "type": "module",
   "main": "dist/index.js",

@@ -26,7 +26,7 @@ describe('Tools Redesign Tests (Core & Full Profiles)', () => {
     } catch {}
   });
 
-  it('should register only 4 core tools when profile is core', () => {
+  it('should register core tools when profile is core', () => {
     const server = new McpServer({ name: 'TestCore', version: '3.0.0' });
     registerTools(server, graph, db, 'core');
 
@@ -34,11 +34,12 @@ describe('Tools Redesign Tests (Core & Full Profiles)', () => {
     const registered = (server as any)._registeredTools;
     const toolNames = Object.keys(registered);
 
-    expect(toolNames).toHaveLength(4);
+    expect(toolNames).toHaveLength(5);
     expect(toolNames).toContain('remember');
     expect(toolNames).toContain('recall');
     expect(toolNames).toContain('forget');
     expect(toolNames).toContain('context');
+    expect(toolNames).toContain('remember_media');
   });
 
   it('should register core and admin tools when profile is full', () => {
