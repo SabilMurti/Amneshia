@@ -5,12 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [3.2.0] - 2026-10-06
 
 ### 🚀 Highlights
+- **Deterministic Media Memory Engine (CAS Storage)**: Content-Addressable Storage (CAS) engine storing immutable media assets (images, audio, video, documents) using streaming cryptographic SHA-256 digests. Implements deterministic sub-directory sharding (`media/ab/cdef...`), instant binary deduplication, and zero external npm dependencies.
+- **Media Ingestion & Orphan Garbage Collection (`amneshia media`, `remember_media`)**: High-level CLI commands and MCP tool (`remember_media`) allowing agents and users to associate images/documents directly with knowledge entities, facts, and relations. Includes `amneshia media prune` for garbage-collecting unreferenced orphan blobs.
 - **Self-Updater CLI Subsystem (`amneshia update`)**: One-command in-place updater for Amneshia. Automatically queries release registries (GitHub Releases API and JSR fallback), performs SemVer delta analysis, detects the host environment (Git clone vs global npm/pnpm/bun), and upgrades the installation seamlessly without manual npm/curl intervention.
 - **Update Verification & Re-install Flags (`--check`, `--force`)**: Added `--check` flag to inspect available release versions without installing, and `--force` flag to force a re-installation or clean re-build of the current release.
 
 ### 🛠️ Added
+- `src/storage/media-store.ts`: Core Content-Addressable Storage engine featuring streaming SHA-256 calculation, zero-dependency MIME type detection, and two-level directory sharding.
 - `src/updater/index.ts`: Dedicated self-updater module featuring SemVer parser & comparator, GitHub Releases/JSR release fetcher with abort timeouts, install environment detection (Git clone vs global package managers), and automated upgrade executors.
+- `amneshia media <list|remember|prune>`: CLI suite for managing CAS media assets, linking local files to knowledge graph entities, and pruning orphan blobs.
 - `amneshia update`: CLI command for automated self-updating with real-time step progress feedback.
+- `remember_media` MCP tool: Native tool in both Core and Full tool profiles for AI agents to ingest screenshots, diagrams, and photos into long-term memory.
+- `tests/media.test.ts`: Complete test suite for CAS ingestion, SHA-256 deduplication, sharding, and orphan blob pruning.
 - `tests/updater.test.ts`: Complete unit test suite verifying SemVer comparison, environment detection, and live release registry contracts (7/7 tests passing).
 - Exported `./updater` subpath in `jsr.json`.
 

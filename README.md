@@ -85,6 +85,13 @@ npm install
 npm run build && npm install -g .
 ```
 
+#### Keeping Amneshia Updated
+Once installed, upgrade Amneshia in-place anytime with a single command:
+```bash
+amneshia update           # Perform seamless in-place upgrade
+amneshia update --check   # Check for updates without installing
+```
+
 ---
 
 ### MCP Client Configurations
@@ -183,7 +190,11 @@ amneshia serve
     - [Cascading Invalidation DAG](#cascading-invalidation-dag)
     - [Pre-Insertion Contradiction Detection](#pre-insertion-contradiction-detection)
   - [2. Dual-Write Storage: Markdown-as-Truth](#2-dual-write-storage-markdown-as-truth)
-  - [3. Tool Surface & JSON-RPC Schemas](#3-tool-surface--json-rpc-schemas)
+  - [3. Deterministic Media Memory Engine (CAS Storage)](#3-deterministic-media-memory-engine-cas-storage)
+  - [4. Local ONNX Hybrid Semantic Search](#4-local-onnx-hybrid-semantic-search)
+  - [5. Git-Native Cloud Sync & Smart Merge Driver](#5-git-native-cloud-sync--smart-merge-driver)
+  - [6. In-Place Self-Updater](#6-in-place-self-updater)
+  - [7. Tool Surface & JSON-RPC Schemas](#7-tool-surface--json-rpc-schemas)
 - [3D Web Dashboard (Port 3457)](#3d-web-dashboard-port-3457)
 - [Agent System Rules & Prompt Presets](#agent-system-rules--prompt-presets)
 - [CLI Reference](#cli-reference)
@@ -305,16 +316,89 @@ updated: "2026-09-28T18:30:00.000Z"
 
 ---
 
-### 3. Tool Surface & JSON-RPC Schemas
+### 3. Deterministic Media Memory Engine (CAS Storage)
 
-When initialized with `--tool-profile core` (default), Amneshia exposes **4 high-level MCP tools**:
+Amneshia v3.2.0 features an immutable **Content-Addressable Storage (CAS)** subsystem for multimodal artifacts (screenshots, architectural diagrams, audio notes, camera captures) associated directly with entities in the knowledge graph:
+- **Streaming Cryptographic Hashing:** Calculates streaming `SHA-256` digests, avoiding memory bloat even on large media.
+- **Two-Level Sharded Storage:** Media blobs are stored in `.amneshia/media/<sha256[:2]>/<sha256[2:]>.<ext>` to prevent filesystem directory scaling bottlenecks.
+- **Zero-Token Binary Deduplication:** Storing identical media across multiple entities or sessions reuses existing blobs instantly ($O(1)$) with zero duplicate disk consumption.
+- **Orphan Garbage Collection:** Unreferenced media files are automatically detected and safely reclaimed with `amneshia media prune`.
+- **Zero Dependencies:** Pure Node.js streams and deterministic MIME extension lookup table without external npm dependencies.
+
+```bash
+# Ingest local media and attach facts into Amneshia CAS
+amneshia media remember ./architecture.png -e "Architecture Diagram" -f "Microservices visual topology"
+
+# List stored media assets with SHA-256 digests and file sizes
+amneshia media list
+
+# Purge unreferenced orphan media blobs
+amneshia media prune
+```
+
+---
+
+### 4. Local ONNX Hybrid Semantic Search
+
+Combines deterministic SQLite FTS5 BM25 lexical ranking and dense vector cosine similarity via **Reciprocal Rank Fusion (RRF, $k=60$)**:
+- **100% Local Inference:** Uses quantized `all-MiniLM-L6-v2` (384 dimensions) with zero external API calls or cloud token costs.
+- **PC-First Acceleration with Mobile Fallback:** Leverages native C++ `onnxruntime-node` with AVX2/AVX-512/GPU execution on PC workstations, and pure WebAssembly SIMD (`onnxruntime-web`) on Android Termux userspace.
+- **Precomputed Vector Index:** Fast cosine similarity dot products calculated directly inside SQLite.
+
+```bash
+# Precompute vector embeddings for all active observations
+amneshia embed
+
+# Hybrid semantic search with RRF scoring
+amneshia search "token expiration and refresh logic"
+```
+
+---
+
+### 5. Git-Native Cloud Sync & Smart Merge Driver
+
+Amneshia synchronizes seamlessly across developer workstations (PC, laptop) and mobile terminals (Android Termux) backed by private Git repositories:
+- **Smart 3-Way Git Merge Driver (`amneshia cloud setup-driver`):** Eliminates standard Git merge conflict markers (`<<<<<<< HEAD`) in Markdown knowledge files. Semantically merges YAML frontmatter, deduplicates observation UUIDs and contents, preserves highest authority tiers, and unions directional relations mathematically.
+- **Bidirectional Cloud Sync:** `amneshia cloud sync` pulls upstream changes, rebuilds SQLite FTS5 index automatically, and pushes local additions in a single command.
+
+```bash
+# Activate merge driver globally in ~/.gitconfig (PC / Workstation)
+amneshia cloud setup-driver --global
+
+# Synchronize across devices in one command
+amneshia cloud sync
+```
+
+---
+
+### 6. In-Place Self-Updater (`amneshia update`)
+
+Keeps your Amneshia installation up to date with zero manual steps:
+- **Registry Failover:** Queries GitHub Releases API first, with automatic fallback to JSR (`jsr.io`).
+- **Environment Detection:** Automatically detects Git clones (`git pull --rebase && npm install && npm run build`) vs global package managers (`npm`/`pnpm`/`bun` installing release tarballs).
+- **SemVer Delta Engine:** Checks if the host installation is up to date (`--check`), and allows forced re-installation (`--force`).
+
+```bash
+# Check if a new release is available
+amneshia update --check
+
+# Upgrade Amneshia in-place to latest release
+amneshia update
+```
+
+---
+
+### 7. Tool Surface & JSON-RPC Schemas
+
+When initialized with `--tool-profile core` (default), Amneshia exposes **5 high-level MCP tools**:
 
 ```
 MCP Toolset (Core Profile)
-├── remember  : Entity upsert, observation recording, contradiction checks
-├── recall    : BM25 full-text search with token budgeting
-├── forget    : Soft/hard invalidation with dependency cascade
-└── context   : GraphRAG multi-hop relational traversal
+├── remember        : Entity upsert, observation recording, contradiction checks
+├── remember_media  : Ingest local image/audio/document into CAS storage and link to entity
+├── recall          : Hybrid BM25 + dense vector semantic search with token budgeting
+├── forget          : Soft/hard invalidation with dependency cascade
+└── context         : GraphRAG multi-hop relational traversal
 ```
 
 #### `remember`
@@ -326,6 +410,20 @@ MCP Toolset (Core Profile)
     "facts": ["JWT access tokens expire after 15 minutes", "Refresh tokens stored in HTTP-only cookies"],
     "tier": "architectural",
     "derived_from": ["obs-001"]
+  }
+}
+```
+
+#### `remember_media`
+```json
+{
+  "name": "remember_media",
+  "arguments": {
+    "file_path": "/path/to/architecture-diagram.png",
+    "entity": "Authentication",
+    "facts": ["Architecture visual spec showing JWT authentication flow"],
+    "domain": "architecture",
+    "tier": "contextual"
   }
 }
 ```
@@ -509,6 +607,11 @@ amneshia cloud setup-driver --global     # Activate driver globally in ~/.gitcon
 amneshia embed                           # Precompute vector embeddings for active observations
 amneshia embed --force                   # Recompute all vector embeddings from scratch
 amneshia search "Android memory limits"  # Hybrid semantic search with Reciprocal Rank Fusion
+
+# Deterministic Media Memory Engine (Content-Addressable Storage / CAS)
+amneshia media list                           # Inspect stored media assets across the graph
+amneshia media remember ./diagram.png -e "Architecture" -f "System design spec" # Ingest media into CAS
+amneshia media prune                          # Purge unreferenced orphan media blobs
 
 # Self-Updater (Automated in-place upgrade from GitHub Releases / JSR)
 amneshia update --check                  # Check for updates without installing
