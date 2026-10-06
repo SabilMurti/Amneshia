@@ -57,6 +57,7 @@ We are committed to providing a welcoming, inclusive, and harassment-free enviro
   - **`search/`**: Local ONNX embedding runtime (`all-MiniLM-L6-v2`), WordPiece tokenizer, and Reciprocal Rank Fusion (RRF)
   - **`storage/`**: Markdown-as-truth store (`.amneshia/knowledge/`), local project adoption engine, and FTS5 reindex engine
   - **`tools/`**: MCP tool registrations (Core 4 profile vs Full profile)
+  - **`updater/`**: Self-updater subsystem for automated in-place upgrades via GitHub Releases & JSR
   - **`server.ts`**: MCP stdio transport + Express HTTP/SSE server (Port 3457)
 - **`dashboard/`**: React 18 + Vite + Tailwind CSS + Three.js 3D ForceGraph web dashboard
 - **`tests/`**: Vitest unit and integration test suite

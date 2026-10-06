@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.0] - 2026-10-06
+
+### 🚀 Highlights
+- **Self-Updater CLI Subsystem (`amneshia update`)**: One-command in-place updater for Amneshia. Automatically queries release registries (GitHub Releases API and JSR fallback), performs SemVer delta analysis, detects the host environment (Git clone vs global npm/pnpm/bun), and upgrades the installation seamlessly without manual npm/curl intervention.
+- **Update Verification & Re-install Flags (`--check`, `--force`)**: Added `--check` flag to inspect available release versions without installing, and `--force` flag to force a re-installation or clean re-build of the current release.
+
+### 🛠️ Added
+- `src/updater/index.ts`: Dedicated self-updater module featuring SemVer parser & comparator, GitHub Releases/JSR release fetcher with abort timeouts, install environment detection (Git clone vs global package managers), and automated upgrade executors.
+- `amneshia update`: CLI command for automated self-updating with real-time step progress feedback.
+- `tests/updater.test.ts`: Complete unit test suite verifying SemVer comparison, environment detection, and live release registry contracts (7/7 tests passing).
+- Exported `./updater` subpath in `jsr.json`.
+
+---
+
 ## [3.1.0] - 2026-10-05
 
 ### 🚀 Highlights

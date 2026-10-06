@@ -21,6 +21,7 @@ describe('CLI Integration Tests', () => {
     expect(stdout).toContain('export [options] <output>');
     expect(stdout).toContain('adopt [options]');
     expect(stdout).toContain('cloud');
+    expect(stdout).toContain('update [options]');
   });
 
   it('should run stats command successfully', async () => {

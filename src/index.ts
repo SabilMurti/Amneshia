@@ -15,6 +15,7 @@ import { initAmneshiaProject, resolveStorageConfig, DualWriteSync, adoptMemory }
 import { MemoryExporter, type ExportFormat } from './export/index.js';
 import { setupGitRemote, getCloudStatus, cloudPull, cloudPush, cloudSync, setupMergeDriver, mergeMarkdownFiles } from './cloud/index.js';
 import { LocalOnnxEmbedder } from './search/index.js';
+import { checkForUpdate, performUpdate } from './updater/index.js';
 import type { AuthorityTier } from './types.js';
 
 const program = new Command();
@@ -659,6 +660,43 @@ cloudCmd
       }
     } catch (err: any) {
       console.error(`[Amneshia] Setup merge driver failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+// Subcommand: update
+program
+  .command('update')
+  .description('Update Amneshia to the latest release (GitHub Releases / JSR)')
+  .option('-c, --check', 'Check for available updates without installing')
+  .option('-f, --force', 'Force re-installation even if already on the latest version')
+  .action(async (cmdOpts) => {
+    const currentVersion = '3.2.0';
+    try {
+      if (cmdOpts.check) {
+        console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);
+        const check = await checkForUpdate(currentVersion);
+        if (check.hasUpdate) {
+          console.log(`\n🎉 New update available: v${currentVersion} -> \x1b[1;32mv${check.latestVersion}\x1b[0m`);
+          console.log(`   Release page: ${check.releaseInfo.releaseUrl}`);
+          console.log(`\nRun \x1b[1;36mamneshia update\x1b[0m to install the update.`);
+        } else {
+          console.log(`\n✨ You are already on the latest version of Amneshia (v${currentVersion}).`);
+        }
+        return;
+      }
+
+      console.log(`\n🧠 Amneshia Self-Updater (Current: v${currentVersion})`);
+      console.log('--------------------------------------------------');
+      const result = await performUpdate({
+        currentVersion,
+        force: Boolean(cmdOpts.force),
+        onProgress: (msg) => console.log(`  • ${msg}`),
+      });
+
+      console.log(`\n${result.message}`);
+    } catch (err: any) {
+      console.error(`\n❌ Update failed: ${err.message}`);
       process.exit(1);
     }
   });

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-import "./chunk-73FKUHZS.js";
 
 // src/index.ts
 import os7 from "os";
-import path12 from "path";
-import fs12 from "fs";
+import path13 from "path";
+import fs13 from "fs";
 import { spawn } from "child_process";
 import { Command } from "commander";
 
@@ -413,7 +412,7 @@ var LocalOnnxEmbedder = class _LocalOnnxEmbedder {
       let selectedBackend = "wasm";
       if (!isAndroid) {
         try {
-          const nodeOrt = await import("./dist-ZI73FDEA.js");
+          const nodeOrt = await import("onnxruntime-node");
           loadedOrt = nodeOrt.default || nodeOrt;
           selectedBackend = "native";
         } catch {
@@ -3109,9 +3108,9 @@ function registerUtilityTools(server, graph) {
       format: z7.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
       id: z7.string().optional().describe("Export target id when removing a destination")
     },
-    async ({ action, name, path: path13, format, id }) => {
+    async ({ action, name, path: path14, format, id }) => {
       try {
-        const result = graph.manageExportTargets({ action, name, path: path13, format, id });
+        const result = graph.manageExportTargets({ action, name, path: path14, format, id });
         return textContent7({ ok: true, result });
       } catch (error) {
         return textContent7({ ok: false, error: error instanceof Error ? error.message : "Failed to manage export targets" });
@@ -4623,19 +4622,214 @@ function mergeMarkdownFiles(basePath, oursPath, theirsPath, targetPath) {
   };
 }
 
+// src/updater/index.ts
+import { execFile as execFile2 } from "child_process";
+import { promisify as promisify2 } from "util";
+import path12 from "path";
+import fs12 from "fs";
+var execFileAsync2 = promisify2(execFile2);
+function compareSemver(v1, v2) {
+  const parse = (v) => {
+    const clean = v.replace(/^v/i, "").split("-")[0].trim();
+    return clean.split(".").map((part) => {
+      const num = parseInt(part, 10);
+      return Number.isNaN(num) ? 0 : num;
+    });
+  };
+  const parts1 = parse(v1);
+  const parts2 = parse(v2);
+  const len = Math.max(parts1.length, parts2.length);
+  for (let i = 0; i < len; i++) {
+    const p1 = parts1[i] ?? 0;
+    const p2 = parts2[i] ?? 0;
+    if (p1 > p2) return 1;
+    if (p1 < p2) return -1;
+  }
+  return 0;
+}
+async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers: {
+        "User-Agent": "Amneshia-Updater/3.2.0",
+        Accept: "application/vnd.github.v3+json"
+      },
+      signal: controller.signal
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const tagName = data.tag_name || "";
+      const version = tagName.replace(/^v/i, "");
+      const tarballAsset = (data.assets || []).find(
+        (a) => a.name === "amneshia-latest.tgz" || a.name.endsWith(".tgz")
+      );
+      clearTimeout(timer);
+      return {
+        version,
+        tagName,
+        releaseUrl: data.html_url || `https://github.com/${repo}/releases/latest`,
+        tarballUrl: tarballAsset?.browser_download_url || `https://github.com/${repo}/releases/latest/download/amneshia-latest.tgz`,
+        notes: data.body || "",
+        publishedAt: data.published_at,
+        source: "github"
+      };
+    }
+  } catch {
+  }
+  try {
+    const jsrRes = await fetch("https://jsr.io/api/scopes/sabilmurti/packages/amneshia", {
+      headers: {
+        "User-Agent": "Amneshia-Updater/3.2.0",
+        Accept: "application/json"
+      },
+      signal: controller.signal
+    });
+    if (jsrRes.ok) {
+      const data = await jsrRes.json();
+      const latestVersion = data.latestVersion || "3.2.0";
+      clearTimeout(timer);
+      return {
+        version: latestVersion,
+        tagName: `v${latestVersion}`,
+        releaseUrl: `https://jsr.io/@sabilmurti/amneshia`,
+        tarballUrl: `https://github.com/${repo}/releases/latest/download/amneshia-latest.tgz`,
+        source: "jsr"
+      };
+    }
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(`Failed to check for Amneshia updates: Network error (${err.message})`);
+  } finally {
+    clearTimeout(timer);
+  }
+  throw new Error(`Could not retrieve latest release information from GitHub or JSR.`);
+}
+async function checkForUpdate(currentVersion, repo) {
+  const releaseInfo = await fetchLatestRelease(repo);
+  const cmp = compareSemver(releaseInfo.version, currentVersion);
+  return {
+    currentVersion,
+    latestVersion: releaseInfo.version,
+    hasUpdate: cmp > 0,
+    releaseInfo
+  };
+}
+function detectInstallEnvironment() {
+  let isGitClone = false;
+  let gitDir;
+  try {
+    const cwdGit = path12.join(process.cwd(), ".git");
+    if (fs12.existsSync(cwdGit)) {
+      const pkgPath = path12.join(process.cwd(), "package.json");
+      if (fs12.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs12.readFileSync(pkgPath, "utf-8"));
+        if (pkg.name === "@sabilmurti/amneshia" || pkg.name === "amneshia") {
+          isGitClone = true;
+          gitDir = process.cwd();
+        }
+      }
+    }
+  } catch {
+  }
+  let pkgManager = "npm";
+  if (process.env.BUN_INSTALL || process.versions.bun) {
+    pkgManager = "bun";
+  }
+  return { isGitClone, gitDir, pkgManager };
+}
+async function performUpdate(options) {
+  const { currentVersion, force = false, onProgress, repo = "SabilMurti/Amneshia" } = options;
+  onProgress?.("Checking for the latest release on GitHub / JSR...");
+  const check = await checkForUpdate(currentVersion, repo);
+  if (!check.hasUpdate && !force) {
+    return {
+      success: true,
+      fromVersion: currentVersion,
+      toVersion: check.latestVersion,
+      method: "none",
+      message: `Amneshia is already on the latest version (v${currentVersion}).`
+    };
+  }
+  const env = detectInstallEnvironment();
+  if (env.isGitClone && env.gitDir) {
+    onProgress?.(`Updating Amneshia from git repository (${env.gitDir})...`);
+    try {
+      onProgress?.("Fetching latest changes from origin/main...");
+      await execFileAsync2("git", ["pull", "--rebase", "origin", "main"], { cwd: env.gitDir });
+      onProgress?.("Installing updated dependencies...");
+      await execFileAsync2(env.pkgManager, ["install"], { cwd: env.gitDir });
+      onProgress?.("Rebuilding production bundles...");
+      await execFileAsync2(env.pkgManager, ["run", "build"], { cwd: env.gitDir });
+      return {
+        success: true,
+        fromVersion: currentVersion,
+        toVersion: check.latestVersion,
+        method: "git",
+        message: `Successfully updated Amneshia repository from v${currentVersion} to v${check.latestVersion}.`
+      };
+    } catch (err) {
+      throw new Error(`Git update failed: ${err.message}`);
+    }
+  }
+  onProgress?.(`Installing Amneshia v${check.latestVersion} globally via ${env.pkgManager}...`);
+  const tarballUrl = check.releaseInfo.tarballUrl || `https://github.com/${repo}/releases/latest/download/amneshia-latest.tgz`;
+  let installSuccess = false;
+  let method = "tarball";
+  try {
+    onProgress?.(`Downloading and installing release tarball: ${tarballUrl}`);
+    if (env.pkgManager === "bun") {
+      await execFileAsync2("bun", ["install", "-g", tarballUrl]);
+    } else if (env.pkgManager === "pnpm") {
+      await execFileAsync2("pnpm", ["add", "-g", tarballUrl]);
+    } else {
+      await execFileAsync2("npm", ["install", "-g", tarballUrl]);
+    }
+    installSuccess = true;
+    method = "tarball";
+  } catch (tarballErr) {
+    onProgress?.(`Tarball installation failed (${tarballErr.message}). Falling back to package registry...`);
+  }
+  if (!installSuccess) {
+    try {
+      const pkgTarget = `@sabilmurti/amneshia@${check.latestVersion}`;
+      onProgress?.(`Installing ${pkgTarget} via ${env.pkgManager}...`);
+      if (env.pkgManager === "bun") {
+        await execFileAsync2("bun", ["install", "-g", pkgTarget]);
+      } else if (env.pkgManager === "pnpm") {
+        await execFileAsync2("pnpm", ["add", "-g", pkgTarget]);
+      } else {
+        await execFileAsync2("npm", ["install", "-g", pkgTarget]);
+      }
+      installSuccess = true;
+      method = "registry";
+    } catch (regErr) {
+      throw new Error(`Package registry installation failed: ${regErr.message}`);
+    }
+  }
+  return {
+    success: true,
+    fromVersion: currentVersion,
+    toVersion: check.latestVersion,
+    method,
+    message: `Amneshia successfully updated from v${currentVersion} to v${check.latestVersion}!`
+  };
+}
+
 // src/index.ts
 var program = new Command();
 program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.2.0").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").option("-d, --adopt-domain <domain>", "Automatically adopt global entities belonging to this domain").option("-a, --adopt-all", "Automatically adopt all global memory entities into this project").action(async (dir, cmdOpts) => {
-  const targetDir = dir ? path12.resolve(dir) : process.cwd();
+  const targetDir = dir ? path13.resolve(dir) : process.cwd();
   const { dataDir, knowledgeDir } = initAmneshiaProject(targetDir);
   console.log(`[Amneshia] Initialized local repository:`);
   console.log(`  - Data Directory:      ${dataDir}`);
   console.log(`  - Knowledge Markdown:  ${knowledgeDir}`);
-  console.log(`  - Config File:         ${path12.join(dataDir, "config.yaml")}`);
-  console.log(`  - Cache .gitignore:    ${path12.join(dataDir, ".gitignore")}`);
+  console.log(`  - Config File:         ${path13.join(dataDir, "config.yaml")}`);
+  console.log(`  - Cache .gitignore:    ${path13.join(dataDir, ".gitignore")}`);
   if (cmdOpts.adoptDomain || cmdOpts.adoptAll) {
     console.log(`
 [Amneshia] Adopting memories from global storage (~/.amneshia)...`);
@@ -4661,7 +4855,7 @@ program.command("init [dir]").description("Initialize a local .amneshia/ knowled
 Ready! Track your markdown files with git, and commit knowledge directly.`);
 });
 program.command("reindex").description("Rebuild SQLite FTS5 cache index from markdown files").option("-l, --local", "Reindex local repository in current working directory").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   console.log(`[Amneshia] Reindexing from: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
@@ -4674,7 +4868,7 @@ program.command("reindex").description("Rebuild SQLite FTS5 cache index from mar
   db.close();
 });
 program.command("sync").description("Export all SQLite entities and observations to Markdown-as-Truth files").option("-l, --local", "Sync local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
@@ -4684,7 +4878,7 @@ program.command("sync").description("Export all SQLite entities and observations
   db.close();
 });
 program.command("gc").description("Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const expired = db.cleanupExpired();
@@ -4697,7 +4891,7 @@ program.command("gc").description("Garbage collect decayed, expired, and invalid
   db.close();
 });
 program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const stats = db.getStats();
@@ -4740,7 +4934,7 @@ program.command("serve").description("Start the HTTP Web Dashboard server").opti
   await startServer({ local: isLocal, http: true, port, stdio: false });
 });
 program.command("export <output>").description("Export memory knowledge graph to SQLite (.db), Markdown bundle, or JSON").option("-f, --format <format>", "Export format: sqlite, markdown, json", "sqlite").option("-d, --domain <domain>", "Filter by domain name").option("-e, --entity <entities...>", "Filter by specific entity names").option("-t, --tier <tier>", "Filter by minimum authority tier (agent, user, system)").option("-q, --query <query>", "Filter observations using FTS5 search query").option("-l, --local", "Export from local project repository (.amneshia) instead of global").action(async (output, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const validFormats = ["sqlite", "markdown", "json"];
@@ -4807,7 +5001,7 @@ ${result.dryRun ? "\u{1F50D} [DRY RUN] " : "\u2705 "}Amneshia Adoption Summary:`
   }
 });
 program.command("embed").description("Compute local ONNX vector embeddings for all observations for hybrid semantic search").option("-l, --local", "Use local repository (.amneshia)").option("-f, --force", "Force re-embedding of all observations").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const embedder = new LocalOnnxEmbedder();
@@ -4852,7 +5046,7 @@ program.command("embed").description("Compute local ONNX vector embeddings for a
   db.close();
 });
 program.command("search <query>").description("Search knowledge graph using Hybrid Semantic (FTS5 + ONNX Vector RRF)").option("-d, --domain <domain>", "Filter by domain").option("-l, --local", "Use local repository").option("-n, --limit <number>", "Result limit", (val) => parseInt(val, 10), 10).action(async (query, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   try {
@@ -4884,7 +5078,7 @@ program.command("search <query>").description("Search knowledge graph using Hybr
 });
 var mediaCmd = program.command("media").description("Manage Content-Addressable Storage (CAS) media memory assets");
 mediaCmd.command("list").description("List all registered media assets across the knowledge graph").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const assets = db.getAllMediaAssets();
@@ -4908,14 +5102,14 @@ mediaCmd.command("list").description("List all registered media assets across th
   db.close();
 });
 mediaCmd.command("remember <filePath>").description("Ingest a local media asset with attached facts and relations into CAS").requiredOption("-e, --entity <name>", "Entity name representing this media asset").option("-d, --domain <domain>", "Domain namespace", "personal").option("-f, --fact <facts...>", "Factual observations describing the media").option("-t, --tier <tier>", "Authority tier (invariant, architectural, contextual, ephemeral)", "contextual").option("-r, --relation <relations...>", 'Relationship links in format "relationType:targetEntity"').option("-l, --local", "Use local repository (.amneshia)").action(async (filePath, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   const sync = new DualWriteSync(config.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, sync);
   const facts = cmdOpts.fact ?? [];
   if (facts.length === 0) {
-    facts.push(`Media asset ${path12.basename(filePath)} ingested into Amneshia CAS.`);
+    facts.push(`Media asset ${path13.basename(filePath)} ingested into Amneshia CAS.`);
   }
   const relations = [];
   if (cmdOpts.relation) {
@@ -4931,7 +5125,7 @@ mediaCmd.command("remember <filePath>").description("Ingest a local media asset 
     }
   }
   try {
-    const resolvedPath = path12.resolve(filePath);
+    const resolvedPath = path13.resolve(filePath);
     console.log(`[Amneshia] Ingesting media: ${resolvedPath}...`);
     const result = await graph.rememberMedia({
       filePath: resolvedPath,
@@ -4958,7 +5152,7 @@ mediaCmd.command("remember <filePath>").description("Ingest a local media asset 
   db.close();
 });
 mediaCmd.command("prune").description("Purge unreferenced orphan media blobs from CAS storage").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   console.log(`[Amneshia] Scanning CAS storage for orphan blobs in ${config.knowledgeDir}...`);
@@ -4971,7 +5165,7 @@ mediaCmd.command("prune").description("Purge unreferenced orphan media blobs fro
 });
 var cloudCmd = program.command("cloud").description("Git-native cross-device synchronization for Amneshia knowledge");
 cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remote repository for cloud knowledge sync").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository (.amneshia) instead of global").action(async (remoteUrl, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     console.log(`[Amneshia] Setting up Git-native cloud sync at: ${config.knowledgeDir}`);
@@ -4989,7 +5183,7 @@ Next steps: Run "amneshia cloud push" or "amneshia cloud sync" to sync knowledge
   }
 });
 cloudCmd.command("status").description("Check cloud sync status, branch info, and uncommitted knowledge changes").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     const status = await getCloudStatus(config.knowledgeDir);
@@ -5016,7 +5210,7 @@ cloudCmd.command("status").description("Check cloud sync status, branch info, an
   }
 });
 cloudCmd.command("pull").description("Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index").option("-b, --branch <branch>", "Branch to pull from", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   try {
@@ -5035,7 +5229,7 @@ cloudCmd.command("pull").description("Pull latest knowledge updates from Git rem
   db.close();
 });
 cloudCmd.command("push").description("Commit and push local knowledge markdown changes to Git remote").option("-m, --message <message>", "Custom commit message").option("-b, --branch <branch>", "Branch to push to", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     console.log(`[Amneshia] Pushing knowledge to cloud remote...`);
@@ -5052,7 +5246,7 @@ cloudCmd.command("push").description("Commit and push local knowledge markdown c
   }
 });
 cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote changes, reindex, and push local changes").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   const db = new DatabaseLayer(config.dataDir);
   try {
@@ -5084,7 +5278,7 @@ cloudCmd.command("merge-driver <base> <ours> <theirs> [targetPath]").description
 });
 cloudCmd.command("setup-driver").description("Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)").option("-g, --global", "Configure globally across all Git repositories (~/.gitconfig)").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
   const isGlobal = Boolean(cmdOpts.global);
-  const isLocal = cmdOpts.local || program.opts().local || fs12.existsSync(path12.join(process.cwd(), ".amneshia"));
+  const isLocal = cmdOpts.local || program.opts().local || fs13.existsSync(path13.join(process.cwd(), ".amneshia"));
   const config = resolveStorageConfig(isLocal);
   try {
     const success = await setupMergeDriver(config.knowledgeDir, { isGlobal });
@@ -5106,6 +5300,40 @@ cloudCmd.command("setup-driver").description("Configure and activate the 3-way g
     process.exit(1);
   }
 });
+program.command("update").description("Update Amneshia to the latest release (GitHub Releases / JSR)").option("-c, --check", "Check for available updates without installing").option("-f, --force", "Force re-installation even if already on the latest version").action(async (cmdOpts) => {
+  const currentVersion = "3.2.0";
+  try {
+    if (cmdOpts.check) {
+      console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);
+      const check = await checkForUpdate(currentVersion);
+      if (check.hasUpdate) {
+        console.log(`
+\u{1F389} New update available: v${currentVersion} -> \x1B[1;32mv${check.latestVersion}\x1B[0m`);
+        console.log(`   Release page: ${check.releaseInfo.releaseUrl}`);
+        console.log(`
+Run \x1B[1;36mamneshia update\x1B[0m to install the update.`);
+      } else {
+        console.log(`
+\u2728 You are already on the latest version of Amneshia (v${currentVersion}).`);
+      }
+      return;
+    }
+    console.log(`
+\u{1F9E0} Amneshia Self-Updater (Current: v${currentVersion})`);
+    console.log("--------------------------------------------------");
+    const result = await performUpdate({
+      currentVersion,
+      force: Boolean(cmdOpts.force),
+      onProgress: (msg) => console.log(`  \u2022 ${msg}`)
+    });
+    console.log(`
+${result.message}`);
+  } catch (err) {
+    console.error(`
+\u274C Update failed: ${err.message}`);
+    process.exit(1);
+  }
+});
 async function runDefault() {
   const options = program.opts();
   const isBackground = options.background || options.daemon;
@@ -5116,11 +5344,11 @@ async function runDefault() {
       console.error("[Amneshia] Error: Background mode requires dashboard to be enabled.");
       process.exit(1);
     }
-    const logDir = path12.join(os7.homedir(), ".amneshia");
-    fs12.mkdirSync(logDir, { recursive: true });
-    const logFile = path12.join(logDir, "server.log");
-    const out = fs12.openSync(logFile, "a");
-    const err = fs12.openSync(logFile, "a");
+    const logDir = path13.join(os7.homedir(), ".amneshia");
+    fs13.mkdirSync(logDir, { recursive: true });
+    const logFile = path13.join(logDir, "server.log");
+    const out = fs13.openSync(logFile, "a");
+    const err = fs13.openSync(logFile, "a");
     const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d" && arg !== "--background" && arg !== "-b");
     const child = spawn(process.argv[0], [process.argv[1], ...args], {
       detached: true,

@@ -510,6 +510,11 @@ amneshia embed                           # Precompute vector embeddings for acti
 amneshia embed --force                   # Recompute all vector embeddings from scratch
 amneshia search "Android memory limits"  # Hybrid semantic search with Reciprocal Rank Fusion
 
+# Self-Updater (Automated in-place upgrade from GitHub Releases / JSR)
+amneshia update --check                  # Check for updates without installing
+amneshia update                          # Perform seamless in-place upgrade
+amneshia update --force                  # Force re-installation / rebuild
+
 # Rebuild SQLite FTS5 database from .amneshia/knowledge/ Markdown files
 amneshia reindex
 

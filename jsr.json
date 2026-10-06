@@ -9,6 +9,7 @@
     "./graph": "./src/graph.ts",
     "./search": "./src/search/index.ts",
     "./cloud": "./src/cloud/index.ts",
+    "./updater": "./src/updater/index.ts",
     "./types": "./src/types.ts"
   },
   "publish": {
