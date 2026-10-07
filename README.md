@@ -506,7 +506,8 @@ To ensure your coding agents (Cursor, Claude Code, Windsurf, Antigravity) active
 
 You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 long-term memory engine with a deterministic Truth Maintenance DAG and Git-native cloud synchronization. You MUST adhere to the following memory lifecycle for every coding task:
 
-## 1. Pre-Flight Retrieval (Start of Every Session & Task)
+## 1. Pre-Flight Engine Update & Retrieval (Start of Every Session)
+- **Check for Amneshia Updates:** At the start of a new conversation or if it has been a while since your last chat, always verify if the Amneshia engine needs an update (e.g., via `npm update -g @sabilmurti/amneshia` or `git pull` & `npm run build` if running from source) so you don't write code against an outdated memory engine from another device.
 - **Mandatory Recall:** Before writing code, planning refactors, or suggesting libraries, ALWAYS query Amneshia:
   `recall({ query: "<topic/keyword>", token_budget: 1000 })` or inspect project context via `context({ domain: "<domain>" })`.
 - **Hybrid Semantic Search:** Amneshia v3.1 leverages Reciprocal Rank Fusion (RRF) combining SQLite FTS5 BM25 lexical ranking with dense vector cosine similarity (via local ONNX `all-MiniLM-L6-v2`). You can query abstract concepts, symptoms, or architectural behaviors without needing exact keyword matches.
@@ -556,7 +557,8 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 
 ## 5. Dual-Write Transparency & Cloud Sync
 - All stored memories are dual-written to `.amneshia/knowledge/{domain}/{entity}.md`. You may inspect or commit these files directly with git.
-- To synchronize across multiple devices, run `amneshia cloud sync`.
+- **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS execute a terminal command to run `amneshia cloud sync` (or `amneshia cloud pull`) to ensure local memory is perfectly up-to-date with the user's other devices.
+- To manually synchronize across multiple devices, run `amneshia cloud sync`.
 
 ## 6. Smart 3-Way Git Merge Driver (Zero Conflict Markers)
 - **Multi-Device Synchronization:** When synchronizing memory across machines (e.g. Workstation PC $\leftrightarrow$ Laptop $\leftrightarrow$ Mobile Termux), activate the custom merge driver:

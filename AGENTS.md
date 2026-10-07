@@ -75,6 +75,9 @@ npm test             # vitest run (must pass 60/60 tests)
 
 Every AI agent working on this codebase must adhere to the 4-phase memory lifecycle:
 
+### Phase 0: Pre-Flight Codebase Sync (Cross-Device Development)
+At the start of a new conversation or if it has been a while since your last chat, ALWAYS execute `git pull` in this project directory (`~/projects/Amneshia`) to fetch the latest engine source code (in case it was updated on Termux or another device). If changes are pulled, run `npm run build` to compile the latest CLI and MCP server before doing any work.
+
 ### Phase 1: Pre-Flight Retrieval
 Before planning or writing code, retrieve active conventions and past architectural decisions:
 ```json
@@ -123,4 +126,5 @@ Upon task completion, record an exhaustive 5-pillar technical debrief:
 
 ### Phase 4: Dual-Write & Cloud Sync
 - Knowledge is automatically serialized to `.amneshia/knowledge/{domain}/{entity}.md`.
-- To synchronize across devices, run `amneshia cloud sync`.
+- **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS run a terminal command `amneshia cloud sync` to ensure the memory is perfectly up-to-date with the user's other devices.
+- To manually synchronize across devices, run `amneshia cloud sync`.
