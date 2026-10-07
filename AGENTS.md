@@ -128,3 +128,7 @@ Upon task completion, record an exhaustive 5-pillar technical debrief:
 - Knowledge is automatically serialized to `.amneshia/knowledge/{domain}/{entity}.md`.
 - **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS run a terminal command `amneshia cloud sync` to ensure the memory is perfectly up-to-date with the user's other devices.
 - To manually synchronize across devices, run `amneshia cloud sync`.
+ 
+### Phase 5: Media Memory (CAS)
+- If a task involves media (images, PDFs, binary files), ingest it into Amneshia's CAS storage via `amneshia media remember <filepath> -e "<entity>"`. 
+- Media assets are immutable and linked directly to entity facts. Never attempt to store raw base64 strings or absolute local paths inside standard text observations.

@@ -569,6 +569,10 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 - **Local ONNX Ingestion:** After large Markdown imports or initial repository adoption, ensure 100% semantic coverage by executing:
   `amneshia embed`
 - Memory embeddings run 100% offline via local ONNX with sub-millisecond SQLite BLOB lookups.
+
+## 8. Content-Addressable Media Memory (CAS)
+- **Media Ingestion:** If a task involves generating, receiving, or analyzing media (images, diagrams, binary files), ALWAYS ingest the file into Amneshia's CAS storage via `amneshia media remember <filepath> -e "<entity>"`.
+- **Immutable Storage:** Media assets are deduplicated by SHA-256 and linked directly to entity facts. Never attempt to store raw base64 strings or absolute local paths inside standard text observations.
 ````
 
 ---
