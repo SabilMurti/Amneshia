@@ -34,6 +34,7 @@ Amneshia is a local-first, deterministic knowledge graph and Truth Maintenance S
 | **Tokenizer** | `src/search/tokenizer.ts` | Pure TypeScript WordPiece tokenizer matching BERT vocabulary. |
 | **Export** | `src/export/exporter.ts` | Universal memory exporter supporting SQLite (`.db`), Markdown bundle, and JSON. |
 | **Maintenance**| `src/maintenance/contradiction.ts`| Polarity check and token-overlap contradiction evaluator. |
+| **Core Tools** | `src/tools/core.ts` | 8 Core MCP tools (`remember`, `remember_media`, `recall`, `forget`, `context`, `status`, `reindex`, `sync`). |
 | **MCP Server** | `src/server.ts` | Stdio and HTTP/SSE MCP server with dashboard web server. |
 | **CLI** | `src/index.ts` | Commander-based CLI entry point (`init`, `reindex`, `stats`, `gc`, `export`, `adopt`, `cloud`, `embed`, `search`, `serve`). |
 
@@ -66,20 +67,20 @@ Amneshia is a local-first, deterministic knowledge graph and Truth Maintenance S
 ```bash
 npm run typecheck    # tsc --noEmit
 npm run build        # tsup src/index.ts --format esm --dts --clean
-npm test             # vitest run (must pass 60/60 tests)
+npm test             # vitest run (must pass 81/81 tests)
 ```
 
 ---
 
 ## 4. Amneshia Long-Term Memory Directives
 
-Every AI agent working on this codebase must adhere to the 4-phase memory lifecycle:
+Every AI agent working on this codebase must adhere to the 6-phase memory lifecycle:
 
 ### Phase 0: Pre-Flight Codebase Sync (Cross-Device Development)
 At the start of a new conversation or if it has been a while since your last chat, ALWAYS execute `git pull` in this project directory (`~/projects/Amneshia`) to fetch the latest engine source code (in case it was updated on Termux or another device). If changes are pulled, run `npm run build` to compile the latest CLI and MCP server before doing any work.
 
-### Phase 1: Pre-Flight Retrieval
-Before planning or writing code, retrieve active conventions and past architectural decisions:
+### Phase 1: Pre-Flight Retrieval & Health Check
+Before planning or writing code, retrieve active conventions and past architectural decisions. You may also inspect graph health via the native MCP `status` tool:
 ```json
 {
   "name": "recall",
@@ -126,9 +127,16 @@ Upon task completion, record an exhaustive 5-pillar technical debrief:
 
 ### Phase 4: Dual-Write & Cloud Sync
 - Knowledge is automatically serialized to `.amneshia/knowledge/{domain}/{entity}.md`.
-- **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS run a terminal command `amneshia cloud sync` to ensure the memory is perfectly up-to-date with the user's other devices.
-- To manually synchronize across devices, run `amneshia cloud sync`.
+- **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS ensure memory is up-to-date with the user's other devices. Prefer calling the native MCP tool `sync({ action: "sync" })` or terminal CLI `amneshia cloud sync`.
+- To inspect Git remote sync health or uncommitted memories, call `status({})` or `sync({ action: "status" })`.
  
 ### Phase 5: Media Memory (CAS)
-- If a task involves media (images, PDFs, binary files), ingest it into Amneshia's CAS storage via `amneshia media remember <filepath> -e "<entity>"`. 
+- If a task involves media (images, PDFs, binary files), ingest it into Amneshia's CAS storage via `amneshia media remember <filepath> -e "<entity>"` or the MCP tool `remember_media`. 
 - Media assets are immutable and linked directly to entity facts. Never attempt to store raw base64 strings or absolute local paths inside standard text observations.
+
+### Phase 6: Disaster Recovery & SQLite Reindexing (`reindex`)
+- **When to Reindex:** Invoke the MCP tool `reindex({})` (or CLI `amneshia reindex`) strictly when:
+  1. Markdown knowledge files were manually edited or deleted outside the active session.
+  2. A Git pull/merge imported external markdown updates without automatic index reconstruction.
+  3. The SQLite FTS5 search index or relational cache becomes desynchronized from the Markdown files.
+- **Strict Guardrail:** NEVER call `reindex()` on routine conversation turns. Dual-write updates are already handled in real-time ($O(1)$ targeted entity sync). Reserve `reindex()` exclusively for initial imports, git reconciliation, or disaster recovery.

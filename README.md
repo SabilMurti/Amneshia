@@ -467,6 +467,36 @@ MCP Toolset (Core Profile)
 }
 ```
 
+#### `status`
+```json
+{
+  "name": "status",
+  "arguments": {}
+}
+```
+*Returns total entity counts, breakdown of active/stale observations by authority tier, open contradictions, and Git remote sync state.*
+
+#### `reindex`
+```json
+{
+  "name": "reindex",
+  "arguments": {}
+}
+```
+*Reconstructs SQLite cache and FTS5 search index from Markdown-as-Truth files during disaster recovery or after manual external edits.*
+
+#### `sync`
+```json
+{
+  "name": "sync",
+  "arguments": {
+    "action": "sync",
+    "message": "sync: update memory from agent session"
+  }
+}
+```
+*Executes native Git cloud synchronization without needing terminal shell access (`action: "sync" | "pull" | "push" | "status"`).*
+
 *(For low-level entity and relation CRUD operations, specify `--tool-profile full` during server launch).*
 
 ---
@@ -560,8 +590,8 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 
 ## 5. Dual-Write Transparency & Cloud Sync
 - All stored memories are dual-written to `.amneshia/knowledge/{domain}/{entity}.md`. You may inspect or commit these files directly with git.
-- **Pre-Flight Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS execute a terminal command to run `amneshia cloud sync` (or `amneshia cloud pull`) to ensure local memory is perfectly up-to-date with the user's other devices.
-- To manually synchronize across multiple devices, run `amneshia cloud sync`.
+- **Pre-Flight Cloud Sync (Cross-Device):** At the start of a new conversation or if it has been a while since your last interaction, ALWAYS ensure memory is up-to-date with other devices. You can invoke the native MCP tool `sync({ action: "sync" })` (or terminal CLI `amneshia cloud sync`).
+- **Memory Health Inspection:** Call `status({})` to verify node counts, authority tier distribution, active contradictions, and cloud Git remote status.
 
 ## 6. Smart 3-Way Git Merge Driver (Zero Conflict Markers)
 - **Multi-Device Synchronization:** When synchronizing memory across machines (e.g. Workstation PC $\leftrightarrow$ Laptop $\leftrightarrow$ Mobile Termux), activate the custom merge driver:
@@ -576,6 +606,13 @@ You are connected to **Amneshia** (`amneshia`), an enterprise-grade SQLite FTS5 
 ## 8. Content-Addressable Media Memory (CAS)
 - **Media Ingestion:** If a task involves generating, receiving, or analyzing media (images, diagrams, binary files), ALWAYS ingest the file into Amneshia's CAS storage via `amneshia media remember <filepath> -e "<entity>"`.
 - **Immutable Storage:** Media assets are deduplicated by SHA-256 and linked directly to entity facts. Never attempt to store raw base64 strings or absolute local paths inside standard text observations.
+
+## 9. Disaster Recovery & SQLite Reindexing (`reindex`)
+- **When to Reindex:** Invoke the MCP tool `reindex({})` (or CLI `amneshia reindex`) when:
+  1. Knowledge markdown files have been manually edited, created, or deleted outside the active session.
+  2. A Git pull/merge brought in external markdown updates without automatic index rebuilding.
+  3. FTS5 full-text search indexes or SQLite cache become corrupted or desynchronized from Markdown-as-Truth files.
+- **Strict Guardrail:** NEVER call `reindex()` repeatedly on routine conversation turns. Amneshia handles real-time dual-write updates automatically; reserve `reindex()` strictly for initial imports, post-git pulls, or disaster recovery.
 ````
 
 ---
