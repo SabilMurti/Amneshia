@@ -12,11 +12,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.2.0-6d28d9.svg?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.2.1-6d28d9.svg?style=flat-square" alt="Release" /></a>
   <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
   <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>
-  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-67%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/actions"><img src="https://img.shields.io/badge/vitest-81%20passed%20(100%25)-059669.svg?style=flat-square" alt="Tests" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/protocol-MCP%201.29-0284c7.svg?style=flat-square" alt="MCP" /></a>
   <a href="https://github.com/SabilMurti/Amneshia"><img src="https://img.shields.io/badge/search-Local%20ONNX%20%2B%20RRF-8b5cf6.svg?style=flat-square" alt="Search: Local ONNX RRF" /></a>
   <a href="tsconfig.json"><img src="https://img.shields.io/badge/language-TypeScript%205.9-2563eb.svg?style=flat-square" alt="TypeScript" /></a>
@@ -390,7 +390,7 @@ amneshia update
 
 ### 7. Tool Surface & JSON-RPC Schemas
 
-When initialized with `--tool-profile core` (default), Amneshia exposes **5 high-level MCP tools**:
+When initialized with `--tool-profile core` (default), Amneshia exposes **8 high-level MCP tools**:
 
 ```
 MCP Toolset (Core Profile)
@@ -398,7 +398,10 @@ MCP Toolset (Core Profile)
 ├── remember_media  : Ingest local image/audio/document into CAS storage and link to entity
 ├── recall          : Hybrid BM25 + dense vector semantic search with token budgeting
 ├── forget          : Soft/hard invalidation with dependency cascade
-└── context         : GraphRAG multi-hop relational traversal
+├── context         : GraphRAG multi-hop relational traversal
+├── status          : Inspect graph summary stats, node health, and cloud sync state
+├── reindex         : Rebuild SQLite FTS5 index from Markdown-as-Truth files
+└── sync            : Bidirectional Git cloud synchronization (pull / push / sync)
 ```
 
 #### `remember`

@@ -26,7 +26,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: 'Amneshia', version: '3.2.0' });
+  const server = new McpServer({ name: 'Amneshia', version: '3.2.1' });
   registerTools(server, graph, db, options.toolProfile);
 
   const cleanup = async () => {
@@ -43,21 +43,51 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("X-Frame-Options", "DENY");
       res.setHeader("X-XSS-Protection", "1; mode=block");
+      // Origin security for mutation requests
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+        const origin = req.headers.origin;
+        if (origin) {
+          try {
+            const originUrl = new URL(origin);
+            if (originUrl.hostname !== 'localhost' && originUrl.hostname !== '127.0.0.1') {
+              res.status(403).json({ error: 'Forbidden cross-origin request' });
+              return;
+            }
+          } catch {
+            res.status(403).json({ error: 'Invalid request origin' });
+            return;
+          }
+        }
+      }
       next();
     });
-    let transport: SSEServerTransport;
 
-    app.get('/sse', (req, res) => {
-      transport = new SSEServerTransport('/messages', res);
-      server.connect(transport);
+    const sseTransports = new Map<string, SSEServerTransport>();
+
+    app.get('/sse', async (req, res) => {
+      const sessionId = (req.query.sessionId as string) || crypto.randomUUID();
+      const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+      sseTransports.set(sessionId, transport);
+      res.on('close', () => {
+        sseTransports.delete(sessionId);
+      });
+      await server.connect(transport);
     });
 
     app.post('/messages', async (req, res) => {
+      const sessionId = req.query.sessionId as string;
+      const transport = sessionId
+        ? sseTransports.get(sessionId)
+        : (sseTransports.values().next().value as SSEServerTransport | undefined);
+      if (!transport) {
+        res.status(404).json({ error: 'SSE session not found or inactive' });
+        return;
+      }
       await transport.handlePostMessage(req, res);
     });
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '3.2.0' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.2.1' });
     });
 
     app.get('/api/graph', (req, res) => res.json(graph.readGraph(req.query.domain as string)));
@@ -135,8 +165,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       res.sendFile(path.join(uiPath, 'index.html'));
     });
 
-    const httpListener = app.listen(options.port || 3457, () => {
-      console.error(`[Amneshia] HTTP Dashboard running on http://localhost:${options.port || 3457}`);
+    const port = options.port || 3457;
+    const httpListener = app.listen(port, '127.0.0.1', () => {
+      console.error(`[Amneshia] HTTP Dashboard running on http://127.0.0.1:${port}`);
     });
 
     httpListener.on('error', (err: any) => {

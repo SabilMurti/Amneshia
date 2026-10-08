@@ -70,7 +70,9 @@ export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): Re
         obs.confidence,
         undefined,
         obs.authorityTier,
-        obs.derivedFrom
+        obs.derivedFrom,
+        obs.id,
+        item.createdAt
       );
 
       if (obs.status && obs.status !== 'active') {

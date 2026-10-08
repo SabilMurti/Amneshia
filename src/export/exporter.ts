@@ -191,9 +191,16 @@ export class MemoryExporter {
     for (const ent of data) {
       saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations, ent.media);
       if (ent.media) {
+        const relPath = ent.media.relativePath;
+        if (path.isAbsolute(relPath) || relPath.includes('..')) {
+          continue;
+        }
         for (const kDir of possibleKnowledgeDirs) {
-          const srcBlob = path.join(kDir, ent.media.relativePath);
-          const destBlob = path.join(outputDir, ent.media.relativePath);
+          const srcBlob = path.join(kDir, relPath);
+          const destBlob = path.resolve(outputDir, relPath);
+          if (!destBlob.startsWith(path.resolve(outputDir) + path.sep)) {
+            continue;
+          }
           if (fs.existsSync(srcBlob) && !fs.existsSync(destBlob)) {
             fs.mkdirSync(path.dirname(destBlob), { recursive: true });
             fs.copyFileSync(srcBlob, destBlob);

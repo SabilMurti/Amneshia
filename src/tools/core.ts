@@ -6,6 +6,7 @@ import type { DatabaseLayer } from '../database/index.js';
 import { checkContradiction } from '../maintenance/contradiction.js';
 import { storeMediaAsset } from '../storage/media-store.js';
 import type { AuthorityTier, ObservationStatus } from '../types.js';
+import { getCloudStatus, cloudPull, cloudPush, cloudSync } from '../cloud/git-sync.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
   return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
@@ -65,14 +66,6 @@ export function registerCoreTools(
               reason: conflict.reason || 'Semantic clash with existing fact',
               conflictingId: conflict.conflictingObservation?.id,
             });
-            if (conflict.conflictingObservation) {
-              db.recordContradiction(
-                'pending',
-                conflict.conflictingObservation.id,
-                ent.id,
-                conflict.reason || 'Polar opposition'
-              );
-            }
           }
 
           const obs = db.addObservation(
@@ -86,13 +79,19 @@ export function registerCoreTools(
             derivedArr
           );
           observationIds.push(obs.id);
+
+          if (conflict.hasContradiction && conflict.conflictingObservation) {
+            db.recordContradiction(
+              obs.id,
+              conflict.conflictingObservation.id,
+              ent.id,
+              conflict.reason || 'Polar opposition'
+            );
+          }
         }
 
-        // Trigger Markdown dual-write sync
-        const obsList = db.getObservationsByEntity(ent.id);
-        const relList = db.getRelationsByEntity(ent.id);
-        (graph as any).triggerAutoExport?.();
-
+        // Trigger targeted Markdown dual-write sync
+        graph.triggerAutoExport(ent.name);
         return textContent({
           ok: true,
           entity: ent.name,
@@ -231,7 +230,8 @@ export function registerCoreTools(
             db.setObservationStatus(obs.id, 'invalidated');
           }
 
-          (graph as any).triggerAutoExport?.();
+          const obsEntity = db.getEntityById(obs.entityId);
+          graph.triggerAutoExport(obsEntity?.name);
           return textContent({
             ok: true,
             type: 'observation',
@@ -258,10 +258,10 @@ export function registerCoreTools(
           }
 
           if (hard) {
-            db.deleteEntity(ent.id);
+            graph.deleteEntities([ent.name]);
+          } else {
+            graph.triggerAutoExport(ent.name);
           }
-
-          (graph as any).triggerAutoExport?.();
           return textContent({
             ok: true,
             type: 'entity',
@@ -380,14 +380,6 @@ export function registerCoreTools(
               reason: conflict.reason || 'Semantic clash with existing fact',
               conflictingId: conflict.conflictingObservation?.id,
             });
-            if (conflict.conflictingObservation) {
-              db.recordContradiction(
-                'pending',
-                conflict.conflictingObservation.id,
-                ent.id,
-                conflict.reason || 'Polar opposition'
-              );
-            }
           }
 
           const obs = db.addObservation(
@@ -400,6 +392,15 @@ export function registerCoreTools(
             tierVal
           );
           observationIds.push(obs.id);
+
+          if (conflict.hasContradiction && conflict.conflictingObservation) {
+            db.recordContradiction(
+              obs.id,
+              conflict.conflictingObservation.id,
+              ent.id,
+              conflict.reason || 'Polar opposition'
+            );
+          }
         }
 
         const relationsCreated: Array<{ to: string; relationType: string }> = [];
@@ -414,8 +415,7 @@ export function registerCoreTools(
         }
 
         // Trigger Markdown dual-write sync
-        (graph as any).triggerAutoExport?.();
-
+        graph.triggerAutoExport(ent.name);
         return textContent({
           ok: true,
           entity: ent.name,
@@ -437,6 +437,95 @@ export function registerCoreTools(
         return textContent({
           ok: false,
           error: error instanceof Error ? error.message : 'Failed to remember media',
+        });
+      }
+    }
+  );
+
+  // 6. status: Graph statistics, authority tier distribution, and system overview
+  server.tool(
+    'status',
+    'Get high-level summary statistics of the knowledge graph including entity counts, active observations, authority tiers, and open contradictions.\n\nWHEN TO USE:\n- Use "status" to verify memory health, inspect total nodes, or get an architectural overview.\n- Returns JSON with entity counts, observation breakdown by status and tier, and system metrics.',
+    {},
+    async () => {
+      try {
+        const stats = graph.getStats();
+        const dualWrite = graph.getDualWriteSync();
+        const cloud = dualWrite ? await getCloudStatus(dualWrite.getKnowledgeDir()) : null;
+        return textContent({
+          ok: true,
+          stats,
+          cloudStatus: cloud,
+        });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Failed to retrieve graph status',
+        });
+      }
+    }
+  );
+
+  // 7. reindex: Rebuild SQLite FTS5 index from Markdown-as-Truth files
+  server.tool(
+    'reindex',
+    'Rebuild the SQLite database, FTS5 full-text index, and relational links from the human-readable Markdown directory.\n\nWHEN TO USE:\n- Use "reindex" when Markdown knowledge files were modified externally, pulled from Git, or during disaster recovery.',
+    {},
+    async () => {
+      try {
+        const dualWrite = graph.getDualWriteSync();
+        if (!dualWrite) {
+          return textContent({ ok: false, error: 'Dual-write markdown storage is not active in this session.' });
+        }
+        const result = dualWrite.reindex();
+        return textContent({ ok: true, result });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Failed to reindex from markdown',
+        });
+      }
+    }
+  );
+
+  // 8. sync: Bidirectional synchronization with Git cloud remote or dual-write storage
+  server.tool(
+    'sync',
+    'Perform synchronization with Git remote cloud repository or force markdown dual-write export.\n\nWHEN TO USE:\n- Use "sync" to pull or push memories across devices via Git-native sync.\n- Options: "sync" (bidirectional), "pull", "push", or "status".',
+    {
+      action: z
+        .enum(['status', 'push', 'pull', 'sync'])
+        .optional()
+        .describe('Sync operation: "sync" (bidirectional), "pull", "push", or "status" (default: "sync")'),
+      message: z.string().optional().describe('Optional Git commit message when pushing'),
+    },
+    async ({ action = 'sync', message }) => {
+      try {
+        const dualWrite = graph.getDualWriteSync();
+        if (!dualWrite) {
+          return textContent({ ok: false, error: 'Dual-write storage is not initialized.' });
+        }
+        const knowledgeDir = dualWrite.getKnowledgeDir();
+
+        if (action === 'status') {
+          const status = await getCloudStatus(knowledgeDir);
+          return textContent({ ok: true, status });
+        }
+        if (action === 'pull') {
+          const pullRes = await cloudPull(knowledgeDir, db);
+          return textContent({ ok: true, pull: pullRes });
+        }
+        if (action === 'push') {
+          const pushRes = await cloudPush(knowledgeDir, message);
+          return textContent({ ok: true, push: pushRes });
+        }
+
+        const syncRes = await cloudSync(knowledgeDir, db, message);
+        return textContent({ ok: true, sync: syncRes });
+      } catch (error) {
+        return textContent({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Sync operation failed',
         });
       }
     }

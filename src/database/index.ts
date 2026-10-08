@@ -306,6 +306,7 @@ function normalizeArray(value: string[] | undefined): string {
 export class DatabaseLayer {
   private readonly db: Database.Database;
   private readonly dataDir: string;
+  private sharedEmbedder: LocalOnnxEmbedder | null = null;
   private readonly statements: {
     createEntity: Database.Statement;
     getEntityByName: Database.Statement;
@@ -644,11 +645,13 @@ export class DatabaseLayer {
     confidence: number = 1,
     expiresAt?: string,
     authorityTier: AuthorityTier = 'contextual',
-    derivedFrom: string[] = []
+    derivedFrom: string[] = [],
+    id?: string,
+    createdAt?: string
   ): Observation {
     const now = nowIso();
     const observation: Observation = {
-      id: uuid(),
+      id: id || uuid(),
       entityId,
       content,
       source: source ?? null,
@@ -661,7 +664,7 @@ export class DatabaseLayer {
       status: 'active',
       expiresAt: expiresAt ?? null,
       supersedes: null,
-      createdAt: now,
+      createdAt: createdAt ?? now,
       updatedAt: now,
     };
 
@@ -831,13 +834,12 @@ export class DatabaseLayer {
 
   // --- Truth Maintenance & Provenance Helpers ---
 
-  getDependentObservations(observationId: string): Observation[] {
+  getDependentObservations(observationId: string, activeOnly = false): Observation[] {
     // Find observations where derived_from JSON array contains observationId
-    const rows = this.db
-      .prepare(
-        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
-      )
-      .all(`%${observationId}%`) as ObservationRow[];
+    const query = activeOnly
+      ? "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
+      : "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ?";
+    const rows = this.db.prepare(query).all(`%${observationId}%`) as ObservationRow[];
 
     return rows.map(toObservation).filter((obs) => obs.derivedFrom.includes(observationId));
   }
@@ -847,16 +849,22 @@ export class DatabaseLayer {
     const queue: string[] = [observationId];
     const visited = new Set<string>();
 
+    // Mark the root observation as invalidated
+    this.setObservationStatus(observationId, 'invalidated');
+
     while (queue.length > 0) {
       const currentId = queue.shift()!;
       if (visited.has(currentId)) continue;
       visited.add(currentId);
 
-      const dependents = this.getDependentObservations(currentId);
+      // Traverse all descendants through intermediate nodes
+      const dependents = this.getDependentObservations(currentId, false);
       for (const dep of dependents) {
         if (!visited.has(dep.id)) {
-          this.setObservationStatus(dep.id, 'stale');
-          staleIds.push(dep.id);
+          if (dep.status === 'active') {
+            this.setObservationStatus(dep.id, 'stale');
+            staleIds.push(dep.id);
+          }
           queue.push(dep.id);
         }
       }
@@ -1062,6 +1070,13 @@ export class DatabaseLayer {
     return results;
   }
 
+  getSharedEmbedder(): LocalOnnxEmbedder {
+    if (!this.sharedEmbedder) {
+      this.sharedEmbedder = new LocalOnnxEmbedder();
+    }
+    return this.sharedEmbedder;
+  }
+
   async searchHybrid(
     query: string,
     options?: { limit?: number; domain?: string; minSimilarity?: number; embedder?: LocalOnnxEmbedder }
@@ -1070,7 +1085,7 @@ export class DatabaseLayer {
     const lexicalResults = this.searchFTSRelevant(query, limit * 2);
 
     try {
-      const embedder = options?.embedder ?? new LocalOnnxEmbedder();
+      const embedder = options?.embedder ?? this.getSharedEmbedder();
       const queryVector = await embedder.embed(query);
       const semanticResults = this.searchVector(queryVector, limit * 2, embedder.getModelName(), options?.minSimilarity ?? 0.2);
 

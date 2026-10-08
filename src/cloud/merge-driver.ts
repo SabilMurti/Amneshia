@@ -207,12 +207,11 @@ export function mergeParsedEntities(
     const higherTier = tierRank(a.authorityTier) >= tierRank(b.authorityTier) ? a.authorityTier : b.authorityTier;
     const combinedDerived = Array.from(new Set([...(a.derivedFrom ?? []), ...(b.derivedFrom ?? [])]));
     const bestStatus: ObservationStatus =
-      a.status === 'active' || b.status === 'active'
-        ? 'active'
+      a.status === 'invalidated' || b.status === 'invalidated'
+        ? 'invalidated'
         : a.status === 'stale' || b.status === 'stale'
         ? 'stale'
-        : a.status;
-
+        : 'active';
     return {
       id: a.id || b.id,
       content: a.content.length >= b.content.length ? a.content : b.content,

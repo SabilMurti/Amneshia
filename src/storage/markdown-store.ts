@@ -292,7 +292,12 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
 export function getEntityFilePath(knowledgeDir: string, domain: string, name: string): string {
   const domainSlug = toSlug(domain);
   const nameSlug = toSlug(name);
-  return path.join(knowledgeDir, domainSlug, `${nameSlug}.md`);
+  const resolvedBase = path.resolve(knowledgeDir);
+  const targetPath = path.resolve(resolvedBase, domainSlug, `${nameSlug}.md`);
+  if (!targetPath.startsWith(resolvedBase + path.sep)) {
+    throw new Error('Path traversal violation: entity file path escapes knowledge directory.');
+  }
+  return targetPath;
 }
 
 export function saveEntityMarkdown(

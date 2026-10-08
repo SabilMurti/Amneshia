@@ -23,7 +23,7 @@ const program = new Command();
 program
   .name('amneshia')
   .description('🧠 Amneshia v3 — Git-native knowledge graph for AI agents with truth maintenance')
-  .version('3.2.0')
+  .version('3.2.1')
   .option('--data-dir <path>', 'Custom data directory')
   .option('-l, --local', 'Use local repository directory (.amneshia) instead of global ~/.amneshia')
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')
@@ -671,7 +671,7 @@ program
   .option('-c, --check', 'Check for available updates without installing')
   .option('-f, --force', 'Force re-installation even if already on the latest version')
   .action(async (cmdOpts) => {
-    const currentVersion = '3.2.0';
+    const currentVersion = '3.2.1';
     try {
       if (cmdOpts.check) {
         console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);

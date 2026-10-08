@@ -34,12 +34,15 @@ describe('Tools Redesign Tests (Core & Full Profiles)', () => {
     const registered = (server as any)._registeredTools;
     const toolNames = Object.keys(registered);
 
-    expect(toolNames).toHaveLength(5);
+    expect(toolNames).toHaveLength(8);
     expect(toolNames).toContain('remember');
     expect(toolNames).toContain('recall');
     expect(toolNames).toContain('forget');
     expect(toolNames).toContain('context');
     expect(toolNames).toContain('remember_media');
+    expect(toolNames).toContain('status');
+    expect(toolNames).toContain('reindex');
+    expect(toolNames).toContain('sync');
   });
 
   it('should register core and admin tools when profile is full', () => {

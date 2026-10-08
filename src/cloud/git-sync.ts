@@ -59,6 +59,12 @@ async function git(cwd: string, args: string[]): Promise<{ stdout: string; stder
     throw new Error(`Git error (${args[0]}): ${errorMsg.trim()}`);
   }
 }
+function validateBranchName(branch: string): void {
+  if (!branch || typeof branch !== 'string' || branch.startsWith('-') || !/^[a-zA-Z0-9_\-\./]+$/.test(branch)) {
+    throw new Error(`Invalid or unsafe branch name: ${branch}`);
+  }
+}
+
 
 function getCloudConfigPath(knowledgeDir: string): string {
   return path.join(path.dirname(knowledgeDir), 'cloud.json');
@@ -88,6 +94,7 @@ export async function setupGitRemote(
   remoteUrl: string,
   branch = 'main'
 ): Promise<{ success: boolean; remoteUrl: string; branch: string }> {
+  validateBranchName(branch);
   fs.mkdirSync(knowledgeDir, { recursive: true });
 
   const gitDir = path.join(knowledgeDir, '.git');
@@ -262,7 +269,8 @@ export async function cloudPull(
 
   let rawOutput = '';
   try {
-    const res = await git(knowledgeDir, ['pull', 'origin', branch, '--no-rebase']);
+    validateBranchName(branch);
+    const res = await git(knowledgeDir, ['pull', '--no-rebase', 'origin', '--', branch]);
     rawOutput = res.stdout + res.stderr;
   } catch (err: any) {
     // If remote branch does not exist yet (e.g. freshly created remote), treat as initial pull
@@ -331,7 +339,8 @@ export async function cloudPush(
     commitHash = revOut.trim();
   } catch {}
 
-  const pushRes = await git(knowledgeDir, ['push', '-u', 'origin', branch]);
+  validateBranchName(branch);
+  const pushRes = await git(knowledgeDir, ['push', '-u', 'origin', '--', branch]);
 
   const cfg = readCloudConfig(knowledgeDir) ?? { remoteUrl: status.remoteUrl, branch, lastSyncAt: null };
   cfg.lastSyncAt = new Date().toISOString();

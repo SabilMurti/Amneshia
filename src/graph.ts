@@ -4,6 +4,7 @@
  * Coordinates entity management, observations, relational traversal, and dual-write markdown sync.
  */
 
+import path from 'node:path';
 import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation, MediaAsset, RememberMediaInput } from './types.js';
 import { DatabaseLayer } from './database.js';
 import { exportToMarkdown } from './export/markdown.js';
@@ -63,6 +64,10 @@ export class KnowledgeGraph {
     private readonly database: DatabaseLayer,
     private readonly dualWriteSync?: DualWriteSync
   ) {}
+  getDualWriteSync(): DualWriteSync | undefined {
+    return this.dualWriteSync;
+  }
+
 
   /**
    * Creates one or more named entities in the graph.
@@ -147,6 +152,9 @@ export class KnowledgeGraph {
       const entity = this.database.getEntityByName(name);
       if (!entity) continue;
       if (this.database.deleteEntity(entity.id)) {
+        if (this.dualWriteSync) {
+          this.dualWriteSync.removeEntity(entity.domain, entity.name);
+        }
         removed += 1;
       }
     }
@@ -378,6 +386,20 @@ export class KnowledgeGraph {
       if (!input.name || !input.path) {
         throw new Error('name and path are required when adding an export target');
       }
+      const resolvedTarget = path.resolve(input.path);
+      const sensitivePatterns = [
+        /(?:^|[/\\])\.ssh(?:[/\\]|$)/i,
+        /(?:^|[/\\])\.gnupg(?:[/\\]|$)/i,
+        /(?:^|[/\\])\.bashrc$/i,
+        /(?:^|[/\\])\.zshrc$/i,
+        /(?:^|[/\\])\.profile$/i,
+        /(?:^|[/\\])etc[/\\]/i,
+      ];
+      for (const pattern of sensitivePatterns) {
+        if (pattern.test(resolvedTarget)) {
+          throw new Error(`Security violation: export target cannot point to system or shell config file "${input.path}".`);
+        }
+      }
       const autoExport = input.autoExport !== false ? 1 : 0;
       return this.database.addExportTarget(input.name, input.path, input.format ?? 'markdown', autoExport);
     }
@@ -533,10 +555,20 @@ export class KnowledgeGraph {
     return this.database.pruneOrphanMedia(storageRoot);
   }
 
-  private triggerAutoExport() {
+  triggerAutoExport(targetEntityNames?: string | string[]) {
     exportToMarkdown(this);
     if (this.dualWriteSync) {
       try {
+        if (targetEntityNames) {
+          const names = Array.isArray(targetEntityNames) ? targetEntityNames : [targetEntityNames];
+          for (const name of names) {
+            const ent = this.database.getEntityByName(name);
+            if (ent) {
+              this.dualWriteSync.syncEntity(ent);
+            }
+          }
+          return;
+        }
         this.dualWriteSync.syncAll();
       } catch (err) {
         console.warn('Failed to sync to markdown storage:', err);

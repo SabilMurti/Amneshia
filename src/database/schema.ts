@@ -93,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_entity ON media_assets(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_sha256 ON media_assets(sha256);
+CREATE INDEX IF NOT EXISTS idx_entities_name_nocase ON entities(name COLLATE NOCASE);
 
 CREATE TABLE IF NOT EXISTS observation_embeddings (
   observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,

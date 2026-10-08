@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { compareSemver, detectInstallEnvironment, fetchLatestRelease, checkForUpdate } from '../src/updater/index.js';
 
 describe('Amneshia Self-Updater Tests', () => {
@@ -39,6 +39,36 @@ describe('Amneshia Self-Updater Tests', () => {
   });
 
   describe('fetchLatestRelease & checkForUpdate', () => {
+    const originalFetch = globalThis.fetch;
+
+    beforeEach(() => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes('api.github.com')) {
+          return {
+            ok: true,
+            json: async () => ({
+              tag_name: 'v3.2.0',
+              html_url: 'https://github.com/SabilMurti/Amneshia/releases/tag/v3.2.0',
+              body: 'Release notes',
+              published_at: '2026-10-01T00:00:00Z',
+              assets: [
+                {
+                  name: 'amneshia-latest.tgz',
+                  browser_download_url: 'https://github.com/SabilMurti/Amneshia/releases/download/v3.2.0/amneshia-latest.tgz',
+                },
+              ],
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      });
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
     it('should query live release endpoints and return structured ReleaseInfo', async () => {
       const release = await fetchLatestRelease('SabilMurti/Amneshia', 10000);
       expect(release).toBeDefined();

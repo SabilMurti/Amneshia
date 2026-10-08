@@ -82,7 +82,7 @@ export async function fetchLatestRelease(
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: {
-        'User-Agent': 'Amneshia-Updater/3.2.0',
+        'User-Agent': 'Amneshia-Updater/3.2.1',
         Accept: 'application/vnd.github.v3+json',
       },
       signal: controller.signal,
@@ -115,7 +115,7 @@ export async function fetchLatestRelease(
   try {
     const jsrRes = await fetch('https://jsr.io/api/scopes/sabilmurti/packages/amneshia', {
       headers: {
-        'User-Agent': 'Amneshia-Updater/3.2.0',
+        'User-Agent': 'Amneshia-Updater/3.2.1',
         Accept: 'application/json',
       },
       signal: controller.signal,
@@ -123,7 +123,7 @@ export async function fetchLatestRelease(
 
     if (jsrRes.ok) {
       const data: any = await jsrRes.json();
-      const latestVersion: string = data.latestVersion || '3.2.0';
+      const latestVersion: string = data.latestVersion || '3.2.1';
       clearTimeout(timer);
       return {
         version: latestVersion,
@@ -251,6 +251,9 @@ export async function performUpdate(options: {
   // Mode 2: Global installation via Release Tarball or Registry
   onProgress?.(`Installing Amneshia v${check.latestVersion} globally via ${env.pkgManager}...`);
   const tarballUrl = check.releaseInfo.tarballUrl || `https://github.com/${repo}/releases/latest/download/amneshia-latest.tgz`;
+  if (!tarballUrl.startsWith(`https://github.com/${repo}/releases/`)) {
+    throw new Error(`Untrusted tarball source rejected: "${tarballUrl}"`);
+  }
 
   let installSuccess = false;
   let method: 'tarball' | 'registry' = 'tarball';
