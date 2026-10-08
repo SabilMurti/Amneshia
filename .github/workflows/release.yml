@@ -34,11 +34,14 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Test Suite
-        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Build Engine (TSUP)
         run: npm run build
+
+      - name: Run Test Suite
+        run: npm test
 
       - name: Build Dashboard (Vite)
         run: |

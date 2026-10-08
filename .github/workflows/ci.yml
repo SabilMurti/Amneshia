@@ -28,11 +28,14 @@ jobs:
       - name: Install Root Dependencies
         run: npm ci
 
-      - name: Run Vitest Test Suite
-        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Build Backend Engine (TSUP)
         run: npm run build
+
+      - name: Run Vitest Test Suite
+        run: npm test
 
       - name: Install Dashboard Dependencies
         run: |
