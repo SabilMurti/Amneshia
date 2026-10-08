@@ -9,7 +9,7 @@ const entryPoint = path.resolve(__dirname, '../dist/index.js');
 describe('CLI Integration Tests', () => {
   it('should display version with --version flag', async () => {
     const { stdout } = await execFileAsync('node', [entryPoint, '--version']);
-    expect(stdout.trim()).toBe('3.2.0');
+    expect(stdout.trim()).toBe('3.2.1');
   });
 
   it('should display help with --help flag and exit 0', async () => {
