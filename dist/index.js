@@ -5742,7 +5742,7 @@ async function startServer(options = {}) {
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: "Amneshia", version: "3.2.1" });
+  const server = new McpServer({ name: "Amneshia", version: "3.2.2" });
   registerTools(server, graph, db, options.toolProfile);
   const cleanup = async () => {
     process.exit(0);
@@ -5794,7 +5794,7 @@ async function startServer(options = {}) {
       await transport.handlePostMessage(req, res);
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "3.2.1" });
+      res.json({ status: "ok", name: "amneshia", version: "3.2.2" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
@@ -6472,7 +6472,7 @@ async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3)
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: {
-        "User-Agent": "Amneshia-Updater/3.2.1",
+        "User-Agent": "Amneshia-Updater/3.2.2",
         Accept: "application/vnd.github.v3+json"
       },
       signal: controller.signal
@@ -6500,14 +6500,14 @@ async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3)
   try {
     const jsrRes = await fetch("https://jsr.io/api/scopes/sabilmurti/packages/amneshia", {
       headers: {
-        "User-Agent": "Amneshia-Updater/3.2.1",
+        "User-Agent": "Amneshia-Updater/3.2.2",
         Accept: "application/json"
       },
       signal: controller.signal
     });
     if (jsrRes.ok) {
       const data = await jsrRes.json();
-      const latestVersion = data.latestVersion || "3.2.1";
+      const latestVersion = data.latestVersion || "3.2.2";
       clearTimeout(timer);
       return {
         version: latestVersion,
@@ -6641,7 +6641,7 @@ async function performUpdate(options) {
 
 // src/index.ts
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.2.1").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.2.2").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").option("-d, --adopt-domain <domain>", "Automatically adopt global entities belonging to this domain").option("-a, --adopt-all", "Automatically adopt all global memory entities into this project").action(async (dir, cmdOpts) => {
@@ -7123,7 +7123,7 @@ cloudCmd.command("setup-driver").description("Configure and activate the 3-way g
   }
 });
 program.command("update").description("Update Amneshia to the latest release (GitHub Releases / JSR)").option("-c, --check", "Check for available updates without installing").option("-f, --force", "Force re-installation even if already on the latest version").action(async (cmdOpts) => {
-  const currentVersion = "3.2.1";
+  const currentVersion = "3.2.2";
   try {
     if (cmdOpts.check) {
       console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);

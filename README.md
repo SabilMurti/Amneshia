@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.2.1-6d28d9.svg?style=flat-square" alt="Release" /></a>
+  <a href="https://github.com/SabilMurti/Amneshia/releases"><img src="https://img.shields.io/badge/version-v3.2.2-6d28d9.svg?style=flat-square" alt="Release" /></a>
   <a href="https://jsr.io/@sabilmurti/amneshia"><img src="https://jsr.io/badges/@sabilmurti/amneshia" alt="JSR" /></a>
   <a href="https://github.com/SabilMurti/Amneshia/pkgs/npm/amneshia"><img src="https://img.shields.io/badge/GitHub%20Packages-%40sabilmurti%2Famneshia-24292e.svg?style=flat-square&logo=github" alt="GitHub Packages" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c1d95.svg?style=flat-square" alt="License: MIT" /></a>

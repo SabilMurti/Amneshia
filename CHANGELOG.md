@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.2] - 2026-10-10
+
+### 🐛 Fixed
+- **Cross-Platform Node Shebang Compatibility**: Rebuilt distribution bundle with standard `#!/usr/bin/env node` shebang, fixing execution failures and `posix_spawn: ENOENT` errors on Linux/WSL environments when built or synced across Termux.
+- **CAS Media Scan & Entity Detection**: Prevented entity markdown scanner (`src/storage/markdown-store.ts`) from erroneously processing Content-Addressable Storage (CAS) media blobs and hidden directories during entity discovery and reindexing.
+
 ## [3.2.1] - 2026-10-08
 
 ### 🚀 Highlights
