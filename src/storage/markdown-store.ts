@@ -336,6 +336,9 @@ export function loadAllEntityMarkdowns(knowledgeDir: string): ParsedMarkdownEnti
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name === 'blobs' || entry.name.startsWith('.')) {
+          continue;
+        }
         scan(fullPath);
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         try {
