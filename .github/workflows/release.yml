@@ -151,7 +151,7 @@ jobs:
           name: release-dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e49cdd09d17208d1f2e8251e604f76239169 # v2.0.8
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
