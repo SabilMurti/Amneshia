@@ -15,7 +15,7 @@ import {
   Compass,
 } from 'lucide-react';
 import { api } from '../api/client';
-import type { GraphSnapshot, Entity, Observation, RelationWithNames, AuthorityTier, ObservationStatus } from '../types';
+import type { GraphSnapshot, Entity, RelationWithNames, AuthorityTier, ObservationStatus } from '../types';
 
 interface MemoryTableProps {
   selectedDomain: string;
@@ -35,11 +35,13 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Entities & related data
-  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [selectedEntityObs, setSelectedEntityObs] = useState<Observation[]>([]);
-  const [selectedEntityRels, setSelectedEntityRels] = useState<RelationWithNames[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<string>('');
   const [debouncedFilter, setDebouncedFilter] = useState<string>('');
+
+  const selectedEntity = snapshot?.entities.find((e) => e.id === selectedEntityId) ?? null;
+  const selectedEntityObs = selectedEntity?.observations || [];
+  const selectedEntityRels = selectedEntity?.relations || [];
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -47,6 +49,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     }, 250);
     return () => clearTimeout(timer);
   }, [entityFilter]);
+
   // Modals state
   const [showAddEntity, setShowAddEntity] = useState(false);
   const [showAddObservation, setShowAddObservation] = useState(false);
@@ -70,55 +73,45 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   const [editingObsTier, setEditingObsTier] = useState<AuthorityTier>('contextual');
   const [editingObsStatus, setEditingObsStatus] = useState<ObservationStatus>('active');
 
-  const loadData = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      if (searchQuery) {
-        const results = await api.search(searchQuery);
-        const entities = results.map((r) => ({
-          ...r.entity,
-          observations: r.observations,
-          relations: (r.relations || []) as any,
-        }));
-        setSnapshot({ entities });
-      } else {
-        const data = await api.getGraph(selectedDomain || undefined);
-        setSnapshot(data);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadData();
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (searchQuery) {
+          const results = await api.search(searchQuery);
+          if (isCancelled) return;
+          const entities = results.map((r) => ({
+            ...r.entity,
+            observations: r.observations,
+            relations: (r.relations || []) as RelationWithNames[],
+          }));
+          setSnapshot({ entities });
+        } else {
+          const data = await api.getGraph(selectedDomain || undefined);
+          if (isCancelled) return;
+          setSnapshot(data);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
     }, 250);
-    return () => clearTimeout(timer);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [selectedDomain, searchQuery, refreshTrigger]);
 
-  useEffect(() => {
-    if (!selectedEntity || !snapshot) return;
-    const fresh = snapshot.entities.find((e) => e.id === selectedEntity.id);
-    if (fresh) {
-      setSelectedEntity(fresh);
-      setSelectedEntityObs(fresh.observations || []);
-      setSelectedEntityRels(fresh.relations || []);
-    } else {
-      setSelectedEntity(null);
-      setSelectedEntityObs([]);
-      setSelectedEntityRels([]);
-    }
-  }, [snapshot]);
-
   const selectEntity = (entity: Entity) => {
-    setSelectedEntity(entity);
-    const item = snapshot?.entities.find((e) => e.id === entity.id);
-    setSelectedEntityObs(item?.observations || []);
-    setSelectedEntityRels(item?.relations || []);
+    setSelectedEntityId(entity.id);
   };
 
   const handleAddEntity = async (e: React.FormEvent) => {
@@ -139,7 +132,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       setNewEntity({ name: '', entityType: 'concept', domain: 'personal', visibility: 'public', allowedAgents: '' });
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -148,11 +141,11 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
     try {
       await api.deleteEntities([name]);
       if (selectedEntity?.name === name) {
-        setSelectedEntity(null);
+        setSelectedEntityId(null);
       }
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -188,7 +181,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       });
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -205,7 +198,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       setEditingObsId(null);
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -215,7 +208,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       await api.deleteObservations([id]);
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -234,7 +227,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       setNewRelation({ from: '', to: '', relationType: 'relates_to' });
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -243,8 +236,18 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
       await api.deleteRelations([id]);
       triggerRefresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const getObservationStatusStyle = (status: ObservationStatus): string => {
+    if (status === 'invalidated' || status === 'superseded') {
+      return 'text-zinc-500 line-through';
+    }
+    if (status === 'stale') {
+      return 'text-amber-200';
+    }
+    return 'text-zinc-200';
   };
 
   // Helper renderers for Authority Tiers
@@ -367,11 +370,13 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
 
         {/* Entities Scrollable List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-          {isLoading && entitiesList.length === 0 ? (
+          {isLoading && entitiesList.length === 0 && (
             <div className="p-8 text-center text-xs font-mono text-zinc-500">Loading knowledge graph…</div>
-          ) : entitiesList.length === 0 ? (
+          )}
+          {!isLoading && entitiesList.length === 0 && (
             <div className="p-8 text-center text-xs font-mono text-zinc-500">No matching entities found.</div>
-          ) : (
+          )}
+          {entitiesList.length > 0 &&
             entitiesList.map((ent) => {
               const isSelected = selectedEntity?.id === ent.id;
               const obsCount = ent.observations?.length || 0;
@@ -400,8 +405,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
                   </div>
                 </div>
               );
-            })
-          )}
+            })}
         </div>
       </div>
 
@@ -552,15 +556,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
                               </div>
                             ) : (
                               <div className="flex items-start justify-between gap-4">
-                                <div
-                                  className={`text-xs font-mono leading-relaxed ${
-                                    obs.status === 'invalidated' || obs.status === 'superseded'
-                                      ? 'text-zinc-500 line-through'
-                                      : obs.status === 'stale'
-                                      ? 'text-amber-200'
-                                      : 'text-zinc-200'
-                                  }`}
-                                >
+                                <div className={`text-xs font-mono leading-relaxed ${getObservationStatusStyle(obs.status)}`}>
                                   {obs.content}
                                 </div>
 

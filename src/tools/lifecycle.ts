@@ -48,10 +48,11 @@ export function registerLifecycleTools(server: McpServer, graph: KnowledgeGraph,
     'Execute deterministic memory maintenance: purges expired ephemeral items, recalculates authority-tier value decay, and deduplicates identical or near-duplicate facts.',
     {
       domain: z.string().optional().describe('Filter maintenance to a specific domain (e.g. personal, work)'),
+      dryRun: z.boolean().optional().describe('Simulate maintenance without mutating the database'),
     },
-    async ({ domain }) => {
+    async ({ domain, dryRun }) => {
       try {
-        const result = runMaintenance(graph, db, domain);
+        const result = runMaintenance(graph, db, domain, dryRun === true);
         return textContent({ ok: true, result });
       } catch (error) {
         return {

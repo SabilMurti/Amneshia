@@ -20,11 +20,16 @@ export const App: React.FC = () => {
   const [contradictionCount, setContradictionCount] = useState<number>(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToast({ message, type });
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setToast(null);
+      toastTimerRef.current = null;
     }, 4500);
   };
 
@@ -50,8 +55,8 @@ export const App: React.FC = () => {
     showToast('Running deterministic memory maintenance (purge, decay, dedup)...', 'info');
     try {
       const response = await api.runMaintenance(selectedDomain || undefined, false);
-      if (response.ok) {
-        const { purgedCount, decayedCount, supersededCount } = response.result;
+      if (response.ok && response.result) {
+        const { purgedCount = 0, decayedCount = 0, supersededCount = 0 } = response.result;
         showToast(
           `Maintenance Complete: ${purgedCount} expired purged, ${decayedCount} decayed, ${supersededCount} duplicates superseded.`,
           'success'
@@ -75,16 +80,18 @@ export const App: React.FC = () => {
 
   const fetchStatsAndDomains = async () => {
     try {
-      const s = await api.getStats();
+      const [s, graphData, conflicts] = await Promise.all([
+        api.getStats(),
+        api.getGraph(),
+        api.getContradictions(),
+      ]);
       setStats(s);
-      const graphData = await api.getGraph();
-      const doms = Array.from(new Set(graphData.entities.map((e) => e.domain).filter(Boolean)));
+      const doms = Array.from(new Set((graphData?.entities ?? []).map((e) => e?.domain).filter(Boolean)));
       setDomains(doms);
-
-      const conflicts = await api.getContradictions();
-      setContradictionCount(conflicts.filter((c) => !c.resolvedAt).length);
+      setContradictionCount((conflicts ?? []).filter((c) => !c?.resolvedAt).length);
     } catch (err) {
       console.error('Failed to fetch dashboard metadata:', err);
+      showToast('Failed to refresh dashboard metadata: ' + (err instanceof Error ? err.message : String(err)), 'error');
     }
   };
 

@@ -26,14 +26,27 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: 'Amneshia', version: '3.2.2' });
+  const server = new McpServer({ name: 'Amneshia', version: '3.3.0' });
   registerTools(server, graph, db, options.toolProfile);
 
+  let httpListener: ReturnType<typeof express.application.listen> | undefined;
+  const sseTransports = new Map<string, SSEServerTransport>();
+
   const cleanup = async () => {
+    console.error('[Amneshia] Shutting down gracefully...');
+    if (httpListener) {
+      await new Promise<void>((resolve) => httpListener?.close(() => resolve()));
+    }
+    sseTransports.clear();
+    try {
+      await server.close();
+      db.close();
+    } catch {}
     process.exit(0);
   };
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
 
   if (options.http) {
     const app = express();
@@ -62,16 +75,21 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
       next();
     });
 
-    const sseTransports = new Map<string, SSEServerTransport>();
-
     app.get('/sse', async (req, res) => {
-      const sessionId = (req.query.sessionId as string) || crypto.randomUUID();
-      const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
-      sseTransports.set(sessionId, transport);
-      res.on('close', () => {
-        sseTransports.delete(sessionId);
-      });
-      await server.connect(transport);
+      try {
+        const sessionId = (req.query.sessionId as string) || crypto.randomUUID();
+        const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+        sseTransports.set(sessionId, transport);
+        res.on('close', () => {
+          sseTransports.delete(sessionId);
+        });
+        await server.connect(transport);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: msg });
+        }
+      }
     });
 
     app.post('/messages', async (req, res) => {
@@ -85,27 +103,64 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
         res.status(404).json({ error: 'SSE session not found or inactive' });
         return;
       }
-      await transport.handlePostMessage(req, res);
+      try {
+        await transport.handlePostMessage(req, res);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: msg || 'Internal server error' });
+      }
     });
 
     app.get('/health', (_req, res) => {
-      res.json({ status: 'ok', name: 'amneshia', version: '3.2.2' });
+      res.json({ status: 'ok', name: 'amneshia', version: '3.3.0' });
     });
 
     app.get('/api/graph', (req, res) => res.json(graph.readGraph(req.query.domain as string)));
     app.get('/api/search', (req, res) => res.json(graph.searchMemory(req.query.q as string)));
     app.get('/api/stats', (req, res) => res.json(graph.getStats()));
-    app.post('/api/entities', (req, res) => res.json(graph.createEntities(req.body.entities)));
+    app.post('/api/entities', (req, res) => {
+      try {
+        res.json(graph.createEntities(req.body.entities));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete('/api/entities', (req, res) => res.json(graph.deleteEntities(req.body.names)));
-    app.post('/api/observations', async (req, res) => res.json(await graph.addObservations(req.body.observations)));
+    app.post('/api/observations', async (req, res) => {
+      try {
+        res.json(await graph.addObservations(req.body.observations));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete('/api/observations', (req, res) => res.json(graph.deleteObservations(req.body.ids)));
     app.put('/api/observations', (req, res) => res.json(graph.updateObservation(req.body)));
-    app.post('/api/relations', (req, res) => res.json(graph.createRelations(req.body.relations)));
+    app.post('/api/relations', (req, res) => {
+      try {
+        res.json(graph.createRelations(req.body.relations));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete('/api/relations', (req, res) => res.json(graph.deleteRelations(req.body.ids)));
     app.get('/api/exports', (req, res) => res.json(db.getExportTargets()));
     app.post('/api/exports', (req, res) => {
-      const autoExportVal = req.body.autoExport !== false ? 1 : 0;
-      res.json(db.addExportTarget(req.body.name, req.body.path, req.body.format, autoExportVal));
+      try {
+        const result = graph.manageExportTargets({
+          action: 'add',
+          name: req.body.name,
+          path: req.body.path,
+          format: req.body.format,
+          autoExport: req.body.autoExport,
+        });
+        res.json(result);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
     });
     app.delete('/api/exports/:id', (req, res) => res.json(db.removeExportTarget(req.params.id)));
     app.post('/api/exports/:id/toggle', (req, res) => {
@@ -168,7 +223,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
     });
 
     const port = options.port || 3457;
-    const httpListener = app.listen(port, '127.0.0.1', () => {
+    httpListener = app.listen(port, '127.0.0.1', () => {
       console.error(`[Amneshia] HTTP Dashboard running on http://127.0.0.1:${port}`);
     });
 
@@ -179,19 +234,6 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
         console.error(`[Amneshia] Express server error: ${err.message}`);
       }
     });
-
-    const cleanup = () => {
-      console.error('[Amneshia] Shutting down gracefully...');
-      httpListener.close();
-      sseTransports.clear();
-      try {
-        db.close();
-      } catch {}
-      process.exit(0);
-    };
-
-    process.once('SIGINT', cleanup);
-    process.once('SIGTERM', cleanup);
   }
 
   if (options.stdio !== false && !process.argv.includes('--daemon')) {

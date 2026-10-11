@@ -5,9 +5,9 @@ import type { KnowledgeGraph } from '../graph.js';
 const relationSchema = {
   relations: z.array(
     z.object({
-      from: z.string().min(1).describe('Source entity name'),
-      to: z.string().min(1).describe('Target entity name'),
-      relationType: z.string().min(1).describe('Relation type such as uses, prefers, works_on, knows, or depends_on'),
+      from: z.string().trim().min(1).describe('Source entity name'),
+      to: z.string().trim().min(1).describe('Target entity name'),
+      relationType: z.string().trim().min(1).describe('Relation type such as uses, prefers, works_on, knows, or depends_on'),
     })
   ).min(1).describe('Relations to create'),
 };
@@ -24,7 +24,14 @@ export function registerRelationTools(server: McpServer, graph: KnowledgeGraph):
     async ({ relations }) => {
       try {
         const created = graph.createRelations(relations);
-        return textContent({ ok: true, created, count: created.length });
+        const skipped = relations.length - created.length;
+        return textContent({
+          ok: true,
+          created,
+          count: created.length,
+          requested: relations.length,
+          ...(skipped > 0 ? { warning: `${skipped} relation(s) skipped due to missing entities` } : {}),
+        });
       } catch (error) {
         return {
           isError: true,

@@ -12,15 +12,17 @@ export default {
       },
       colors: {
         obsidian: {
+          bg: '#080612',
+          card: '#0c0a1a',
           950: '#05040a',
           900: '#080612',
           850: '#0c0a1a',
           800: '#120f26',
           750: '#171333',
           700: '#1f1945',
-          border: 'rgba(168, 85, 247, 0.12)',
-          'border-active': 'rgba(168, 85, 247, 0.45)',
-          'border-subtle': 'rgba(255, 255, 255, 0.06)',
+          border: 'rgb(168 85 247 / <alpha-value>)',
+          'border-active': 'rgb(168 85 247 / <alpha-value>)',
+          'border-subtle': 'rgb(255 255 255 / <alpha-value>)',
         },
         amethyst: {
           400: '#c084fc',

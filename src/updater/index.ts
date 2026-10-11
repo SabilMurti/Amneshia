@@ -83,17 +83,24 @@ export async function fetchLatestRelease(
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: {
-        'User-Agent': 'Amneshia-Updater/3.2.2',
+        'User-Agent': 'Amneshia-Updater/3.3.0',
         Accept: 'application/vnd.github.v3+json',
       },
       signal: controller.signal,
     });
 
     if (res.ok) {
-      const data: any = await res.json();
+      interface GitHubReleaseResponse {
+        tag_name?: string;
+        html_url?: string;
+        body?: string;
+        published_at?: string;
+        assets?: Array<{ name: string; browser_download_url: string }>;
+      }
+      const data = (await res.json()) as GitHubReleaseResponse;
       const tagName: string = data.tag_name || '';
       const version = tagName.replace(/^v/i, '');
-      const tarballAsset = (data.assets || []).find((a: any) =>
+      const tarballAsset = (data.assets || []).find((a) =>
         a.name === 'amneshia-latest.tgz' || a.name.endsWith('.tgz')
       );
 
@@ -116,15 +123,19 @@ export async function fetchLatestRelease(
   try {
     const jsrRes = await fetch('https://jsr.io/api/scopes/sabilmurti/packages/amneshia', {
       headers: {
-        'User-Agent': 'Amneshia-Updater/3.2.2',
+        'User-Agent': 'Amneshia-Updater/3.3.0',
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (jsrRes.ok) {
-      const data: any = await jsrRes.json();
-      const latestVersion: string = data.latestVersion || '3.2.2';
+      interface JsrPackageResponse { latestVersion?: string }
+      const data = (await jsrRes.json()) as JsrPackageResponse;
+      if (!data.latestVersion) {
+        throw new Error('JSR registry response missing latestVersion property');
+      }
+      const latestVersion: string = data.latestVersion;
       clearTimeout(timer);
       return {
         version: latestVersion,
@@ -134,9 +145,10 @@ export async function fetchLatestRelease(
         source: 'jsr',
       };
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     clearTimeout(timer);
-    throw new Error(`Failed to check for Amneshia updates: Network error (${err.message})`);
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to check for Amneshia updates: Network error (${msg})`);
   } finally {
     clearTimeout(timer);
   }
@@ -243,8 +255,8 @@ export async function performUpdate(options: {
   if (env.isGitClone && env.gitDir) {
     onProgress?.(`Updating Amneshia from git repository (${env.gitDir})...`);
     try {
-      onProgress?.('Fetching latest changes from origin/main...');
-      await execFileAsync('git', ['pull', '--rebase', 'origin', 'main'], { cwd: env.gitDir });
+      onProgress?.('Fetching latest changes from tracking remote...');
+      await execFileAsync('git', ['pull', '--rebase'], { cwd: env.gitDir });
 
       const execOptions = { cwd: env.gitDir, shell: process.platform === 'win32' };
       onProgress?.('Installing updated dependencies...');
@@ -260,8 +272,9 @@ export async function performUpdate(options: {
         method: 'git',
         message: `Successfully updated Amneshia repository from v${currentVersion} to v${check.latestVersion}.`,
       };
-    } catch (err: any) {
-      throw new Error(`Git update failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Git update failed: ${msg}`);
     }
   }
 
@@ -274,21 +287,23 @@ export async function performUpdate(options: {
 
   let installSuccess = false;
   let method: 'tarball' | 'registry' = 'tarball';
+  const globalExecOpts = { shell: process.platform === 'win32' };
 
   // Attempt A: Direct GitHub Release Tarball
   try {
     onProgress?.(`Downloading and installing release tarball: ${tarballUrl}`);
     if (env.pkgManager === 'bun') {
-      await execFileAsync('bun', ['install', '-g', tarballUrl]);
+      await execFileAsync('bun', ['install', '-g', tarballUrl], globalExecOpts);
     } else if (env.pkgManager === 'pnpm') {
-      await execFileAsync('pnpm', ['add', '-g', tarballUrl]);
+      await execFileAsync('pnpm', ['add', '-g', tarballUrl], globalExecOpts);
     } else {
-      await execFileAsync('npm', ['install', '-g', tarballUrl]);
+      await execFileAsync('npm', ['install', '-g', tarballUrl], globalExecOpts);
     }
     installSuccess = true;
     method = 'tarball';
-  } catch (tarballErr: any) {
-    onProgress?.(`Tarball installation failed (${tarballErr.message}). Falling back to package registry...`);
+  } catch (tarballErr: unknown) {
+    const msg = tarballErr instanceof Error ? tarballErr.message : String(tarballErr);
+    onProgress?.(`Tarball installation failed (${msg}). Falling back to package registry...`);
   }
 
   // Attempt B: Registry fallback (@sabilmurti/amneshia@latest)
@@ -297,16 +312,17 @@ export async function performUpdate(options: {
       const pkgTarget = `@sabilmurti/amneshia@${check.latestVersion}`;
       onProgress?.(`Installing ${pkgTarget} via ${env.pkgManager}...`);
       if (env.pkgManager === 'bun') {
-        await execFileAsync('bun', ['install', '-g', pkgTarget]);
+        await execFileAsync('bun', ['install', '-g', pkgTarget], globalExecOpts);
       } else if (env.pkgManager === 'pnpm') {
-        await execFileAsync('pnpm', ['add', '-g', pkgTarget]);
+        await execFileAsync('pnpm', ['add', '-g', pkgTarget], globalExecOpts);
       } else {
-        await execFileAsync('npm', ['install', '-g', pkgTarget]);
+        await execFileAsync('npm', ['install', '-g', pkgTarget], globalExecOpts);
       }
       installSuccess = true;
       method = 'registry';
-    } catch (regErr: any) {
-      throw new Error(`Package registry installation failed: ${regErr.message}`);
+    } catch (regErr: unknown) {
+      const msg = regErr instanceof Error ? regErr.message : String(regErr);
+      throw new Error(`Package registry installation failed: ${msg}`);
     }
   }
 

@@ -257,27 +257,27 @@ export async function cloudPull(
     throw new Error('Cloud sync not initialized. Run "amneshia cloud setup <remote-url>" first.');
   }
 
-  // If untracked .gitignore or .gitattributes exists locally, temporarily remove to avoid merge conflicts with remote
+  // If untracked .gitignore or .gitattributes exists locally, temporarily back up and remove to avoid merge conflicts with remote
   const gitignorePath = path.join(knowledgeDir, '.gitignore');
-  let hadUntrackedGitignore = false;
+  let backupGitignore: string | null = null;
   if (fs.existsSync(gitignorePath)) {
     try {
       const { stdout } = await git(knowledgeDir, ['status', '--porcelain', '.gitignore']);
       if (stdout.includes('??')) {
+        backupGitignore = fs.readFileSync(gitignorePath, 'utf-8');
         fs.unlinkSync(gitignorePath);
-        hadUntrackedGitignore = true;
       }
     } catch {}
   }
 
   const gitattributesPath = path.join(knowledgeDir, '.gitattributes');
-  let hadUntrackedGitattributes = false;
+  let backupGitattributes: string | null = null;
   if (fs.existsSync(gitattributesPath)) {
     try {
       const { stdout } = await git(knowledgeDir, ['status', '--porcelain', '.gitattributes']);
       if (stdout.includes('??')) {
+        backupGitattributes = fs.readFileSync(gitattributesPath, 'utf-8');
         fs.unlinkSync(gitattributesPath);
-        hadUntrackedGitattributes = true;
       }
     } catch {}
   }
@@ -292,16 +292,26 @@ export async function cloudPull(
     const res = await git(knowledgeDir, ['pull', '--no-rebase', 'origin', '--', branch]);
     rawOutput = res.stdout + res.stderr;
   } catch (err: any) {
+    let isMissingRemoteBranch = false;
+    try {
+      const lsRemote = await git(knowledgeDir, ['ls-remote', '--heads', 'origin', branch]);
+      if (!lsRemote.stdout.trim()) {
+        isMissingRemoteBranch = true;
+      }
+    } catch {}
+
     // If remote branch does not exist yet (e.g. freshly created remote), treat as initial pull
-    if (err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
+    if (isMissingRemoteBranch || err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
       rawOutput = 'Remote branch does not exist yet; continuing with local state.';
     } else {
+      // Abort unfinished merge on failure
+      await git(knowledgeDir, ['merge', '--abort']).catch(() => {});
       // Restore files if pull failed and they were removed
-      if (hadUntrackedGitignore && !fs.existsSync(gitignorePath)) {
-        fs.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
+      if (backupGitignore !== null && !fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, backupGitignore, 'utf-8');
       }
-      if (hadUntrackedGitattributes && !fs.existsSync(gitattributesPath)) {
-        fs.writeFileSync(gitattributesPath, "*.md merge=amneshia\n", 'utf-8');
+      if (backupGitattributes !== null && !fs.existsSync(gitattributesPath)) {
+        fs.writeFileSync(gitattributesPath, backupGitattributes, 'utf-8');
       }
       throw err;
     }
@@ -309,13 +319,16 @@ export async function cloudPull(
 
   // Ensure .gitignore and merge driver (.gitattributes) exist after pull
   if (!fs.existsSync(gitignorePath)) {
-    fs.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
+    fs.writeFileSync(gitignorePath, backupGitignore ?? "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
+  }
+  if (backupGitattributes !== null && !fs.existsSync(gitattributesPath)) {
+    fs.writeFileSync(gitattributesPath, backupGitattributes, 'utf-8');
   }
   await setupMergeDriver(knowledgeDir);
 
   // Verify merge status before reindexing to avoid indexing conflict markers
   const statusRes = await git(knowledgeDir, ['status', '--porcelain']);
-  if (statusRes.stdout.includes('UU') || statusRes.stdout.includes('AA')) {
+  if (/(?:^|\n)(UU|AA|DD|AU|UD|UA|DU)\s/.test(statusRes.stdout)) {
     await git(knowledgeDir, ['merge', '--abort']).catch(() => {});
     throw new Error(`Git pull resulted in unmerged conflicts. Merge aborted.`);
   }

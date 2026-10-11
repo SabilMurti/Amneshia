@@ -54,12 +54,17 @@ export function filterMemoryGraph(
   // Keyword query search across observations if query is specified
   let matchingEntityIds: Set<string> | null = null;
   let matchingObsIds: Set<string> | null = null;
+  const matchedByNameIds = new Set<string>();
   if (filters.query && filters.query.trim().length > 0) {
     const ftsResults = db.searchFTSRelevant(filters.query, 1000);
     matchingEntityIds = new Set<string>();
     matchingObsIds = new Set<string>();
+    const queryLower = filters.query.trim().toLowerCase();
     for (const res of ftsResults) {
       matchingEntityIds.add(res.entity.id);
+      if (res.entity.name.toLowerCase().includes(queryLower)) {
+        matchedByNameIds.add(res.entity.id);
+      }
       for (const obs of res.observations) {
         matchingObsIds.add(obs.id);
       }
@@ -89,14 +94,14 @@ export function filterMemoryGraph(
       if (allowedStatuses && !allowedStatuses.has(obs.status)) {
         return false;
       }
-      if (matchingObsIds && !matchingObsIds.has(obs.id)) {
+      if (matchingObsIds && !matchedByNameIds.has(ent.id) && !matchingObsIds.has(obs.id)) {
         return false;
       }
       return true;
     });
 
     // If query filter is applied and no observations match, skip unless entity name matched
-    if (filters.query && filteredObs.length === 0 && (!matchingEntityIds || !matchingEntityIds.has(ent.id))) {
+    if (filters.query && filteredObs.length === 0 && !matchedByNameIds.has(ent.id)) {
       continue;
     }
 
@@ -130,12 +135,15 @@ export class MemoryExporter {
     const resolvedPath = path.resolve(outputPath);
     const filteredData = filterMemoryGraph(this.db, filters);
 
+    const entityIds = new Set(filteredData.map((e) => e.id));
     let totalObs = 0;
     const uniqueRelIds = new Set<string>();
     for (const e of filteredData) {
       totalObs += e.observations.length;
       for (const r of e.relations) {
-        uniqueRelIds.add(r.id);
+        if (entityIds.has(r.fromEntity) && entityIds.has(r.toEntity)) {
+          uniqueRelIds.add(r.id);
+        }
       }
     }
     const totalRel = uniqueRelIds.size;
@@ -175,18 +183,15 @@ export class MemoryExporter {
       entities: data,
     };
 
-    fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf-8');
+    const tempPath = `${outputPath}.tmp.${Date.now()}`;
+    fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf-8');
+    fs.renameSync(tempPath, outputPath);
   }
 
   private exportToMarkdown(outputDir: string, data: FilteredEntityNode[]): void {
     fs.mkdirSync(outputDir, { recursive: true });
 
-    const possibleKnowledgeDirs = [
-      path.join(this.db.getDataDir(), '..', 'knowledge'),
-      path.join(this.db.getDataDir(), 'knowledge'),
-      path.join(process.cwd(), '.amneshia', 'knowledge'),
-      path.join(os.homedir(), '.amneshia', 'knowledge'),
-    ];
+    const knowledgeDir = path.resolve(this.db.getDataDir(), 'knowledge');
 
     for (const ent of data) {
       saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations, ent.media);
@@ -195,17 +200,17 @@ export class MemoryExporter {
         if (path.isAbsolute(relPath) || relPath.includes('..')) {
           continue;
         }
-        for (const kDir of possibleKnowledgeDirs) {
-          const srcBlob = path.join(kDir, relPath);
-          const destBlob = path.resolve(outputDir, relPath);
-          if (!destBlob.startsWith(path.resolve(outputDir) + path.sep)) {
-            continue;
-          }
-          if (fs.existsSync(srcBlob) && !fs.existsSync(destBlob)) {
-            fs.mkdirSync(path.dirname(destBlob), { recursive: true });
-            fs.copyFileSync(srcBlob, destBlob);
-            break;
-          }
+        const srcBlob = path.resolve(knowledgeDir, relPath);
+        const destBlob = path.resolve(outputDir, relPath);
+        if (!srcBlob.startsWith(knowledgeDir + path.sep)) {
+          continue;
+        }
+        if (!destBlob.startsWith(path.resolve(outputDir) + path.sep)) {
+          continue;
+        }
+        if (fs.existsSync(srcBlob) && !fs.existsSync(destBlob)) {
+          fs.mkdirSync(path.dirname(destBlob), { recursive: true });
+          fs.copyFileSync(srcBlob, destBlob);
         }
       }
     }
@@ -233,18 +238,19 @@ export class MemoryExporter {
     const parentDir = path.dirname(outputPath);
     fs.mkdirSync(parentDir, { recursive: true });
 
-    if (fs.existsSync(outputPath)) {
-      fs.unlinkSync(outputPath);
+    const tempPath = `${outputPath}.tmp.${Date.now()}`;
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
     }
 
-    const exportDb = new Database(outputPath);
+    const exportDb = new Database(tempPath);
     try {
       exportDb.pragma('journal_mode = WAL');
       exportDb.pragma('synchronous = NORMAL');
       exportDb.pragma('foreign_keys = ON');
 
       exportDb.exec(SCHEMA_SQL);
-      runMigrations(exportDb);
+      exportDb.pragma('user_version = 4');
 
       const insertEntity = exportDb.prepare(`
         INSERT INTO entities (id, name, entity_type, domain, visibility, allowed_agents, created_at, updated_at)
@@ -320,28 +326,40 @@ export class MemoryExporter {
         }
 
         // Only insert relations where both entities are present in export
+        const insertedRelationIds = new Set<string>();
         for (const ent of data) {
           for (const rel of ent.relations) {
-            if (entityIds.has(rel.fromEntity) && entityIds.has(rel.toEntity)) {
-              try {
-                insertRelation.run(
-                  rel.id,
-                  rel.fromEntity,
-                  rel.toEntity,
-                  rel.relationType,
-                  rel.createdAt
-                );
-              } catch {
-                // Ignore duplicate relation inserts if already inserted from another side
-              }
+            if (entityIds.has(rel.fromEntity) && entityIds.has(rel.toEntity) && !insertedRelationIds.has(rel.id)) {
+              insertRelation.run(
+                rel.id,
+                rel.fromEntity,
+                rel.toEntity,
+                rel.relationType,
+                rel.createdAt
+              );
+              insertedRelationIds.add(rel.id);
             }
           }
         }
       });
 
       populateTransaction();
-    } finally {
       exportDb.close();
+
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      fs.renameSync(tempPath, outputPath);
+    } catch (err) {
+      try {
+        exportDb.close();
+      } catch {}
+      if (fs.existsSync(tempPath)) {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {}
+      }
+      throw err;
     }
   }
 }

@@ -13,6 +13,22 @@
 export type AuthorityTier = 'invariant' | 'architectural' | 'contextual' | 'ephemeral';
 
 /**
+ * Visibility scope of an entity node.
+ * - `public`: Visible to all agents and search queries.
+ * - `restricted`: Visible only to specified agents in `allowedAgents`.
+ * - `private`: Scoped strictly to the creating context.
+ */
+export type EntityVisibility = 'public' | 'restricted' | 'private';
+
+/**
+ * Retention and priority weight tier of an observation.
+ * - `permanent`: Never evicted or cleaned up by automatic GC routines.
+ * - `normal`: Standard retention adhering to authority tier decay rules.
+ * - `ephemeral`: Fast-decaying scratchpad memory with short TTL.
+ */
+export type ObservationImportance = 'permanent' | 'normal' | 'ephemeral';
+
+/**
  * Operational status of an observation within the Truth Maintenance DAG.
  * - `active`: Valid and queryable fact.
  * - `stale`: A premise in the dependency chain was revoked or updated.
@@ -34,8 +50,8 @@ export interface Entity {
   entityType: string;
   /** Domain namespace grouping related entities (e.g. "backend", "frontend", "personal") */
   domain: string;
-  /** Visibility scope ("public" or "private") */
-  visibility: string;
+  /** Visibility scope ("public", "restricted", or "private") */
+  visibility: EntityVisibility;
   /** List of agent identifiers authorized to view this entity */
   allowedAgents: string[];
   /** ISO-8601 creation timestamp */
@@ -56,8 +72,8 @@ export interface Observation {
   content: string;
   /** Provenance source (e.g. file path, URL, agent ID, or user prompt) */
   source: string | null;
-  /** Importance descriptor or numerical weight */
-  importance: string;
+  /** Importance descriptor or numerical weight ('permanent' | 'normal' | 'ephemeral') */
+  importance: ObservationImportance;
   /** Confidence score between 0.0 and 1.0 */
   confidence: number;
   /** Authority tier dictating decay and eviction policy */
@@ -250,8 +266,8 @@ export interface CreateEntityInput {
   entityType: string;
   /** Optional domain namespace */
   domain?: string;
-  /** Visibility scope */
-  visibility?: string;
+  /** Visibility scope ("public", "restricted", or "private") */
+  visibility?: EntityVisibility;
   /** Authorized agent IDs */
   allowedAgents?: string[];
 }
@@ -278,8 +294,8 @@ export interface AddObservationInput {
   contents: string[];
   /** Optional source provenance */
   source?: string;
-  /** Importance descriptor */
-  importance?: string;
+  /** Importance descriptor ('permanent' | 'normal' | 'ephemeral') */
+  importance?: ObservationImportance;
   /** Authority tier */
   authorityTier?: AuthorityTier;
   /** Dependency premise observation UUIDs */
@@ -354,8 +370,10 @@ export interface RecallResult {
  * High-level MCP input schema for the `forget` tool.
  */
 export interface ForgetInput {
-  /** Target observation UUID or entity name to invalidate */
+  /** Target observation UUID, entity ID, or entity name to invalidate (observation UUID takes precedence if ambiguous) */
   target: string;
+  /** Optional discriminator to disambiguate target type */
+  targetType?: 'observation' | 'entity';
   /** If true, permanently purge from database; if false, mark as invalidated */
   hard?: boolean;
   /** If true, cascade invalidation to all dependent derived facts */

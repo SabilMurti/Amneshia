@@ -3,7 +3,10 @@ node_modules/
 dashboard/node_modules/
 
 # Environment & OS
-.env*
+.env
+.env.*
+!.env.example
+.env*.local
 .DS_Store
 *.log
 
@@ -16,13 +19,19 @@ dashboard/node_modules/
 
 # Scratch & Temporary
 scratch/
+scripts/
 MEMORY.md
 .agents/
 .understand-anything/
 *.sty
 *launch_strategy*.md
+ocr-*.html
+ocr-*.json
+OCR_REMEDIATION_PROMPT.md
 
+# Build Artifact Exclusions
 dist/*.node
 dist/chunk-*.js
 dist/dist-*.js
+
 

@@ -56,19 +56,19 @@ CREATE TABLE IF NOT EXISTS export_targets (
 
 CREATE TABLE IF NOT EXISTS contradiction_log (
   id TEXT PRIMARY KEY,
-  observation_id TEXT NOT NULL,
-  conflicting_observation_id TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
+  observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  conflicting_observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   reason TEXT NOT NULL,
-  resolution TEXT CHECK(resolution IN ('override', 'kept_both', 'rejected', NULL)),
+  resolution TEXT CHECK(resolution IS NULL OR resolution IN ('override', 'kept_both', 'rejected')),
   detected_at TEXT NOT NULL,
   resolved_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS access_log (
   id TEXT PRIMARY KEY,
-  entity_id TEXT NOT NULL,
-  observation_id TEXT,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  observation_id TEXT REFERENCES observations(id) ON DELETE CASCADE,
   accessed_at TEXT NOT NULL
 );
 
@@ -90,6 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_obs_status ON observations(status);
 CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
 CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
+CREATE INDEX IF NOT EXISTS idx_access_log_entity ON access_log(entity_id);
+CREATE INDEX IF NOT EXISTS idx_contradiction_obs ON contradiction_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_entity ON media_assets(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_sha256 ON media_assets(sha256);
@@ -125,7 +127,7 @@ CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
   DELETE FROM memory_fts WHERE observation_id = OLD.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE OF content, entity_id ON observations BEGIN
   DELETE FROM memory_fts WHERE observation_id = OLD.id;
   INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
   SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
@@ -138,7 +140,7 @@ CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
   VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
 END;
 
-CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
+CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE OF name, entity_type ON entities BEGIN
   DELETE FROM memory_fts WHERE observation_id IS NULL AND entity_id = OLD.id;
   INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
   VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);

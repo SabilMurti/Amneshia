@@ -30,7 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'contradictions' as const,
       label: 'Truth Maintenance',
       icon: ShieldAlert,
-      badge: contradictionCount > 0 ? `${contradictionCount} alert` : 'v3.0',
+      badge: contradictionCount > 0 ? `${contradictionCount} ${contradictionCount === 1 ? 'alert' : 'alerts'}` : 'v3.2',
       badgeColor: contradictionCount > 0 ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' : undefined,
     },
     { id: 'storage' as const, label: 'Markdown-as-Truth', icon: FolderGit2, badge: 'Git' },
@@ -50,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <h1 className="font-sans text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
               <span>Amneshia</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold">
-                v3.0
+                v3.3.0
               </span>
             </h1>
             <p className="text-[10px] font-mono text-purple-400/70 tracking-wider uppercase mt-0.5 flex items-center gap-1">
@@ -61,13 +61,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="space-y-1.5">
+        <nav className="space-y-1.5" role="tablist">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const badgeClass =
+              tab.badgeColor ||
+              (isActive
+                ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                : 'bg-white/5 text-zinc-500 border-white/5 group-hover:text-purple-300 group-hover:border-purple-500/20');
+
             return (
               <button
                 key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all duration-300 group ${
                   isActive
@@ -83,15 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   />
                   <span className="font-sans text-xs font-semibold">{tab.label}</span>
                 </div>
-                <span
-                  className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
-                    tab.badgeColor
-                      ? tab.badgeColor
-                      : isActive
-                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                      : 'bg-white/5 text-zinc-500 border-white/5 group-hover:text-purple-300 group-hover:border-purple-500/20'
-                  }`}
-                >
+                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${badgeClass}`}>
                   {tab.badge}
                 </span>
               </button>

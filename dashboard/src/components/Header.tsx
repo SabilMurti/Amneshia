@@ -32,7 +32,11 @@ export const Header: React.FC<HeaderProps> = ({
   onRunMaintenance,
 }) => {
   const [query, setQuery] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isMaintaining, setIsMaintaining] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const refreshStatsRef = useRef(refreshStats);
+  refreshStatsRef.current = refreshStats;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -45,10 +49,17 @@ export const Header: React.FC<HeaderProps> = ({
     e.preventDefault();
     onSearch(query);
   };
-  // Keyboard shortcut '/' to focus search
+
+  // Keyboard shortcut '/' to focus search (guards against typing in inputs/textareas)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && document.activeElement !== inputRef.current) {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput =
+        activeEl?.tagName === 'INPUT' ||
+        activeEl?.tagName === 'TEXTAREA' ||
+        Boolean(activeEl?.isContentEditable);
+
+      if (e.key === '/' && !isInput && activeEl !== inputRef.current) {
         e.preventDefault();
         inputRef.current?.focus();
       }
@@ -58,8 +69,10 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   useEffect(() => {
-    refreshStats();
-    const interval = setInterval(refreshStats, 8000);
+    refreshStatsRef.current();
+    const interval = setInterval(() => {
+      refreshStatsRef.current();
+    }, 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -135,24 +148,42 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Sync Markdown Button */}
         <button
-          onClick={onSyncMarkdown}
+          onClick={async () => {
+            if (isSyncing) return;
+            setIsSyncing(true);
+            try {
+              await onSyncMarkdown();
+            } finally {
+              setIsSyncing(false);
+            }
+          }}
+          disabled={isSyncing}
           type="button"
-          className="flex items-center gap-1.5 bg-purple-950/50 hover:bg-purple-900/50 border border-purple-500/30 text-purple-200 px-3.5 py-1.5 rounded-xl font-mono text-xs font-semibold transition-all hover:border-purple-400 active:scale-[0.97]"
+          className="flex items-center gap-1.5 bg-purple-950/50 hover:bg-purple-900/50 disabled:opacity-50 disabled:cursor-not-allowed border border-purple-500/30 text-purple-200 px-3.5 py-1.5 rounded-xl font-mono text-xs font-semibold transition-all hover:border-purple-400 active:scale-[0.97]"
           title="Export and sync all entities to .amneshia/knowledge/ Markdown files"
         >
-          <FolderSync className="w-3.5 h-3.5 text-purple-400" />
-          <span>Sync MD</span>
+          <FolderSync className={`w-3.5 h-3.5 text-purple-400 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>{isSyncing ? 'Syncing...' : 'Sync MD'}</span>
         </button>
 
         {/* Memory Maintenance Button */}
         <button
-          onClick={onRunMaintenance}
+          onClick={async () => {
+            if (isMaintaining) return;
+            setIsMaintaining(true);
+            try {
+              await onRunMaintenance();
+            } finally {
+              setIsMaintaining(false);
+            }
+          }}
+          disabled={isMaintaining}
           type="button"
-          className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white px-3.5 py-1.5 rounded-xl font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.97] border border-purple-400/40"
+          className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-xl font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.97] border border-purple-400/40"
           title="Run Memory Maintenance (Purge expired, authority decay, deduplicate facts)"
         >
-          <Sparkles className="w-3.5 h-3.5 text-purple-200" />
-          <span>Maintain</span>
+          <Sparkles className={`w-3.5 h-3.5 text-purple-200 ${isMaintaining ? 'animate-spin' : ''}`} />
+          <span>{isMaintaining ? 'Maintaining...' : 'Maintain'}</span>
         </button>
 
         {/* Engine Status Ping */}

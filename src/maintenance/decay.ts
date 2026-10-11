@@ -22,7 +22,7 @@ export function computeDecayScore(obs: Observation, nowMs: number = Date.now()):
 
   if (obs.expiresAt) {
     const exp = new Date(obs.expiresAt).getTime();
-    if (!Number.isNaN(exp) && exp <= nowMs) {
+    if (Number.isNaN(exp) || exp <= nowMs) {
       return 0.0;
     }
   }
@@ -32,7 +32,7 @@ export function computeDecayScore(obs: Observation, nowMs: number = Date.now()):
 
   const rawDate = obs.lastAccessedAt || obs.createdAt;
   const parsed = new Date(rawDate).getTime();
-  const lastActivity = Number.isNaN(parsed) ? nowMs : parsed;
+  const lastActivity = Number.isNaN(parsed) ? 0 : parsed;
   const daysInactive = Math.max(0, (nowMs - lastActivity) / (1000 * 60 * 60 * 24));
 
   if (daysInactive >= maxDays) {
@@ -40,7 +40,8 @@ export function computeDecayScore(obs: Observation, nowMs: number = Date.now()):
   }
 
   const recencyFactor = Math.max(0, 1 - daysInactive / maxDays);
-  const frequencyFactor = 1 + Math.log10((obs.accessCount || 0) + 1);
+  const safeAccessCount = Math.max(0, obs.accessCount || 0);
+  const frequencyFactor = 1 + Math.log10(safeAccessCount + 1);
 
   return tierWeight * frequencyFactor * recencyFactor;
 }
@@ -48,6 +49,7 @@ export function computeDecayScore(obs: Observation, nowMs: number = Date.now()):
 export interface DecayEvaluationResult {
   decayed: Observation[];
   retained: Observation[];
+  inactive: Observation[];
 }
 
 export function evaluateDecay(
@@ -57,9 +59,11 @@ export function evaluateDecay(
 ): DecayEvaluationResult {
   const decayed: Observation[] = [];
   const retained: Observation[] = [];
+  const inactive: Observation[] = [];
 
   for (const obs of observations) {
     if (obs.status !== 'active') {
+      inactive.push(obs);
       continue;
     }
 
@@ -76,7 +80,7 @@ export function evaluateDecay(
     }
   }
 
-  return { decayed, retained };
+  return { decayed, retained, inactive };
 }
 
 export function applyDecay(
@@ -84,7 +88,7 @@ export function applyDecay(
   threshold = 0.1,
   nowMs: number = Date.now()
 ): { decayedCount: number; decayedIds: string[] } {
-  const snapshot = db.readGraph();
+  const snapshot = db.readGraph(undefined, undefined, 'active');
   const decayedIds: string[] = [];
 
   for (const entity of snapshot.entities) {

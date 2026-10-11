@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { KnowledgeGraph } from '../graph.js';
-import type { AuthorityTier, ObservationStatus } from '../types.js';
+import type { AuthorityTier, ObservationStatus, AddObservationInput } from '../types.js';
 
 const observationSchema = {
   observations: z
@@ -34,7 +34,7 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
     observationSchema,
     async ({ observations }) => {
       try {
-        const created = await graph.addObservations(observations as any);
+        const created = await graph.addObservations(observations as AddObservationInput[]);
         return textContent({ ok: true, created, count: created.length });
       } catch (error) {
         return {

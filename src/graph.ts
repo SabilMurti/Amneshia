@@ -223,7 +223,8 @@ export class KnowledgeGraph {
    * @returns Formatted search result
    */
   searchMemory(query: string, limit = 20, domain?: string): SearchMemoryResult {
-    const filtered = this.database.searchFTS(query, limit * 2).filter((result) => (domain ? result.entity.domain === domain : true));
+    const fetchLimit = domain ? Math.max(limit * 5, 100) : limit;
+    const filtered = this.database.searchFTS(query, fetchLimit).filter((result) => (domain ? result.entity.domain === domain : true));
     return {
       query,
       limit,
@@ -239,7 +240,8 @@ export class KnowledgeGraph {
    * @returns Formatted search result
    */
   searchRelevantMemory(query: string, limit = 20, domain?: string): SearchMemoryResult {
-    const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => (domain ? result.entity.domain === domain : true));
+    const fetchLimit = domain ? Math.max(limit * 5, 100) : limit;
+    const filtered = this.database.searchFTSRelevant(query, fetchLimit).filter((result) => (domain ? result.entity.domain === domain : true));
     return {
       query,
       limit,

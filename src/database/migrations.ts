@@ -12,13 +12,15 @@ interface ColumnInfo {
 export function runMigrations(db: Database.Database): void {
   const versionRow = db.pragma('user_version', { simple: true }) as number;
 
-  if (versionRow < 3) {
-    // Check if observations table exists (migrating an existing v2 database)
-    const tableCheck = db
-      .prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'")
-      .get() as { count: number };
+  // Check if observations table exists (migrating an existing v2/v3 database)
+  const tableCheck = db
+    .prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'")
+    .get() as { count: number } | undefined;
 
-    if (tableCheck && tableCheck.count > 0) {
+  const hasObservationsTable = Boolean(tableCheck && tableCheck.count > 0);
+
+  if (versionRow < 3 && hasObservationsTable) {
+    db.transaction(() => {
       const columns = db.pragma('table_info(observations)') as ColumnInfo[];
       const columnNames = new Set(columns.map((c) => c.name));
 
@@ -46,34 +48,38 @@ export function runMigrations(db: Database.Database): void {
         );
       }
 
-      // Auto-update superseded status if superseded is set
+      // Auto-update superseded status if supersedes column exists
       if (columnNames.has('supersedes')) {
         db.exec(
           "UPDATE observations SET status = 'superseded' WHERE id IN (SELECT supersedes FROM observations WHERE supersedes IS NOT NULL) AND status = 'active'"
         );
       }
-    }
 
-    // Drop deprecated bridge tables if present
-    try {
-      db.exec('DROP TABLE IF EXISTS bridge_servers;');
-    } catch {
-      // Ignore
-    }
+      // Drop deprecated bridge tables if present
+      try {
+        db.exec('DROP TABLE IF EXISTS bridge_servers;');
+      } catch {
+        // Ignore
+      }
+
+      db.pragma('user_version = 3');
+    })();
   }
 
   // Migration 4: Hybrid Semantic Vector Search table
-  if (versionRow < 4) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS observation_embeddings (
-        observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        model TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
-    `);
-    db.pragma('user_version = 4');
+  if (versionRow < 4 && hasObservationsTable) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observation_embeddings (
+          observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+          dimensions INTEGER NOT NULL,
+          vector BLOB NOT NULL,
+          model TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
+      `);
+      db.pragma('user_version = 4');
+    })();
   }
 }

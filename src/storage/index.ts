@@ -25,12 +25,23 @@ export interface StorageConfig {
   knowledgeDir: string;
 }
 
-export function resolveStorageConfig(forceLocal = false): StorageConfig {
+export function resolveStorageConfig(
+  forceLocalOrOptions: boolean | { forceLocal?: boolean; dataDir?: string } = false
+): StorageConfig {
+  const options = typeof forceLocalOrOptions === 'boolean' ? { forceLocal: forceLocalOrOptions } : forceLocalOrOptions;
+  if (options.dataDir) {
+    const resolved = path.resolve(options.dataDir);
+    return {
+      mode: 'local',
+      dataDir: resolved,
+      knowledgeDir: path.join(resolved, 'knowledge'),
+    };
+  }
   const cwd = process.cwd();
   const localAmneshiaDir = path.join(cwd, '.amneshia');
 
-  // If explicitly requested or if local .amneshia exists in cwd
-  if (forceLocal || fs.existsSync(localAmneshiaDir)) {
+  // If explicitly requested or if local .amneshia exists as a directory in cwd
+  if (options.forceLocal || (fs.existsSync(localAmneshiaDir) && fs.statSync(localAmneshiaDir).isDirectory())) {
     return {
       mode: 'local',
       dataDir: localAmneshiaDir,
@@ -101,9 +112,11 @@ export class DualWriteSync {
 
   syncAll(): number {
     const snapshot = this.database.readGraph();
+    const mediaList = this.database.getAllMediaAssets();
+    const mediaByEntity = new Map(mediaList.map((m) => [m.entityId, m]));
     let count = 0;
     for (const entity of snapshot.entities) {
-      const media = this.database.getMediaByEntity(entity.id);
+      const media = mediaByEntity.get(entity.id) ?? null;
       saveEntityMarkdown(this.knowledgeDir, entity, entity.observations, entity.relations, media);
       count++;
     }

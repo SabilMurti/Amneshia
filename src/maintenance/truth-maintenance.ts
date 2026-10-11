@@ -14,6 +14,9 @@ export function cascadeInvalidate(
   const result = db.cascadeInvalidate(observationId);
   const affected: Observation[] = [];
 
+  const rootObs = db.getObservationById(observationId);
+  if (rootObs) affected.push(rootObs);
+
   for (const staleId of result.staleIds) {
     const obs = db.getObservationById(staleId);
     if (obs) affected.push(obs);

@@ -11,13 +11,13 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
     'search_memory',
     'Search the memory graph using SQLite FTS5 with BM25 ranking. Use this when you know part of a name, fact, or observation text and want the most relevant entities and observations.',
     {
-      query: z.string().min(1).describe('Search text to match against entity names, types, and observation content'),
+      query: z.string().trim().min(1).describe('Search text to match against entity names, types, and observation content'),
       limit: z.number().int().positive().max(100).optional().describe('Maximum number of ranked results to return'),
       domain: z.string().optional().describe('Optional domain filter such as personal or project:<name>'),
     },
     async ({ query, limit, domain }) => {
       try {
-        const result = graph.searchMemory(query, limit ?? 20, domain);
+        const result = graph.searchMemory(query.trim(), limit ?? 20, domain);
         return textContent({ ok: true, ...result });
       } catch (error) {
         return {
@@ -32,13 +32,13 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
     'search_relevant_memory',
     'Search the memory graph with stop words (e.g. yang, di, ke, the, of, in) filtered out to optimize token efficiency and retrieval precision. Use this when querying user profiles or project preferences using a natural language prompt.',
     {
-      query: z.string().min(1).describe('Search text prompt to filter and match against memory'),
+      query: z.string().trim().min(1).describe('Search text prompt to filter and match against memory'),
       limit: z.number().int().positive().max(100).optional().describe('Maximum number of ranked results to return'),
       domain: z.string().optional().describe('Optional domain filter such as personal or project:<name>'),
     },
     async ({ query, limit, domain }) => {
       try {
-        const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
+        const result = graph.searchRelevantMemory(query.trim(), limit ?? 20, domain);
         return textContent({ ok: true, ...result });
       } catch (error) {
         return {
@@ -73,11 +73,11 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
     'open_nodes',
     'Open a set of entity names and return each matching node with its full observations and relations. Use this when you already know the entities you want to inspect.',
     {
-      names: z.array(z.string().min(1)).min(1).describe('Entity names to open'),
+      names: z.array(z.string().trim().min(1)).min(1).describe('Entity names to open'),
     },
     async ({ names }) => {
       try {
-        const snapshot = graph.openNodes(names);
+        const snapshot = graph.openNodes(names.map((n) => n.trim()));
         return textContent({ ok: true, snapshot });
       } catch (error) {
         return {
@@ -92,14 +92,14 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
     'get_context',
     'GraphRAG multi-hop context engine. Provide a query to find seeds via FTS5 BM25, then traverse the graph outwards (BFS) by N levels to collect full relational context into a compressed markdown string. Fast and eliminates round-trips.',
     {
-      query: z.string().min(1).describe('Search query for starting seeds'),
+      query: z.string().trim().min(1).describe('Search query for starting seeds'),
       depth: z.number().int().min(0).max(5).optional().describe('Graph traversal depth (0 = seeds only, 1 = immediate neighbors)'),
       limit: z.number().int().positive().max(50).optional().describe('Maximum number of starting seed entities to match'),
       domain: z.string().optional().describe('Optional domain filter such as personal or project:<name>'),
     },
     async ({ query, depth, limit, domain }) => {
       try {
-        const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
+        const context = graph.getContext(query.trim(), depth ?? 1, limit ?? 5, domain);
         return textContent(context);
       } catch (error) {
         return {

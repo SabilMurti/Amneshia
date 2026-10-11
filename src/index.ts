@@ -18,12 +18,21 @@ import { LocalOnnxEmbedder } from './search/index.js';
 import { checkForUpdate, performUpdate } from './updater/index.js';
 import type { AuthorityTier } from './types.js';
 
+export const APP_VERSION = '3.3.0';
+
 const program = new Command();
+
+function getConfigForCmd(cmdOpts?: Record<string, any>, cmd?: any) {
+  const commandObj = cmd instanceof Command ? cmd : undefined;
+  const globalOpts = commandObj?.optsWithGlobals ? commandObj.optsWithGlobals() : program.opts();
+  const isLocal = Boolean(cmdOpts?.local || globalOpts?.local || fs.existsSync(path.join(process.cwd(), '.amneshia')));
+  return resolveStorageConfig({ forceLocal: isLocal, dataDir: globalOpts?.dataDir });
+}
 
 program
   .name('amneshia')
   .description('🧠 Amneshia v3 — Git-native knowledge graph for AI agents with truth maintenance')
-  .version('3.2.2')
+  .version(APP_VERSION)
   .option('--data-dir <path>', 'Custom data directory')
   .option('-l, --local', 'Use local repository directory (.amneshia) instead of global ~/.amneshia')
   .option('--tool-profile <profile>', 'MCP tool profile: "core" (4 tools) or "full" (all tools)', 'core')
@@ -80,9 +89,8 @@ program
   .command('reindex')
   .description('Rebuild SQLite FTS5 cache index from markdown files')
   .option('-l, --local', 'Reindex local repository in current working directory')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     console.log(`[Amneshia] Reindexing from: ${config.knowledgeDir}`);
     const db = new DatabaseLayer(config.dataDir);
     const sync = new DualWriteSync(config.knowledgeDir, db);
@@ -99,9 +107,8 @@ program
   .command('sync')
   .description('Export all SQLite entities and observations to Markdown-as-Truth files')
   .option('-l, --local', 'Sync local repository')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
     const db = new DatabaseLayer(config.dataDir);
     const sync = new DualWriteSync(config.knowledgeDir, db);
@@ -115,9 +122,8 @@ program
   .command('gc')
   .description('Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs')
   .option('-l, --local', 'Run GC on local repository')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     const expired = db.cleanupExpired();
     const decayed = db.gc();
@@ -134,9 +140,8 @@ program
   .command('stats')
   .description('Display knowledge graph statistics and health breakdown')
   .option('-l, --local', 'Display stats for local repository')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     const stats = db.getStats();
 
@@ -195,9 +200,8 @@ program
   .option('-t, --tier <tier>', 'Filter by minimum authority tier (agent, user, system)')
   .option('-q, --query <query>', 'Filter observations using FTS5 search query')
   .option('-l, --local', 'Export from local project repository (.amneshia) instead of global')
-  .action(async (output, cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (output, cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
 
     const validFormats: ExportFormat[] = ['sqlite', 'markdown', 'json'];
@@ -228,8 +232,9 @@ program
       console.log(`  - Entities:     ${result.entitiesCount}`);
       console.log(`  - Observations: ${result.observationsCount}`);
       console.log(`  - Relations:    ${result.relationsCount}`);
-    } catch (err: any) {
-      console.error(`[Amneshia] Export failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Export failed: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -286,9 +291,8 @@ program
   .description('Compute local ONNX vector embeddings for all observations for hybrid semantic search')
   .option('-l, --local', 'Use local repository (.amneshia)')
   .option('-f, --force', 'Force re-embedding of all observations')
-  .action(async (cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     const embedder = new LocalOnnxEmbedder();
 
@@ -332,8 +336,9 @@ program
 
       const duration = ((Date.now() - start) / 1000).toFixed(2);
       console.log(`\n\n✅ Embedding complete: ${completed} observations embedded in ${duration}s.`);
-    } catch (err: any) {
-      console.error(`\n[Amneshia] Embedding failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`\n[Amneshia] Embedding failed: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -347,9 +352,8 @@ program
   .option('-d, --domain <domain>', 'Filter by domain')
   .option('-l, --local', 'Use local repository')
   .option('-n, --limit <number>', 'Result limit', (val) => parseInt(val, 10), 10)
-  .action(async (query, cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (query, cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
 
     try {
@@ -371,8 +375,9 @@ program
         }
       }
       console.log('');
-    } catch (err: any) {
-      console.error(`[Amneshia] Search error: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Search error: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -388,9 +393,8 @@ mediaCmd
   .command('list')
   .description('List all registered media assets across the knowledge graph')
   .option('-l, --local', 'Use local repository (.amneshia)')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     const assets = db.getAllMediaAssets();
 
@@ -421,9 +425,8 @@ mediaCmd
   .option('-t, --tier <tier>', 'Authority tier (invariant, architectural, contextual, ephemeral)', 'contextual')
   .option('-r, --relation <relations...>', 'Relationship links in format "relationType:targetEntity"')
   .option('-l, --local', 'Use local repository (.amneshia)')
-  .action(async (filePath, cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (filePath, cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     const sync = new DualWriteSync(config.knowledgeDir, db);
     const graph = new KnowledgeGraph(db, sync);
@@ -467,8 +470,9 @@ mediaCmd
       console.log(`  - Deduplicated: ${result.deduplicated ? 'Yes (reused existing blob)' : 'No (new blob stored)'}`);
       console.log(`  - Observations: ${result.observationIds.length}`);
       console.log(`  - Relations:    ${result.relations.length}`);
-    } catch (err: any) {
-      console.error(`[Amneshia] Media ingestion failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Media ingestion failed: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -479,9 +483,8 @@ mediaCmd
   .command('prune')
   .description('Purge unreferenced orphan media blobs from CAS storage')
   .option('-l, --local', 'Use local repository (.amneshia)')
-  .action((cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action((cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
 
     console.log(`[Amneshia] Scanning CAS storage for orphan blobs in ${config.knowledgeDir}...`);
@@ -502,9 +505,8 @@ cloudCmd
   .description('Initialize or link a Git remote repository for cloud knowledge sync')
   .option('-b, --branch <branch>', 'Target git branch', 'main')
   .option('-l, --local', 'Use local repository (.amneshia) instead of global')
-  .action(async (remoteUrl, cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (remoteUrl, cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     try {
       console.log(`[Amneshia] Setting up Git-native cloud sync at: ${config.knowledgeDir}`);
       const res = await setupGitRemote(config.knowledgeDir, remoteUrl, cmdOpts.branch);
@@ -513,8 +515,9 @@ cloudCmd
       console.log(`  - Remote URL:    ${res.remoteUrl}`);
       console.log(`  - Branch:        ${res.branch}`);
       console.log(`\nNext steps: Run "amneshia cloud push" or "amneshia cloud sync" to sync knowledge.`);
-    } catch (err: any) {
-      console.error(`[Amneshia] Cloud setup failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Cloud setup failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -523,9 +526,8 @@ cloudCmd
   .command('status')
   .description('Check cloud sync status, branch info, and uncommitted knowledge changes')
   .option('-l, --local', 'Use local repository')
-  .action(async (cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     try {
       const status = await getCloudStatus(config.knowledgeDir);
       console.log(`\n🧠 Amneshia Cloud Status (${config.mode.toUpperCase()} mode):`);
@@ -543,8 +545,9 @@ cloudCmd
         }
       }
       console.log('');
-    } catch (err: any) {
-      console.error(`[Amneshia] Cloud status check failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Cloud status check failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -554,9 +557,8 @@ cloudCmd
   .description('Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index')
   .option('-b, --branch <branch>', 'Branch to pull from', 'main')
   .option('-l, --local', 'Use local repository')
-  .action(async (cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     try {
       console.log(`[Amneshia] Pulling from cloud remote into ${config.knowledgeDir}...`);
@@ -565,8 +567,9 @@ cloudCmd
       console.log(`  - Entities Reindexed:     ${result.reindex.entities}`);
       console.log(`  - Observations Reindexed: ${result.reindex.observations}`);
       console.log(`  - Relations Reindexed:    ${result.reindex.relations}`);
-    } catch (err: any) {
-      console.error(`[Amneshia] Cloud pull failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Cloud pull failed: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -579,9 +582,8 @@ cloudCmd
   .option('-m, --message <message>', 'Custom commit message')
   .option('-b, --branch <branch>', 'Branch to push to', 'main')
   .option('-l, --local', 'Use local repository')
-  .action(async (cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     try {
       console.log(`[Amneshia] Pushing knowledge to cloud remote...`);
       const result = await cloudPush(config.knowledgeDir, cmdOpts.message, cmdOpts.branch);
@@ -590,8 +592,9 @@ cloudCmd
       if (result.commitHash) {
         console.log(`  - Commit:  ${result.commitHash}`);
       }
-    } catch (err: any) {
-      console.error(`[Amneshia] Cloud push failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Cloud push failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -601,9 +604,8 @@ cloudCmd
   .description('Atomic bidirectional sync: pull remote changes, reindex, and push local changes')
   .option('-b, --branch <branch>', 'Target git branch', 'main')
   .option('-l, --local', 'Use local repository')
-  .action(async (cmdOpts) => {
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+  .action(async (cmdOpts, cmd) => {
+    const config = getConfigForCmd(cmdOpts, cmd);
     const db = new DatabaseLayer(config.dataDir);
     try {
       console.log(`[Amneshia] Running bidirectional cloud sync on ${config.knowledgeDir}...`);
@@ -615,8 +617,9 @@ cloudCmd
       if (result.push.commitHash) {
         console.log(`  - Commit Hash:            ${result.push.commitHash}`);
       }
-    } catch (err: any) {
-      console.error(`[Amneshia] Cloud sync failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Cloud sync failed: ${msg}`);
       db.close();
       process.exit(1);
     }
@@ -630,8 +633,9 @@ cloudCmd
     try {
       mergeMarkdownFiles(base, ours, theirs, targetPath);
       process.exit(0);
-    } catch (err: any) {
-      console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -641,10 +645,9 @@ cloudCmd
   .description('Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)')
   .option('-g, --global', 'Configure globally across all Git repositories (~/.gitconfig)')
   .option('-l, --local', 'Use local repository')
-  .action(async (cmdOpts) => {
+  .action(async (cmdOpts, cmd) => {
     const isGlobal = Boolean(cmdOpts.global);
-    const isLocal = cmdOpts.local || program.opts().local || fs.existsSync(path.join(process.cwd(), '.amneshia'));
-    const config = resolveStorageConfig(isLocal);
+    const config = getConfigForCmd(cmdOpts, cmd);
     try {
       const success = await setupMergeDriver(config.knowledgeDir, { isGlobal });
       if (success) {
@@ -658,8 +661,9 @@ cloudCmd
         console.error(`[Amneshia] Knowledge directory not initialized with Git. Run "amneshia cloud setup <url>" first.`);
         process.exit(1);
       }
-    } catch (err: any) {
-      console.error(`[Amneshia] Setup merge driver failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Amneshia] Setup merge driver failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -671,7 +675,7 @@ program
   .option('-c, --check', 'Check for available updates without installing')
   .option('-f, --force', 'Force re-installation even if already on the latest version')
   .action(async (cmdOpts) => {
-    const currentVersion = '3.2.2';
+    const currentVersion = APP_VERSION;
     try {
       if (cmdOpts.check) {
         console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);
@@ -695,8 +699,9 @@ program
       });
 
       console.log(`\n${result.message}`);
-    } catch (err: any) {
-      console.error(`\n❌ Update failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`\n❌ Update failed: ${msg}`);
       process.exit(1);
     }
   });
@@ -733,7 +738,7 @@ async function runDefault(): Promise<void> {
       .slice(2)
       .filter((arg) => arg !== '--daemon' && arg !== '-d' && arg !== '--background' && arg !== '-b');
 
-    const child = spawn(process.argv[0], [process.argv[1], ...args], {
+    const child = spawn(process.argv[0], [process.argv[1], ...args, '--daemon'], {
       detached: true,
       stdio: ['ignore', out, err],
     });

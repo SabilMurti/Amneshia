@@ -1,5 +1,8 @@
 name: Amneshia Multi-Channel Release
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
@@ -8,7 +11,7 @@ on:
     inputs:
       tag_name:
         description: 'Release Tag (e.g. v3.0.0)'
-        required: false
+        required: true
         type: string
 
 concurrency:
@@ -19,6 +22,9 @@ jobs:
   validate-and-build:
     name: Test & Build Release Bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -72,6 +78,7 @@ jobs:
     name: Publish to GitHub Packages
     needs: validate-and-build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -92,7 +99,13 @@ jobs:
           scope: '@sabilmurti'
 
       - name: Publish to GitHub Packages
-        run: npm publish
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@sabilmurti/amneshia@$CURRENT_VERSION" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "Version $CURRENT_VERSION already published to GitHub Packages, skipping."
+          else
+            npm publish
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -100,6 +113,7 @@ jobs:
     name: Publish to JSR (jsr.io)
     needs: validate-and-build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # Required for JSR OIDC authentication
@@ -128,6 +142,7 @@ jobs:
     name: Publish GitHub Release & Assets
     needs: validate-and-build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -140,9 +155,9 @@ jobs:
           name: release-dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c062e49cdd09d17208d1f2e8251e604f76239169 # v2.0.8
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          tag_name: ${{ github.event.inputs.tag_name || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
           files: |
             *.tgz
             SHA256SUMS

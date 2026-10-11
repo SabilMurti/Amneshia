@@ -175,7 +175,7 @@ function toEntity(row: EntityRow): Entity {
     name: row.name,
     entityType: row.entity_type,
     domain: row.domain,
-    visibility: row.visibility,
+    visibility: (row.visibility as Entity['visibility']) || 'public',
     allowedAgents: toAllowedAgents(row.allowed_agents),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -188,7 +188,7 @@ function toObservation(row: ObservationRow): Observation {
     entityId: row.entity_id,
     content: row.content,
     source: row.source,
-    importance: row.importance,
+    importance: (row.importance as Observation['importance']) || 'normal',
     confidence: row.confidence,
     authorityTier: (row.authority_tier as AuthorityTier) || 'contextual',
     derivedFrom: toDerivedFrom(row.derived_from),
@@ -365,6 +365,9 @@ export class DatabaseLayer {
     getEmbedding: Database.Statement;
     getAllEmbeddings: Database.Statement;
     getUnembeddedObservations: Database.Statement;
+    setObservationSupersedes: Database.Statement;
+    getDependentObservations: Database.Statement;
+    getActiveDependentObservations: Database.Statement;
   };
 
   constructor(dataDir?: string) {
@@ -381,8 +384,18 @@ export class DatabaseLayer {
   }
 
   private initializeSchema(): void {
-    runMigrations(this.db);
+    const tableCheck = this.db
+      .prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'")
+      .get() as { count: number } | undefined;
+    const hasObservations = Boolean(tableCheck && tableCheck.count > 0);
+
+    if (hasObservations) {
+      runMigrations(this.db);
+    }
     this.db.exec(SCHEMA_SQL);
+    if (!hasObservations) {
+      this.db.pragma('user_version = 4');
+    }
     this.ensureDefaultExportTargets();
   }
 
@@ -440,6 +453,9 @@ export class DatabaseLayer {
         'UPDATE observations SET content = ?, authority_tier = ?, status = ?, updated_at = ? WHERE id = ?'
       ),
       setObservationStatus: this.db.prepare('UPDATE observations SET status = ?, updated_at = ? WHERE id = ?'),
+      setObservationSupersedes: this.db.prepare(
+        "UPDATE observations SET supersedes = ?, status = 'superseded', updated_at = ? WHERE id = ?"
+      ),
       deleteObservation: this.db.prepare('DELETE FROM observations WHERE id = ?'),
       createRelation: this.db.prepare(
         'INSERT OR IGNORE INTO relations (id, from_entity, to_entity, relation_type, created_at) VALUES (?, ?, ?, ?, ?)'
@@ -472,6 +488,12 @@ export class DatabaseLayer {
       ),
       insertFtsEntity: this.db.prepare(
         'INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id) VALUES (?, ?, ?, ?, ?)'
+      ),
+      getDependentObservations: this.db.prepare(
+        'SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ?'
+      ),
+      getActiveDependentObservations: this.db.prepare(
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
       ),
       searchFts: this.db.prepare(
         'SELECT entity_id, observation_id, observation_content, rank FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?'
@@ -596,12 +618,13 @@ export class DatabaseLayer {
 
   createEntity(input: CreateEntityInput): Entity {
     const now = nowIso();
+    const visibility: Entity['visibility'] = input.visibility ? (input.visibility.trim() as Entity['visibility']) : 'public';
     const entity: Entity = {
       id: uuid(),
       name: input.name.trim(),
       entityType: input.entityType.trim(),
       domain: (input.domain ?? 'personal').trim(),
-      visibility: (input.visibility ?? 'public').trim(),
+      visibility,
       allowedAgents: input.allowedAgents ?? [],
       createdAt: now,
       updatedAt: now,
@@ -618,7 +641,6 @@ export class DatabaseLayer {
       entity.updatedAt
     );
 
-    this.statements.insertFtsEntity.run(entity.name, entity.entityType, `${entity.name} ${entity.entityType}`, null, entity.id);
     return entity;
   }
 
@@ -641,7 +663,7 @@ export class DatabaseLayer {
     entityId: string,
     content: string,
     source?: string,
-    importance: string = 'normal',
+    importance: Observation['importance'] = 'normal',
     confidence: number = 1,
     expiresAt?: string,
     authorityTier: AuthorityTier = 'contextual',
@@ -741,9 +763,7 @@ export class DatabaseLayer {
     const now = nowIso();
     this.db.transaction(() => {
       this.statements.observationHistory.run(uuid(), id, existing.content, existing.content, changedBy ?? null, now);
-      this.db
-        .prepare("UPDATE observations SET supersedes = ?, status = 'superseded', updated_at = ? WHERE id = ?")
-        .run(supersedingId, now, id);
+      this.statements.setObservationSupersedes.run(supersedingId, now, id);
     })();
   }
 
@@ -836,11 +856,8 @@ export class DatabaseLayer {
   // --- Truth Maintenance & Provenance Helpers ---
 
   getDependentObservations(observationId: string, activeOnly = false): Observation[] {
-    // Find observations where derived_from JSON array contains observationId
-    const query = activeOnly
-      ? "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
-      : "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ?";
-    const rows = this.db.prepare(query).all(`%${observationId}%`) as ObservationRow[];
+    const stmt = activeOnly ? this.statements.getActiveDependentObservations : this.statements.getDependentObservations;
+    const rows = stmt.all(`%${observationId}%`) as ObservationRow[];
 
     return rows.map(toObservation).filter((obs) => obs.derivedFrom.includes(observationId));
   }
@@ -954,11 +971,13 @@ export class DatabaseLayer {
         const entityRow = this.getEntityRowById(row.entity_id);
         if (!entityRow) continue;
         const entity = toEntity(entityRow);
-        const observations = row.observation_id
-          ? this.getObservationsByEntity(row.entity_id)
-              .filter((obs) => obs.id === row.observation_id)
-              .filter((obs) => includeInactive || (obs.status !== 'invalidated' && obs.status !== 'decayed'))
-          : [];
+        let observations: Observation[] = [];
+        if (row.observation_id) {
+          const obs = this.getObservationById(row.observation_id);
+          if (obs && (includeInactive || (obs.status !== 'invalidated' && obs.status !== 'decayed'))) {
+            observations = [obs];
+          }
+        }
 
         // If observation was filtered out due to status, skip
         if (row.observation_id && observations.length === 0) {
@@ -1068,11 +1087,11 @@ export class DatabaseLayer {
       const entityRow = this.getEntityRowById(item.row.entity_id);
       if (!entityRow) continue;
       const entity = toEntity(entityRow);
-      const obs = this.getObservationsByEntity(entity.id).filter((o) => o.id === item.row.observation_id);
+      const obs = this.getObservationById(item.row.observation_id);
 
       results.push({
         entity,
-        observations: obs,
+        observations: obs ? [obs] : [],
         matchedContent: item.row.content,
         similarity: item.similarity,
       });
@@ -1134,15 +1153,54 @@ export class DatabaseLayer {
     }
     const payload = JSON.stringify(names);
     const entityRows = this.statements.openNodesEntities.all(payload) as EntityRow[];
-    const entityMap = new Map<string, Entity>();
-    for (const row of entityRows) {
-      entityMap.set(row.id, toEntity(row));
+    const obsRows = this.statements.openNodesObservations.all(payload) as ObservationRow[];
+    const relRows = this.statements.openNodesRelations.all(payload, payload) as (RelationRow & {
+      from_entity_name: string;
+      to_entity_name: string;
+    })[];
+
+    const obsMap = new Map<string, Observation[]>();
+    for (const r of obsRows) {
+      const list = obsMap.get(r.entity_id);
+      const obs = toObservation(r);
+      if (list) {
+        list.push(obs);
+      } else {
+        obsMap.set(r.entity_id, [obs]);
+      }
     }
-    const entities = [...entityMap.values()].map((entity) => ({
-      ...entity,
-      observations: this.getObservationsByEntity(entity.id),
-      relations: this.getRelationsByEntity(entity.id),
-    }));
+
+    const relMap = new Map<string, RelationWithNames[]>();
+    for (const r of relRows) {
+      const rel: RelationWithNames = {
+        id: r.id,
+        fromEntity: r.from_entity,
+        fromEntityName: r.from_entity_name,
+        toEntity: r.to_entity,
+        toEntityName: r.to_entity_name,
+        relationType: r.relation_type,
+        createdAt: r.created_at,
+      };
+      const fromList = relMap.get(r.from_entity);
+      if (fromList) fromList.push(rel);
+      else relMap.set(r.from_entity, [rel]);
+
+      if (r.from_entity !== r.to_entity) {
+        const toList = relMap.get(r.to_entity);
+        if (toList) toList.push(rel);
+        else relMap.set(r.to_entity, [rel]);
+      }
+    }
+
+    const entities = entityRows.map((row) => {
+      const entity = toEntity(row);
+      return {
+        ...entity,
+        observations: obsMap.get(entity.id) ?? [],
+        relations: relMap.get(entity.id) ?? [],
+      };
+    });
+
     return { entities };
   }
 

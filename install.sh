@@ -31,9 +31,9 @@ if ! command -v node >/dev/null 2>&1; then
     exit 1
 fi
 
-NODE_MAJOR=$(node -v | cut -d'.' -f1 | sed 's/v//')
-if [ "$NODE_MAJOR" -lt 18 ]; then
-    echo -e "${RED}Error: Node.js version >= 18 is required. Current: $(node -v)${NC}"
+NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo "0")
+if ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || [ "$NODE_MAJOR" -lt 18 ]; then
+    echo -e "${RED}Error: Node.js version >= 18 is required. Current: $(node -v 2>/dev/null || echo 'unknown')${NC}"
     exit 1
 fi
 
@@ -70,7 +70,7 @@ elif [ "$PKG_MANAGER" = "pnpm" ]; then
         INSTALLED=1
     fi
 elif [ "$PKG_MANAGER" = "bun" ]; then
-    if bun install -g "$TARBALL_URL" >/dev/null 2>&1; then
+    if bun add -g "$TARBALL_URL" >/dev/null 2>&1; then
         INSTALLED=1
     fi
 fi
@@ -78,12 +78,22 @@ fi
 # Fallback: Scoped package install
 if [ "$INSTALLED" -eq 0 ]; then
     echo -e "${YELLOW}Notice: Direct tarball download not yet available or failed. Attempting registry install...${NC}"
+    FALLBACK_FAILED=0
     if [ "$PKG_MANAGER" = "npm" ]; then
-        npm install -g @sabilmurti/amneshia
+        npm install -g @sabilmurti/amneshia || FALLBACK_FAILED=1
     elif [ "$PKG_MANAGER" = "pnpm" ]; then
-        pnpm add -g @sabilmurti/amneshia
+        pnpm add -g @sabilmurti/amneshia || FALLBACK_FAILED=1
     elif [ "$PKG_MANAGER" = "bun" ]; then
-        bun install -g @sabilmurti/amneshia
+        bun add -g @sabilmurti/amneshia || FALLBACK_FAILED=1
+    fi
+
+    if [ "$FALLBACK_FAILED" -ne 0 ]; then
+        echo -e "\n${RED}Error: Global package installation failed.${NC}"
+        echo -e "${YELLOW}Troubleshooting:${NC}"
+        echo -e "  - Permission error (EACCES): Run with a Node version manager (fnm/nvm) or configure npm prefix:"
+        echo -e "      mkdir -p ~/.npm-global && npm config set prefix '~/.npm-global'"
+        echo -e "  - Or run: sudo npm install -g @sabilmurti/amneshia"
+        exit 1
     fi
 fi
 

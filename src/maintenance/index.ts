@@ -1,9 +1,7 @@
 import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database/index.js';
-import { findDuplicates, type DuplicatePair } from './dedup.js';
+import { findDuplicates } from './dedup.js';
 import { applyDecay } from './decay.js';
-import { cascadeInvalidate } from './truth-maintenance.js';
-import { checkContradiction, detectRuleBasedContradiction } from './contradiction.js';
 
 export * from './dedup.js';
 export * from './decay.js';
@@ -15,6 +13,7 @@ export interface MaintenanceResult {
   decayedCount: number;
   supersededCount: number;
   details?: {
+    /** List of purged observation IDs, or empty array if only batch count is tracked */
     purged: string[];
     decayed: string[];
     superseded: Array<{ oldId: string; newId: string; reason: string; oldContent?: string; newContent?: string }>;

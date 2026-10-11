@@ -148,13 +148,54 @@ export async function storeMediaAsset(
   // Ensure blob directory exists
   fs.mkdirSync(destDir, { recursive: true });
 
+  // Byte-level CAS deduplication: check if any blob with this SHA-256 already exists in shard
+  const tier1 = sha256.slice(0, 2);
+  const tier2 = sha256.slice(2, 4);
+  let existingBlobName: string | null = null;
+  if (fs.existsSync(destDir)) {
+    const entries = fs.readdirSync(destDir);
+    for (const entry of entries) {
+      if (entry.startsWith(sha256) && (entry.length === 64 || entry[64] === '.')) {
+        existingBlobName = entry;
+        break;
+      }
+    }
+  }
+
+  if (existingBlobName) {
+    const existingRelativePath = path.posix.join('media', 'blobs', tier1, tier2, existingBlobName);
+    const existingAbsolutePath = path.resolve(storageRoot, existingRelativePath);
+    return {
+      sha256,
+      mimeType,
+      fileName,
+      fileSize: stat.size,
+      relativePath: existingRelativePath,
+      absolutePath: existingAbsolutePath,
+      deduplicated: true,
+    };
+  }
+
   let deduplicated = false;
   if (fs.existsSync(absoluteDestPath)) {
     deduplicated = true;
   } else {
-    const tempPath = path.join(destDir, `.tmp.${path.basename(absoluteDestPath)}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`);
-    fs.copyFileSync(resolvedSource, tempPath);
-    fs.renameSync(tempPath, absoluteDestPath);
+    const tempPath = path.join(destDir, `.tmp.${path.basename(absoluteDestPath)}.${crypto.randomUUID()}`);
+    try {
+      fs.copyFileSync(resolvedSource, tempPath);
+      fs.renameSync(tempPath, absoluteDestPath);
+    } catch (err) {
+      if (fs.existsSync(tempPath)) {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {}
+      }
+      if (fs.existsSync(absoluteDestPath)) {
+        deduplicated = true;
+      } else {
+        throw err;
+      }
+    }
   }
 
   return {
@@ -170,8 +211,13 @@ export async function storeMediaAsset(
 
 /**
  * Scans the CAS blobs directory and identifies orphan files not present in the active hashes set.
+ * Supports an optional grace period (in milliseconds) to prevent pruning in-flight ingestion blobs.
  */
-export function findOrphanMediaBlobs(storageRoot: string, activeHashes: Set<string>): string[] {
+export function findOrphanMediaBlobs(
+  storageRoot: string,
+  activeHashes: Set<string>,
+  gracePeriodMs: number = 0
+): string[] {
   const blobsDir = path.join(storageRoot, 'media', 'blobs');
   if (!fs.existsSync(blobsDir)) return [];
 
@@ -189,6 +235,16 @@ export function findOrphanMediaBlobs(storageRoot: string, activeHashes: Set<stri
         const dotIdx = base.indexOf('.');
         const fileHash = dotIdx > 0 ? base.slice(0, dotIdx) : base;
         if (!activeHashes.has(fileHash)) {
+          if (gracePeriodMs > 0) {
+            try {
+              const fileStat = fs.statSync(fullPath);
+              if (Date.now() - fileStat.mtimeMs <= gracePeriodMs) {
+                continue;
+              }
+            } catch {
+              continue;
+            }
+          }
           orphans.push(fullPath);
         }
       }
@@ -205,9 +261,10 @@ export function findOrphanMediaBlobs(storageRoot: string, activeHashes: Set<stri
  */
 export function pruneOrphanMediaBlobs(
   storageRoot: string,
-  activeHashes: Set<string>
+  activeHashes: Set<string>,
+  gracePeriodMs: number = 0
 ): { prunedCount: number; reclaimedBytes: number } {
-  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes);
+  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes, gracePeriodMs);
   let reclaimedBytes = 0;
   let prunedCount = 0;
 

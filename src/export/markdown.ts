@@ -17,8 +17,9 @@ function relationSummary(entityName: string, relations: RelationWithNames[]): st
   if (relations.length === 0) return '';
   return relations
     .map((relation) => {
-      const other = relation.fromEntityName === entityName ? relation.toEntityName : relation.fromEntityName;
-      return `${relation.relationType} → ${other}`;
+      const isOutgoing = relation.fromEntityName === entityName;
+      const other = isOutgoing ? relation.toEntityName : relation.fromEntityName;
+      return isOutgoing ? `${relation.relationType} → ${other}` : `${relation.relationType} ← ${other}`;
     })
     .join(', ');
 }
@@ -42,7 +43,11 @@ function renderMarkdown(snapshot: GraphSnapshot): string {
     for (const entity of entities) {
       lines.push(`### ${entity.name}`);
       const activeObs = entity.observations.filter(
-        (o) => o.status === 'active' && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+        (o) =>
+          o.status === 'active' &&
+          (o.expiresAt === null ||
+            (!Number.isNaN(new Date(o.expiresAt).getTime()) &&
+              new Date(o.expiresAt).getTime() > Date.now()))
       );
       if (activeObs.length === 0) {
         lines.push('- No observations yet');
@@ -81,7 +86,9 @@ export function exportToMarkdown(graph: KnowledgeGraph, forceAll = false): Array
     try {
       const outputPath = resolveTargetPath(target.path);
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fs.writeFileSync(outputPath, markdown, 'utf8');
+      const tempPath = `${outputPath}.tmp.${Date.now()}`;
+      fs.writeFileSync(tempPath, markdown, 'utf8');
+      fs.renameSync(tempPath, outputPath);
       writes.push({ target: target.name, path: outputPath });
     } catch (error) {
       console.warn(`Export target "${target.name}" failed:`, error instanceof Error ? error.message : error);

@@ -42,6 +42,25 @@ function normalizeContent(content: string): string {
 }
 
 /**
+ * Deterministic equality check for parsed observations.
+ */
+function areObservationsEqual(a: ParsedObservation, b: ParsedObservation): boolean {
+  if (a.id !== b.id) return false;
+  if (normalizeContent(a.content) !== normalizeContent(b.content)) return false;
+  if (a.authorityTier !== b.authorityTier) return false;
+  if (a.confidence !== b.confidence) return false;
+  if (a.status !== b.status) return false;
+  if ((a.supersedes || null) !== (b.supersedes || null)) return false;
+  const aDerived = (a.derivedFrom ?? []).slice().sort();
+  const bDerived = (b.derivedFrom ?? []).slice().sort();
+  if (aDerived.length !== bDerived.length) return false;
+  for (let i = 0; i < aDerived.length; i++) {
+    if (aDerived[i] !== bDerived[i]) return false;
+  }
+  return true;
+}
+
+/**
  * Extract relations with direction preservation ('->' vs '<-').
  */
 export function extractDirectionalRelations(markdown: string): DirectionalRelation[] {
@@ -67,7 +86,7 @@ export function extractDirectionalRelations(markdown: string): DirectionalRelati
  * Serialize a parsed markdown entity back to valid Amneshia Markdown format.
  */
 export function serializeParsedEntity(entity: MergedMarkdownEntity): string {
-  const frontmatter = [
+  const frontmatterLines = [
     '---',
     `id: ${JSON.stringify(entity.id || '')}`,
     `name: ${JSON.stringify(entity.name || '')}`,
@@ -77,8 +96,19 @@ export function serializeParsedEntity(entity: MergedMarkdownEntity): string {
     `allowed_agents: ${JSON.stringify(entity.allowedAgents ?? [])}`,
     `created: ${JSON.stringify(entity.createdAt || new Date().toISOString())}`,
     `updated: ${JSON.stringify(entity.updatedAt || new Date().toISOString())}`,
-    '---',
-  ].join('\n');
+  ];
+
+  if (entity.media) {
+    frontmatterLines.push('media:');
+    frontmatterLines.push(`  sha256: ${JSON.stringify(entity.media.sha256)}`);
+    frontmatterLines.push(`  mime_type: ${JSON.stringify(entity.media.mimeType)}`);
+    frontmatterLines.push(`  file_name: ${JSON.stringify(entity.media.fileName)}`);
+    frontmatterLines.push(`  file_size: ${entity.media.fileSize}`);
+    frontmatterLines.push(`  relative_path: ${JSON.stringify(entity.media.relativePath)}`);
+  }
+
+  frontmatterLines.push('---');
+  const frontmatter = frontmatterLines.join('\n');
 
   const obsLines: string[] = [];
   for (const obs of entity.observations) {
@@ -111,6 +141,14 @@ export function serializeParsedEntity(entity: MergedMarkdownEntity): string {
   }
 
   const sections = [frontmatter];
+
+  if (entity.media) {
+    if (entity.media.mimeType.startsWith('image/')) {
+      sections.push(`\n![${entity.media.fileName}](../${entity.media.relativePath})\n`);
+    } else {
+      sections.push(`\n[${entity.media.fileName}](../${entity.media.relativePath}) *(${entity.media.mimeType}, ${entity.media.fileSize} bytes)*\n`);
+    }
+  }
 
   sections.push('## Observations\n');
   if (obsLines.length > 0) {
@@ -265,7 +303,7 @@ export function mergeParsedEntities(
         // Existed in Base
         if (!tObs) {
           // Deleted in Theirs
-          const oursModified = JSON.stringify(oObs) !== JSON.stringify(bObs);
+          const oursModified = !areObservationsEqual(oObs, bObs);
           if (oursModified) {
             // Ours modified it, so preserve our modification instead of deleting
             candidateObservations.push(oObs);
@@ -273,8 +311,8 @@ export function mergeParsedEntities(
           // Else: unchanged in Ours and deleted in Theirs -> deleted (do not add)
         } else {
           // Exists in both Ours and Theirs
-          const oursChanged = JSON.stringify(oObs) !== JSON.stringify(bObs);
-          const theirsChanged = JSON.stringify(tObs) !== JSON.stringify(bObs);
+          const oursChanged = !areObservationsEqual(oObs, bObs);
+          const theirsChanged = !areObservationsEqual(tObs, bObs);
 
           if (!oursChanged && theirsChanged) {
             // Theirs changed, Ours didn't -> take Theirs
@@ -309,7 +347,7 @@ export function mergeParsedEntities(
         candidateObservations.push(tObs);
       } else {
         // Existed in Base, but not in Ours (deleted in Ours)
-        const theirsModified = JSON.stringify(tObs) !== JSON.stringify(bObs);
+        const theirsModified = !areObservationsEqual(tObs, bObs);
         if (theirsModified) {
           // Theirs modified while Ours deleted -> Keep Theirs modification
           candidateObservations.push(tObs);
@@ -378,6 +416,12 @@ export function mergeParsedEntities(
     processedRelKeys.add(key);
   }
 
+  const media = base
+    ? (theirs.media && (!base.media || theirs.media.sha256 !== base.media.sha256)
+        ? theirs.media
+        : ours.media || base.media)
+    : (ours.media || theirs.media);
+
   return {
     id,
     name,
@@ -389,6 +433,7 @@ export function mergeParsedEntities(
     updatedAt,
     observations: dedupedObservations,
     relations: mergedRelations,
+    media,
   };
 }
 

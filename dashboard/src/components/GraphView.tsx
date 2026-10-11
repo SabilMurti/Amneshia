@@ -232,31 +232,41 @@ export const GraphView: React.FC<GraphViewProps> = ({
   }, []);
 
   // Fetch graph slice
-  const fetchData = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      if (searchQuery) {
-        const results = await api.search(searchQuery);
-        const entities = results.map(r => ({
-          ...r.entity,
-          observations: r.observations,
-          relations: (r.relations || []) as any,
-        }));
-        setSnapshot({ entities });
-      } else {
-        const graphData = await api.getGraph(selectedDomain || undefined);
-        setSnapshot(graphData);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
+    let isCancelled = false;
+    const loadData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (searchQuery) {
+          const results = await api.search(searchQuery);
+          if (isCancelled) return;
+          const entities = results.map(r => ({
+            ...r.entity,
+            observations: r.observations,
+            relations: (r.relations || []) as any,
+          }));
+          setSnapshot({ entities });
+        } else {
+          const graphData = await api.getGraph(selectedDomain || undefined);
+          if (isCancelled) return;
+          setSnapshot(graphData);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadData();
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedDomain, searchQuery, refreshTrigger]);
 
   // Format node graph structure
@@ -372,7 +382,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     } catch {
       // safe fallback if layout is settling
     }
-  }, [chargeStrength, linkDistance]);
+  }, [chargeStrength, linkDistance, is3D]);
 
   // Initial camera auto-framing (zoomToFit) once nodes load
   useEffect(() => {
@@ -430,6 +440,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
     return { highlightNodes: nodes, highlightLinks: links };
   }, [hoveredNode, graphData]);
+
+  const resolveLinkColor = useCallback((link: GraphLink, is3DMode: boolean): string => {
+    if (link.relationType === 'observation') {
+      if (!hoveredNode) {
+        return is3DMode ? 'rgba(168, 85, 247, 0.4)' : 'rgba(168, 85, 247, 0.45)';
+      }
+      return highlightLinks.has(link.id) ? '#a855f7' : 'rgba(168, 85, 247, 0.08)';
+    }
+    const base = getRelationColor(link.relationType);
+    if (!hoveredNode) {
+      return is3DMode ? base + 'b3' : base + 'cc';
+    }
+    if (highlightLinks.has(link.id)) {
+      return base;
+    }
+    return is3DMode ? 'rgba(113, 113, 122, 0.12)' : 'rgba(113, 113, 122, 0.15)';
+  }, [hoveredNode, highlightLinks]);
 
   // Node selection & camera focus
   const handleNodeClick = useCallback((node: any) => {
@@ -525,10 +552,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
     } else {
       // Multi-faceted geometric crystal for Entities
       const geometry = new THREE.IcosahedronGeometry(radius, 1);
+      let entityEmissiveIntensity = 0.18;
+      if (isHighlighted) {
+        entityEmissiveIntensity = isSelected ? 0.95 : 0.55;
+      }
       const material = new THREE.MeshPhongMaterial({
         color,
         emissive: color,
-        emissiveIntensity: isHighlighted ? (isSelected ? 0.95 : 0.55) : 0.18,
+        emissiveIntensity: entityEmissiveIntensity,
         shininess: 95,
         transparent: true,
         opacity: isHighlighted ? 0.94 : 0.2,
@@ -801,18 +832,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   const isHighlighted = hoveredNode ? highlightLinks.has(link.id) : false;
                   return isHighlighted ? 2.5 : 1.2;
                 }}
-                linkColor={(link: any) => {
-                  if (link.relationType === 'observation') {
-                    return hoveredNode
-                      ? (highlightLinks.has(link.id) ? '#a855f7' : 'rgba(168, 85, 247, 0.08)')
-                      : 'rgba(168, 85, 247, 0.4)';
-                  }
-                  const base = getRelationColor(link.relationType);
-                  if (hoveredNode) {
-                    return highlightLinks.has(link.id) ? base : 'rgba(113, 113, 122, 0.12)';
-                  }
-                  return base + 'b3';
-                }}
+                linkColor={(link: any) => resolveLinkColor(link as GraphLink, true)}
                 linkDirectionalParticles={2}
                 linkDirectionalParticleSpeed={0.005}
                 linkDirectionalParticleWidth={(link: any) => highlightLinks.has(link.id) ? 2.5 : 1.5}
@@ -836,18 +856,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
                   const isHighlighted = hoveredNode ? highlightLinks.has(link.id) : false;
                   return isHighlighted ? 2.8 : 1.2;
                 }}
-                linkColor={(link: any) => {
-                  if (link.relationType === 'observation') {
-                    return hoveredNode
-                      ? (highlightLinks.has(link.id) ? '#a855f7' : 'rgba(168, 85, 247, 0.08)')
-                      : 'rgba(168, 85, 247, 0.45)';
-                  }
-                  const base = getRelationColor(link.relationType);
-                  if (hoveredNode) {
-                    return highlightLinks.has(link.id) ? base : 'rgba(113, 113, 122, 0.15)';
-                  }
-                  return base + 'cc';
-                }}
+                linkColor={(link: any) => resolveLinkColor(link as GraphLink, false)}
                 linkLineDash={(link: any) => link.relationType === 'observation' ? [3, 2] : null}
                 linkDirectionalArrowLength={(link: any) => link.relationType === 'observation' ? 0 : 4}
                 linkDirectionalArrowRelPos={1}
@@ -1099,7 +1108,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
           {/* Drawer Footer */}
           <div className="p-3 border-t border-purple-500/20 bg-black/40 text-center flex items-center justify-between text-[10px] font-mono text-zinc-500">
-            <span>UUID: {selectedNode.id.slice(0, 16)}…</span>
+            <span>UUID: {typeof selectedNode.id === 'string' ? selectedNode.id.slice(0, 16) + '…' : 'unknown'}</span>
             <span className="text-purple-400/80">{selectedNode.domain}</span>
           </div>
         </aside>

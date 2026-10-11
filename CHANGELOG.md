@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-10-11
+
+### 🚀 Highlights
+- **Comprehensive Full-Scan OCR Remediation (204 Cards / 58 Files)**: Systematic remediation of all 204 architectural, security, memory management, and correctness findings identified across the entire Amneshia engine, CLI, MCP tools, and React Dashboard.
+- **Enterprise-Grade Stability & 100% Test Pass Rate**: Zero placeholders (`// TODO`), zero dead code, strict type safety, and all 81/81 Vitest unit and integration tests passing in under 7 seconds.
+- **TMS & Truth Maintenance Hardening**: Corrected positional argument contracts for observation creation, fixed inverted supersedes DAG logic, and enforced strict ACID transactions across bulk graph operations.
+- **Zero-Corruption Vector Buffer Decoding**: Replaced unaligned Float32Array buffer sharing with safe byte-offset aligned slicing, preventing memory faults and corrupted cosine similarities.
+- **React Dashboard Ergonomics & Performance**: Modernized React 19 UI with GPU compositor promotion, eliminated ternary nesting, unified entity selection state, added race-condition mutexes, and resolved `/` shortcut input focus theft.
+- **Container & CI/CD Security Hardening**: Upgraded Dockerfile with `tini` PID 1 process management, persistent volume declarations, non-root user isolation, and least-privilege GitHub Actions workflows.
+
+### 🧠 Core TMS & Database Engine
+- **`addObservation` Contract Compliance**: Refactored call sites to adhere strictly to positional argument signatures (`db.addObservation(entityId, content, source?, importance?, confidence?, expiresAt?, authorityTier?, derivedFrom?)`), eliminating silent argument misalignment.
+- **Aligned Float32Array Vector Slicing**: Replaced direct buffer sharing (`new Float32Array(row.embedding.buffer)`) with aligned byte-offset slicing (`new Float32Array(row.embedding.buffer.slice(row.embedding.byteOffset, row.embedding.byteOffset + row.embedding.byteLength))`), eliminating memory alignment exceptions during vector cosine calculation.
+- **ACID Transaction Wrapping**: Wrapped multi-step database mutations (entity creation, observation ingestion, relation batching, and cascade invalidations) in `db.transaction(...)`, ensuring atomic commits and zero partial graph corruption on unexpected termination.
+- **Inverted Supersedes DAG Repair**: Corrected DAG transition order during superseding mutations. Previous observations now cleanly demote from `active` to `stale` while preserving the full premise audit lineage.
+- **SQLite WAL & Pragma Tuning**: Hardened SQLite connection lifecycle with `PRAGMA synchronous = NORMAL`, `PRAGMA temp_store = MEMORY`, and prepared statement caching.
+
+### 📦 Storage & Media CAS
+- **Identical Path Non-Destructive Guard**: Added canonical path resolution in `src/storage/adopt.ts` (`path.resolve(source) === path.resolve(target)`), preventing recursive overwrites or file truncation when adopting memory in the same directory.
+- **Content-Addressable Storage (CAS) Ingestion**: Hardened `src/storage/media-store.ts` with streaming SHA-256 digests, strict path boundary confinement against LFI/path traversal, and automated orphan blob garbage collection (`amneshia media prune`).
+- **Atomic Markdown Dual-Write**: Implemented atomic temporary file writes with atomic renames in `src/storage/dual-write.ts`, eliminating truncated markdown entities during unexpected process interruptions.
+- **Path Traversal & Slug Sanitization**: Normalized slug generation in `src/storage/slug.ts` to strictly sanitize dots, path separators, and special shell characters.
+
+### 🔍 Search Engine & Local Embedder
+- **Concurrency Mutex Lock**: Implemented mutual exclusion locking in `src/search/embedder.ts` to prevent race conditions during concurrent ONNX runtime inferences in WebAssembly / Termux mode.
+- **Atomic Model Download Staging**: Staged local ONNX weight downloads in `.tmp` files prior to atomic promotion, preventing broken model binaries from network disconnects.
+- **Cache Path Confinement**: Enforced strict boundary checks ensuring model caches remain confined to designated user cache directories.
+- **Hybrid RRF Search Engine**: Fine-tuned Reciprocal Rank Fusion ($k=60$) combining SQLite FTS5 BM25 lexical ranking with dense 384-dimensional cosine similarity.
+
+### 🛠️ MCP Tools Layer
+- **Idempotent Server Registration**: Added `WeakSet<McpServer>` registry guards in `src/tools/index.ts` to prevent duplicate tool registration crashes when MCP servers are reinstantiated.
+- **Runtime Profile Validation**: Added strict validation for `--tool-profile` values (`core` vs `full`), rejecting invalid profiles with helpful diagnostics instead of failing silently.
+- **Structured Error Handling**: Eliminated empty catch blocks across tool implementations; all MCP endpoints now log structured diagnostic context and return actionable error messages.
+
+### 💻 Dashboard UI & Performance
+- **Ternary Nesting Refactoring**: Deconstructed deep ternary expressions in `MemoryTable.tsx`, `GraphView.tsx`, and `StorageView.tsx` into declarative sub-components with early returns.
+- **Unified Entity Selection State**: Removed duplicate `selectedEntityId` state in `App.tsx`, establishing a single source of truth for graph and table views.
+- **GPU Compositor Acceleration**: Promoted 3D universe canvas and transition animations to GPU compositing via `will-change: transform` and CSS hardware acceleration in `index.css`.
+- **Keyboard Shortcut Focus Guard**: Updated `/` global search hotkey in `Header.tsx` to ignore inputs when the user is already typing in form inputs, textareas, or contentEditable elements.
+- **Action Mutex Guards**: Added `isBusy` lock to reindex and adoption triggers in `SettingsView.tsx` preventing concurrent execution from rapid double-clicks.
+- **AbortController on Unmount**: Wired abort controllers to all asynchronous fetch routines to eliminate unmounted React state update warnings.
+
+### 🛡️ Container & Infrastructure Hardening
+- **Dockerfile Security & PID 1**: Integrated `tini` as the container init process for proper signal forwarding (`SIGINT`/`SIGTERM`) and zombie reap; declared `VOLUME ["/app/.amneshia"]` for persistent memory isolation; dropped privileges to non-root `node` user.
+- **Least-Privilege CI/CD**: Hardened `.github/workflows/ci.yml` and `release.yml` with explicit top-level read permissions, granular job scopes, and step execution timeouts.
+- **Environment-Aware Test Runner**: Tuned `vitest.config.ts` to detect thread concurrency constraints in sandboxed environments, preventing CPU over-allocation.
+
+### 🧪 Developer Tooling & Verification
+- **100% Passing Tests**: All 81 unit and integration tests passing across 14 Vitest test suites.
+- **Strict TypeScript Typing**: Full codebase passes `tsc --noEmit` with zero errors or warnings.
+- **Repository Cleanliness**: Removed temporary OCR test dumps and added `scripts/` to `.gitignore`.
+
+---
+
 ## [3.2.2] - 2026-10-10
 
 ### 🐛 Fixed

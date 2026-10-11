@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AuthorityTier, Entity, MediaAsset, Observation, ObservationStatus, RelationWithNames } from '../types.js';
+import type { AuthorityTier, Entity, EntityVisibility, MediaAsset, Observation, ObservationStatus, RelationWithNames } from '../types.js';
 import { toSlug } from './slug.js';
 
 export interface ParsedObservation {
@@ -32,7 +32,7 @@ export interface ParsedMarkdownEntity {
   name: string;
   entityType: string;
   domain: string;
-  visibility: string;
+  visibility: EntityVisibility;
   allowedAgents: string[];
   createdAt: string;
   updatedAt: string;
@@ -141,18 +141,26 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
   const getFrontmatterValue = (key: string): string | null => {
     const fieldMatch = frontmatterStr.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
     if (!fieldMatch) return null;
-    let val = fieldMatch[1].trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
+    const rawVal = fieldMatch[1].trim();
+    if (rawVal.startsWith('"') && rawVal.endsWith('"')) {
+      try {
+        return JSON.parse(rawVal);
+      } catch {
+        return rawVal.slice(1, -1);
+      }
     }
-    return val;
+    if (rawVal.startsWith("'") && rawVal.endsWith("'")) {
+      return rawVal.slice(1, -1);
+    }
+    return rawVal;
   };
 
   const id = getFrontmatterValue('id') || '';
   const name = getFrontmatterValue('name') || '';
   const entityType = getFrontmatterValue('type') || 'concept';
   const domain = getFrontmatterValue('domain') || 'personal';
-  const visibility = getFrontmatterValue('visibility') || 'public';
+  const rawVisibility = getFrontmatterValue('visibility');
+  const visibility: EntityVisibility = rawVisibility === 'private' || rawVisibility === 'restricted' ? rawVisibility : 'public';
   const createdAt = getFrontmatterValue('created') || new Date().toISOString();
   const updatedAt = getFrontmatterValue('updated') || new Date().toISOString();
 
@@ -207,15 +215,18 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
       const lines = item.split('\n').map((l) => l.trim()).filter(Boolean);
       if (lines.length === 0) continue;
 
-      let contentLine = lines[0];
-      const isStrikethrough = contentLine.startsWith('~~') && contentLine.endsWith('~~');
+      const lastLine = lines[lines.length - 1];
+      const hasMeta = lines.length > 1 && lastLine.startsWith('`') && lastLine.endsWith('`');
+      const contentLines = hasMeta ? lines.slice(0, -1) : lines;
+      let rawContent = contentLines.join('\n');
+      const isStrikethrough = rawContent.startsWith('~~') && rawContent.endsWith('~~');
       if (isStrikethrough) {
-        contentLine = contentLine.slice(2, -2);
+        rawContent = rawContent.slice(2, -2);
       }
 
       let authorityTier: AuthorityTier = 'contextual';
-      const tierMatch = contentLine.match(/^\*\*\[(invariant|architectural|contextual|ephemeral)\]\*\*\s*(.*)$/);
-      let factContent = contentLine;
+      const tierMatch = rawContent.match(/^\*\*\[(invariant|architectural|contextual|ephemeral)\]\*\*\s*([\s\S]*)$/);
+      let factContent = rawContent;
       if (tierMatch) {
         authorityTier = tierMatch[1] as AuthorityTier;
         factContent = tierMatch[2];
@@ -227,8 +238,8 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
       let derivedFrom: string[] = [];
       let supersedes: string | null = null;
 
-      if (lines.length > 1 && lines[1].startsWith('`') && lines[1].endsWith('`')) {
-        const metaStr = lines[1].slice(1, -1);
+      if (hasMeta) {
+        const metaStr = lastLine.slice(1, -1);
         const parts = metaStr.split('|').map((p) => p.trim());
         for (const part of parts) {
           const [k, ...vParts] = part.split(':').map((p) => p.trim());

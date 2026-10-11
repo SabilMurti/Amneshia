@@ -35,6 +35,7 @@ export const ContradictionsView: React.FC<ContradictionsViewProps> = ({
       setContradictions(data);
     } catch (err) {
       console.error('Failed to load contradictions:', err);
+      showToast?.(err instanceof Error ? err.message : 'Failed to load contradictions', 'error');
     } finally {
       setLoading(false);
     }
@@ -45,13 +46,15 @@ export const ContradictionsView: React.FC<ContradictionsViewProps> = ({
   }, [refreshTrigger]);
 
   const handleResolve = async (id: string, resolution: 'override' | 'kept_both' | 'rejected') => {
+    if (actionLoadingId) return;
     setActionLoadingId(id);
     try {
       const res = await api.resolveContradiction(id, resolution);
       if (res.ok) {
         showToast?.(`Contradiction marked as "${resolution}"`, 'success');
-        await fetchContradictions();
         triggerRefresh();
+      } else {
+        showToast?.('Failed to resolve contradiction: ' + JSON.stringify(res), 'error');
       }
     } catch (err) {
       showToast?.(err instanceof Error ? err.message : String(err), 'error');

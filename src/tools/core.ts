@@ -5,7 +5,7 @@ import type { KnowledgeGraph } from '../graph.js';
 import type { DatabaseLayer } from '../database/index.js';
 import { checkContradiction } from '../maintenance/contradiction.js';
 import { storeMediaAsset } from '../storage/media-store.js';
-import type { AuthorityTier, ObservationStatus } from '../types.js';
+import type { AuthorityTier } from '../types.js';
 import { getCloudStatus, cloudPull, cloudPush, cloudSync } from '../cloud/git-sync.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
@@ -57,9 +57,13 @@ export function registerCoreTools(
         const observationIds: string[] = [];
         const warnings: Array<{ fact: string; reason: string; conflictingId?: string }> = [];
 
-        for (const fact of facts) {
-          // Pre-insertion contradiction check
-          const conflict = await checkContradiction(fact, ent.id, db);
+        // Parallel pre-insertion contradiction checks
+        const conflicts = await Promise.all(facts.map((fact) => checkContradiction(fact, ent.id, db)));
+
+        for (let i = 0; i < facts.length; i++) {
+          const fact = facts[i];
+          const conflict = conflicts[i];
+
           if (conflict.hasContradiction) {
             warnings.push({
               fact,
@@ -144,7 +148,8 @@ export function registerCoreTools(
           db.recordAccess(item.entity.id);
 
           const facts: Array<{ id: string; content: string; tier: string; status: string }> = [];
-          for (const obs of item.observations) {
+          const sortedObservations = [...item.observations].sort((a, b) => (a.status === 'active' ? -1 : 1));
+          for (const obs of sortedObservations) {
             db.recordAccess(item.entity.id, obs.id);
             const factSummary = `${obs.content} (${obs.authorityTier})`;
             const est = estimateTokens(factSummary);
@@ -219,9 +224,20 @@ export function registerCoreTools(
         const obs = db.getObservationById(target);
         if (obs) {
           let staleCount = 0;
+          const affectedEntityNames = new Set<string>();
+          const obsEntity = db.getEntityById(obs.entityId);
+          if (obsEntity) affectedEntityNames.add(obsEntity.name);
+
           if (cascade) {
             const cascadeRes = db.cascadeInvalidate(obs.id);
             staleCount = cascadeRes.staleIds.length;
+            for (const sId of cascadeRes.staleIds) {
+              const sObs = db.getObservationById(sId);
+              if (sObs) {
+                const sEnt = db.getEntityById(sObs.entityId);
+                if (sEnt) affectedEntityNames.add(sEnt.name);
+              }
+            }
           }
 
           if (hard) {
@@ -230,8 +246,7 @@ export function registerCoreTools(
             db.setObservationStatus(obs.id, 'invalidated');
           }
 
-          const obsEntity = db.getEntityById(obs.entityId);
-          graph.triggerAutoExport(obsEntity?.name);
+          graph.triggerAutoExport(Array.from(affectedEntityNames));
           return textContent({
             ok: true,
             type: 'observation',
@@ -241,16 +256,25 @@ export function registerCoreTools(
           });
         }
 
-        // Check if target is an Entity name
-        const ent = db.getEntityByName(target);
+        // Check if target is an Entity name or ID
+        const ent = db.getEntityByName(target) ?? db.getEntityById(target);
         if (ent) {
           const obsList = db.getObservationsByEntity(ent.id);
           let staleCount = 0;
+          const affectedEntityNames = new Set<string>();
+          affectedEntityNames.add(ent.name);
 
           for (const o of obsList) {
             if (cascade) {
               const cascadeRes = db.cascadeInvalidate(o.id);
               staleCount += cascadeRes.staleIds.length;
+              for (const sId of cascadeRes.staleIds) {
+                const sObs = db.getObservationById(sId);
+                if (sObs) {
+                  const sEnt = db.getEntityById(sObs.entityId);
+                  if (sEnt) affectedEntityNames.add(sEnt.name);
+                }
+              }
             }
             if (!hard) {
               db.setObservationStatus(o.id, 'invalidated');
@@ -260,7 +284,7 @@ export function registerCoreTools(
           if (hard) {
             graph.deleteEntities([ent.name]);
           } else {
-            graph.triggerAutoExport(ent.name);
+            graph.triggerAutoExport(Array.from(affectedEntityNames));
           }
           return textContent({
             ok: true,
@@ -339,8 +363,8 @@ export function registerCoreTools(
     },
     async ({ filePath, entity, domain, facts, tier, relations }) => {
       try {
-        const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
-        const storageRoot = (graph as any).getStorageRoot ? (graph as any).getStorageRoot() : db.getDataDir();
+        const resolvedPath = path.resolve(filePath);
+        const storageRoot = graph.getStorageRoot();
         const stored = await storeMediaAsset(resolvedPath, storageRoot);
 
         let ent = db.getEntityByName(entity);
@@ -378,8 +402,13 @@ export function registerCoreTools(
         const observationIds: string[] = [];
         const warnings: Array<{ fact: string; reason: string; conflictingId?: string }> = [];
 
-        for (const fact of facts) {
-          const conflict = await checkContradiction(fact, ent.id, db);
+        // Parallel pre-insertion contradiction checks
+        const conflicts = await Promise.all(facts.map((fact) => checkContradiction(fact, ent.id, db)));
+
+        for (let i = 0; i < facts.length; i++) {
+          const fact = facts[i];
+          const conflict = conflicts[i];
+
           if (conflict.hasContradiction) {
             warnings.push({
               fact,

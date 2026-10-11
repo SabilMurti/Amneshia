@@ -22,7 +22,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isGcRunning, setIsGcRunning] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
+  const isBusy = isCleaning || isReindexing || isGcRunning;
+
   const handleCleanupExpired = async () => {
+    if (isBusy) return;
     setIsCleaning(true);
     setActionMessage(null);
     try {
@@ -30,13 +33,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setActionMessage(`Cleanup complete: Purged ${res.cleanedCount} expired ephemeral records.`);
       refreshStats();
     } catch (err) {
-      alert(`Cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionMessage(`Cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsCleaning(false);
     }
   };
 
   const handleReindex = async () => {
+    if (isBusy) return;
     setIsReindexing(true);
     setActionMessage(null);
     try {
@@ -44,13 +48,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setActionMessage(`Reindex complete: Verified ${res.entities} entities, ${res.observations} facts, ${res.relations} relations from Markdown.`);
       refreshStats();
     } catch (err) {
-      alert(`Reindex failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionMessage(`Reindex failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsReindexing(false);
     }
   };
 
   const handleRunGc = async () => {
+    if (isBusy) return;
     setIsGcRunning(true);
     setActionMessage(null);
     try {
@@ -58,7 +63,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setActionMessage(`Garbage collection complete: Removed ${res.removed} decayed/superseded records.`);
       refreshStats();
     } catch (err) {
-      alert(`GC failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionMessage(`GC failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGcRunning(false);
     }
@@ -134,8 +139,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex flex-wrap gap-3 pt-1">
               <button
                 onClick={onRunMaintenance}
+                disabled={isBusy}
                 type="button"
-                className="flex items-center gap-2 bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 text-white px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.98] border border-purple-400/30"
+                className="flex items-center gap-2 bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all shadow-glow-purple active:scale-[0.98] border border-purple-400/30"
               >
                 <Sparkles className="w-4 h-4 text-purple-200" />
                 <span>Run Full Maintenance</span>
@@ -143,9 +149,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <button
                 onClick={handleReindex}
-                disabled={isReindexing}
+                disabled={isBusy}
                 type="button"
-                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
+                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 disabled:opacity-50 disabled:cursor-not-allowed border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
               >
                 <FolderSync className={`w-3.5 h-3.5 text-purple-400 ${isReindexing ? 'animate-spin' : ''}`} />
                 <span>{isReindexing ? 'Reindexing...' : 'Reindex from Markdown'}</span>
@@ -153,9 +159,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <button
                 onClick={handleRunGc}
-                disabled={isGcRunning}
+                disabled={isBusy}
                 type="button"
-                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
+                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 disabled:opacity-50 disabled:cursor-not-allowed border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
               >
                 <Trash2 className={`w-3.5 h-3.5 text-indigo-400 ${isGcRunning ? 'animate-spin' : ''}`} />
                 <span>{isGcRunning ? 'Running GC...' : 'Garbage Collection (GC)'}</span>
@@ -163,9 +169,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <button
                 onClick={handleCleanupExpired}
-                disabled={isCleaning}
+                disabled={isBusy}
                 type="button"
-                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
+                className="flex items-center gap-2 bg-black/40 hover:bg-purple-950/30 disabled:opacity-50 disabled:cursor-not-allowed border border-purple-500/20 text-zinc-300 hover:text-white px-4 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all active:scale-[0.98]"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${isCleaning ? 'animate-spin' : ''}`} />
                 <span>{isCleaning ? 'Pruning...' : 'Purge Expired TTLs'}</span>

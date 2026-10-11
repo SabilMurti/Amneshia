@@ -1627,7 +1627,7 @@ var require_dist = __commonJS({
 });
 
 // src/index.ts
-import os7 from "os";
+import os6 from "os";
 import path15 from "path";
 import fs14 from "fs";
 import { spawn } from "child_process";
@@ -1705,19 +1705,19 @@ CREATE TABLE IF NOT EXISTS export_targets (
 
 CREATE TABLE IF NOT EXISTS contradiction_log (
   id TEXT PRIMARY KEY,
-  observation_id TEXT NOT NULL,
-  conflicting_observation_id TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
+  observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  conflicting_observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   reason TEXT NOT NULL,
-  resolution TEXT CHECK(resolution IN ('override', 'kept_both', 'rejected', NULL)),
+  resolution TEXT CHECK(resolution IS NULL OR resolution IN ('override', 'kept_both', 'rejected')),
   detected_at TEXT NOT NULL,
   resolved_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS access_log (
   id TEXT PRIMARY KEY,
-  entity_id TEXT NOT NULL,
-  observation_id TEXT,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  observation_id TEXT REFERENCES observations(id) ON DELETE CASCADE,
   accessed_at TEXT NOT NULL
 );
 
@@ -1739,6 +1739,8 @@ CREATE INDEX IF NOT EXISTS idx_obs_status ON observations(status);
 CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity);
 CREATE INDEX IF NOT EXISTS idx_access_log_obs ON access_log(observation_id);
+CREATE INDEX IF NOT EXISTS idx_access_log_entity ON access_log(entity_id);
+CREATE INDEX IF NOT EXISTS idx_contradiction_obs ON contradiction_log(observation_id);
 CREATE INDEX IF NOT EXISTS idx_contradiction_entity ON contradiction_log(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_entity ON media_assets(entity_id);
 CREATE INDEX IF NOT EXISTS idx_media_sha256 ON media_assets(sha256);
@@ -1774,7 +1776,7 @@ CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
   DELETE FROM memory_fts WHERE observation_id = OLD.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE OF content, entity_id ON observations BEGIN
   DELETE FROM memory_fts WHERE observation_id = OLD.id;
   INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
   SELECT e.name, e.entity_type, NEW.content, NEW.id, NEW.entity_id
@@ -1787,7 +1789,7 @@ CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
   VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
 END;
 
-CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
+CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE OF name, entity_type ON entities BEGIN
   DELETE FROM memory_fts WHERE observation_id IS NULL AND entity_id = OLD.id;
   INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id)
   VALUES (NEW.name, NEW.entity_type, NEW.name || ' ' || NEW.entity_type, NULL, NEW.id);
@@ -1802,9 +1804,10 @@ END;
 // src/database/migrations.ts
 function runMigrations(db) {
   const versionRow = db.pragma("user_version", { simple: true });
-  if (versionRow < 3) {
-    const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
-    if (tableCheck && tableCheck.count > 0) {
+  const tableCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
+  const hasObservationsTable = Boolean(tableCheck && tableCheck.count > 0);
+  if (versionRow < 3 && hasObservationsTable) {
+    db.transaction(() => {
       const columns = db.pragma("table_info(observations)");
       const columnNames = new Set(columns.map((c) => c.name));
       if (!columnNames.has("authority_tier")) {
@@ -1831,24 +1834,27 @@ function runMigrations(db) {
           "UPDATE observations SET status = 'superseded' WHERE id IN (SELECT supersedes FROM observations WHERE supersedes IS NOT NULL) AND status = 'active'"
         );
       }
-    }
-    try {
-      db.exec("DROP TABLE IF EXISTS bridge_servers;");
-    } catch {
-    }
+      try {
+        db.exec("DROP TABLE IF EXISTS bridge_servers;");
+      } catch {
+      }
+      db.pragma("user_version = 3");
+    })();
   }
-  if (versionRow < 4) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS observation_embeddings (
-        observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
-        dimensions INTEGER NOT NULL,
-        vector BLOB NOT NULL,
-        model TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
-    `);
-    db.pragma("user_version = 4");
+  if (versionRow < 4 && hasObservationsTable) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observation_embeddings (
+          observation_id TEXT PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+          dimensions INTEGER NOT NULL,
+          vector BLOB NOT NULL,
+          model TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
+      `);
+      db.pragma("user_version = 4");
+    })();
   }
 }
 
@@ -1892,6 +1898,9 @@ var WordPieceTokenizer = class {
     if (this.vocab["[SEP]"] !== void 0) this.sepId = this.vocab["[SEP]"];
     if (this.vocab["[PAD]"] !== void 0) this.padId = this.vocab["[PAD]"];
   }
+  getPadId() {
+    return this.padId;
+  }
   /**
    * Normalize text by lowercasing and normalizing whitespace.
    */
@@ -1907,16 +1916,22 @@ var WordPieceTokenizer = class {
     const tokenIds = [this.clsId];
     const tokens = ["[CLS]"];
     for (const word of words) {
+      if (tokenIds.length >= this.maxSeqLength - 1) {
+        break;
+      }
       let start = 0;
+      const wordTokenIds = [];
+      const wordTokens = [];
+      let isBad = false;
       while (start < word.length) {
         let end = word.length;
         let matched = false;
         while (start < end) {
           const substr = word.slice(start, end);
           const piece = start === 0 ? substr : `##${substr}`;
-          if (this.vocab[piece] !== void 0) {
-            tokenIds.push(this.vocab[piece]);
-            tokens.push(piece);
+          if (Object.prototype.hasOwnProperty.call(this.vocab, piece) && typeof this.vocab[piece] === "number") {
+            wordTokenIds.push(this.vocab[piece]);
+            wordTokens.push(piece);
             start = end;
             matched = true;
             break;
@@ -1924,16 +1939,19 @@ var WordPieceTokenizer = class {
           end--;
         }
         if (!matched) {
-          tokenIds.push(this.unkId);
-          tokens.push("[UNK]");
+          isBad = true;
           break;
         }
-        if (tokenIds.length >= this.maxSeqLength - 1) {
+        if (tokenIds.length + wordTokenIds.length >= this.maxSeqLength - 1) {
           break;
         }
       }
-      if (tokenIds.length >= this.maxSeqLength - 1) {
-        break;
+      if (isBad) {
+        tokenIds.push(this.unkId);
+        tokens.push("[UNK]");
+      } else {
+        tokenIds.push(...wordTokenIds);
+        tokens.push(...wordTokens);
       }
     }
     tokenIds.push(this.sepId);
@@ -2200,35 +2218,58 @@ var LocalOnnxEmbedder = class _LocalOnnxEmbedder {
 // src/search/hybrid.ts
 function fuseRRF(lexicalResults, semanticResults, options) {
   const k = options?.k ?? 60;
-  const limit = options?.limit ?? 20;
+  const limit = Math.max(0, options?.limit ?? 20);
   const entityMap = /* @__PURE__ */ new Map();
   lexicalResults.forEach((item, index) => {
     const rank = index + 1;
     const rrfContrib = 1 / (k + rank);
-    entityMap.set(item.entity.id, {
-      entity: item.entity,
-      observations: [...item.observations],
-      matchedContent: item.matchedContent,
-      lexicalRank: rank,
-      rrfScore: rrfContrib,
-      matchType: "lexical"
-    });
-  });
-  semanticResults.forEach((item, index) => {
-    const rank = index + 1;
-    const rrfContrib = 1 / (k + rank);
     const existing = entityMap.get(item.entity.id);
     if (existing) {
-      existing.rrfScore += rrfContrib;
-      existing.semanticRank = rank;
-      existing.semanticSimilarity = item.similarity;
-      existing.matchType = "hybrid";
       const existingObsIds = new Set(existing.observations.map((o) => o.id));
       for (const obs of item.observations) {
         if (!existingObsIds.has(obs.id)) {
           existing.observations.push(obs);
           existingObsIds.add(obs.id);
         }
+      }
+      if (item.matchedContent && !existing.matchedContent.includes(item.matchedContent)) {
+        existing.matchedContent += `
+${item.matchedContent}`;
+      }
+    } else {
+      entityMap.set(item.entity.id, {
+        entity: item.entity,
+        observations: [...item.observations],
+        matchedContent: item.matchedContent,
+        lexicalRank: rank,
+        rrfScore: rrfContrib,
+        matchType: "lexical"
+      });
+    }
+  });
+  semanticResults.forEach((item, index) => {
+    const rank = index + 1;
+    const rrfContrib = 1 / (k + rank);
+    const existing = entityMap.get(item.entity.id);
+    if (existing) {
+      if (existing.semanticRank === void 0) {
+        existing.rrfScore += rrfContrib;
+        existing.semanticRank = rank;
+        existing.semanticSimilarity = item.similarity;
+        if (existing.lexicalRank !== void 0) {
+          existing.matchType = "hybrid";
+        }
+      }
+      const existingObsIds = new Set(existing.observations.map((o) => o.id));
+      for (const obs of item.observations) {
+        if (!existingObsIds.has(obs.id)) {
+          existing.observations.push(obs);
+          existingObsIds.add(obs.id);
+        }
+      }
+      if (item.matchedContent && !existing.matchedContent.includes(item.matchedContent)) {
+        existing.matchedContent += `
+${item.matchedContent}`;
       }
     } else {
       entityMap.set(item.entity.id, {
@@ -2344,13 +2385,52 @@ async function storeMediaAsset(sourceFilePath, storageRoot) {
     throw new Error(`Path traversal violation detected: destination escapes storage root.`);
   }
   fs3.mkdirSync(destDir, { recursive: true });
+  const tier1 = sha256.slice(0, 2);
+  const tier2 = sha256.slice(2, 4);
+  let existingBlobName = null;
+  if (fs3.existsSync(destDir)) {
+    const entries = fs3.readdirSync(destDir);
+    for (const entry of entries) {
+      if (entry.startsWith(sha256) && (entry.length === 64 || entry[64] === ".")) {
+        existingBlobName = entry;
+        break;
+      }
+    }
+  }
+  if (existingBlobName) {
+    const existingRelativePath = path2.posix.join("media", "blobs", tier1, tier2, existingBlobName);
+    const existingAbsolutePath = path2.resolve(storageRoot, existingRelativePath);
+    return {
+      sha256,
+      mimeType,
+      fileName,
+      fileSize: stat.size,
+      relativePath: existingRelativePath,
+      absolutePath: existingAbsolutePath,
+      deduplicated: true
+    };
+  }
   let deduplicated = false;
   if (fs3.existsSync(absoluteDestPath)) {
     deduplicated = true;
   } else {
-    const tempPath = path2.join(destDir, `.tmp.${path2.basename(absoluteDestPath)}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`);
-    fs3.copyFileSync(resolvedSource, tempPath);
-    fs3.renameSync(tempPath, absoluteDestPath);
+    const tempPath = path2.join(destDir, `.tmp.${path2.basename(absoluteDestPath)}.${crypto2.randomUUID()}`);
+    try {
+      fs3.copyFileSync(resolvedSource, tempPath);
+      fs3.renameSync(tempPath, absoluteDestPath);
+    } catch (err) {
+      if (fs3.existsSync(tempPath)) {
+        try {
+          fs3.unlinkSync(tempPath);
+        } catch {
+        }
+      }
+      if (fs3.existsSync(absoluteDestPath)) {
+        deduplicated = true;
+      } else {
+        throw err;
+      }
+    }
   }
   return {
     sha256,
@@ -2362,7 +2442,7 @@ async function storeMediaAsset(sourceFilePath, storageRoot) {
     deduplicated
   };
 }
-function findOrphanMediaBlobs(storageRoot, activeHashes) {
+function findOrphanMediaBlobs(storageRoot, activeHashes, gracePeriodMs = 0) {
   const blobsDir = path2.join(storageRoot, "media", "blobs");
   if (!fs3.existsSync(blobsDir)) return [];
   const orphans = [];
@@ -2378,6 +2458,16 @@ function findOrphanMediaBlobs(storageRoot, activeHashes) {
         const dotIdx = base.indexOf(".");
         const fileHash = dotIdx > 0 ? base.slice(0, dotIdx) : base;
         if (!activeHashes.has(fileHash)) {
+          if (gracePeriodMs > 0) {
+            try {
+              const fileStat = fs3.statSync(fullPath);
+              if (Date.now() - fileStat.mtimeMs <= gracePeriodMs) {
+                continue;
+              }
+            } catch {
+              continue;
+            }
+          }
           orphans.push(fullPath);
         }
       }
@@ -2386,8 +2476,8 @@ function findOrphanMediaBlobs(storageRoot, activeHashes) {
   scan(blobsDir);
   return orphans;
 }
-function pruneOrphanMediaBlobs(storageRoot, activeHashes) {
-  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes);
+function pruneOrphanMediaBlobs(storageRoot, activeHashes, gracePeriodMs = 0) {
+  const orphans = findOrphanMediaBlobs(storageRoot, activeHashes, gracePeriodMs);
   let reclaimedBytes = 0;
   let prunedCount = 0;
   for (const orphanPath of orphans) {
@@ -2452,7 +2542,7 @@ function toEntity(row) {
     name: row.name,
     entityType: row.entity_type,
     domain: row.domain,
-    visibility: row.visibility,
+    visibility: row.visibility || "public",
     allowedAgents: toAllowedAgents(row.allowed_agents),
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -2464,7 +2554,7 @@ function toObservation(row) {
     entityId: row.entity_id,
     content: row.content,
     source: row.source,
-    importance: row.importance,
+    importance: row.importance || "normal",
     confidence: row.confidence,
     authorityTier: row.authority_tier || "contextual",
     derivedFrom: toDerivedFrom(row.derived_from),
@@ -2667,8 +2757,15 @@ var DatabaseLayer = class {
     this.statements = this.prepareStatements();
   }
   initializeSchema() {
-    runMigrations(this.db);
+    const tableCheck = this.db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'").get();
+    const hasObservations = Boolean(tableCheck && tableCheck.count > 0);
+    if (hasObservations) {
+      runMigrations(this.db);
+    }
     this.db.exec(SCHEMA_SQL);
+    if (!hasObservations) {
+      this.db.pragma("user_version = 4");
+    }
     this.ensureDefaultExportTargets();
   }
   ensureDefaultExportTargets() {
@@ -2715,6 +2812,9 @@ var DatabaseLayer = class {
         "UPDATE observations SET content = ?, authority_tier = ?, status = ?, updated_at = ? WHERE id = ?"
       ),
       setObservationStatus: this.db.prepare("UPDATE observations SET status = ?, updated_at = ? WHERE id = ?"),
+      setObservationSupersedes: this.db.prepare(
+        "UPDATE observations SET supersedes = ?, status = 'superseded', updated_at = ? WHERE id = ?"
+      ),
       deleteObservation: this.db.prepare("DELETE FROM observations WHERE id = ?"),
       createRelation: this.db.prepare(
         "INSERT OR IGNORE INTO relations (id, from_entity, to_entity, relation_type, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -2747,6 +2847,12 @@ var DatabaseLayer = class {
       ),
       insertFtsEntity: this.db.prepare(
         "INSERT INTO memory_fts(entity_name, entity_type, observation_content, observation_id, entity_id) VALUES (?, ?, ?, ?, ?)"
+      ),
+      getDependentObservations: this.db.prepare(
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ?"
+      ),
+      getActiveDependentObservations: this.db.prepare(
+        "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'"
       ),
       searchFts: this.db.prepare(
         "SELECT entity_id, observation_id, observation_content, rank FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?"
@@ -2866,12 +2972,13 @@ var DatabaseLayer = class {
   }
   createEntity(input) {
     const now = nowIso();
+    const visibility = input.visibility ? input.visibility.trim() : "public";
     const entity = {
       id: uuid(),
       name: input.name.trim(),
       entityType: input.entityType.trim(),
       domain: (input.domain ?? "personal").trim(),
-      visibility: (input.visibility ?? "public").trim(),
+      visibility,
       allowedAgents: input.allowedAgents ?? [],
       createdAt: now,
       updatedAt: now
@@ -2886,7 +2993,6 @@ var DatabaseLayer = class {
       entity.createdAt,
       entity.updatedAt
     );
-    this.statements.insertFtsEntity.run(entity.name, entity.entityType, `${entity.name} ${entity.entityType}`, null, entity.id);
     return entity;
   }
   getEntityByName(name) {
@@ -2978,7 +3084,7 @@ var DatabaseLayer = class {
     const now = nowIso();
     this.db.transaction(() => {
       this.statements.observationHistory.run(uuid(), id, existing.content, existing.content, changedBy ?? null, now);
-      this.db.prepare("UPDATE observations SET supersedes = ?, status = 'superseded', updated_at = ? WHERE id = ?").run(supersedingId, now, id);
+      this.statements.setObservationSupersedes.run(supersedingId, now, id);
     })();
   }
   deleteObservation(id) {
@@ -3053,8 +3159,8 @@ var DatabaseLayer = class {
   }
   // --- Truth Maintenance & Provenance Helpers ---
   getDependentObservations(observationId, activeOnly = false) {
-    const query = activeOnly ? "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ? AND status = 'active'" : "SELECT id, entity_id, content, source, importance, confidence, authority_tier, derived_from, access_count, last_accessed_at, status, expires_at, supersedes, created_at, updated_at FROM observations WHERE derived_from LIKE ?";
-    const rows = this.db.prepare(query).all(`%${observationId}%`);
+    const stmt = activeOnly ? this.statements.getActiveDependentObservations : this.statements.getDependentObservations;
+    const rows = stmt.all(`%${observationId}%`);
     return rows.map(toObservation).filter((obs) => obs.derivedFrom.includes(observationId));
   }
   cascadeInvalidate(observationId) {
@@ -3142,7 +3248,13 @@ var DatabaseLayer = class {
         const entityRow = this.getEntityRowById(row.entity_id);
         if (!entityRow) continue;
         const entity = toEntity(entityRow);
-        const observations = row.observation_id ? this.getObservationsByEntity(row.entity_id).filter((obs) => obs.id === row.observation_id).filter((obs) => includeInactive || obs.status !== "invalidated" && obs.status !== "decayed") : [];
+        let observations = [];
+        if (row.observation_id) {
+          const obs = this.getObservationById(row.observation_id);
+          if (obs && (includeInactive || obs.status !== "invalidated" && obs.status !== "decayed")) {
+            observations = [obs];
+          }
+        }
         if (row.observation_id && observations.length === 0) {
           continue;
         }
@@ -3222,10 +3334,10 @@ var DatabaseLayer = class {
       const entityRow = this.getEntityRowById(item.row.entity_id);
       if (!entityRow) continue;
       const entity = toEntity(entityRow);
-      const obs = this.getObservationsByEntity(entity.id).filter((o) => o.id === item.row.observation_id);
+      const obs = this.getObservationById(item.row.observation_id);
       results.push({
         entity,
-        observations: obs,
+        observations: obs ? [obs] : [],
         matchedContent: item.row.content,
         similarity: item.similarity
       });
@@ -3276,15 +3388,46 @@ var DatabaseLayer = class {
     }
     const payload = JSON.stringify(names);
     const entityRows = this.statements.openNodesEntities.all(payload);
-    const entityMap = /* @__PURE__ */ new Map();
-    for (const row of entityRows) {
-      entityMap.set(row.id, toEntity(row));
+    const obsRows = this.statements.openNodesObservations.all(payload);
+    const relRows = this.statements.openNodesRelations.all(payload, payload);
+    const obsMap = /* @__PURE__ */ new Map();
+    for (const r of obsRows) {
+      const list = obsMap.get(r.entity_id);
+      const obs = toObservation(r);
+      if (list) {
+        list.push(obs);
+      } else {
+        obsMap.set(r.entity_id, [obs]);
+      }
     }
-    const entities = [...entityMap.values()].map((entity) => ({
-      ...entity,
-      observations: this.getObservationsByEntity(entity.id),
-      relations: this.getRelationsByEntity(entity.id)
-    }));
+    const relMap = /* @__PURE__ */ new Map();
+    for (const r of relRows) {
+      const rel = {
+        id: r.id,
+        fromEntity: r.from_entity,
+        fromEntityName: r.from_entity_name,
+        toEntity: r.to_entity,
+        toEntityName: r.to_entity_name,
+        relationType: r.relation_type,
+        createdAt: r.created_at
+      };
+      const fromList = relMap.get(r.from_entity);
+      if (fromList) fromList.push(rel);
+      else relMap.set(r.from_entity, [rel]);
+      if (r.from_entity !== r.to_entity) {
+        const toList = relMap.get(r.to_entity);
+        if (toList) toList.push(rel);
+        else relMap.set(r.to_entity, [rel]);
+      }
+    }
+    const entities = entityRows.map((row) => {
+      const entity = toEntity(row);
+      return {
+        ...entity,
+        observations: obsMap.get(entity.id) ?? [],
+        relations: relMap.get(entity.id) ?? []
+      };
+    });
     return { entities };
   }
   getStats() {
@@ -3379,8 +3522,9 @@ function groupTitle(entityType) {
 function relationSummary(entityName, relations) {
   if (relations.length === 0) return "";
   return relations.map((relation) => {
-    const other = relation.fromEntityName === entityName ? relation.toEntityName : relation.fromEntityName;
-    return `${relation.relationType} \u2192 ${other}`;
+    const isOutgoing = relation.fromEntityName === entityName;
+    const other = isOutgoing ? relation.toEntityName : relation.fromEntityName;
+    return isOutgoing ? `${relation.relationType} \u2192 ${other}` : `${relation.relationType} \u2190 ${other}`;
   }).join(", ");
 }
 function renderMarkdown(snapshot) {
@@ -3400,7 +3544,7 @@ function renderMarkdown(snapshot) {
     for (const entity of entities) {
       lines.push(`### ${entity.name}`);
       const activeObs = entity.observations.filter(
-        (o) => o.status === "active" && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+        (o) => o.status === "active" && (o.expiresAt === null || !Number.isNaN(new Date(o.expiresAt).getTime()) && new Date(o.expiresAt).getTime() > Date.now())
       );
       if (activeObs.length === 0) {
         lines.push("- No observations yet");
@@ -3436,7 +3580,9 @@ function exportToMarkdown(graph, forceAll = false) {
     try {
       const outputPath = resolveTargetPath(target.path);
       fs5.mkdirSync(path4.dirname(outputPath), { recursive: true });
-      fs5.writeFileSync(outputPath, markdown, "utf8");
+      const tempPath = `${outputPath}.tmp.${Date.now()}`;
+      fs5.writeFileSync(tempPath, markdown, "utf8");
+      fs5.renameSync(tempPath, outputPath);
       writes.push({ target: target.name, path: outputPath });
     } catch (error) {
       console.warn(`Export target "${target.name}" failed:`, error instanceof Error ? error.message : error);
@@ -3605,7 +3751,8 @@ var KnowledgeGraph = class {
    * @returns Formatted search result
    */
   searchMemory(query, limit = 20, domain) {
-    const filtered = this.database.searchFTS(query, limit * 2).filter((result) => domain ? result.entity.domain === domain : true);
+    const fetchLimit = domain ? Math.max(limit * 5, 100) : limit;
+    const filtered = this.database.searchFTS(query, fetchLimit).filter((result) => domain ? result.entity.domain === domain : true);
     return {
       query,
       limit,
@@ -3620,7 +3767,8 @@ var KnowledgeGraph = class {
    * @returns Formatted search result
    */
   searchRelevantMemory(query, limit = 20, domain) {
-    const filtered = this.database.searchFTSRelevant(query, limit * 2).filter((result) => domain ? result.entity.domain === domain : true);
+    const fetchLimit = domain ? Math.max(limit * 5, 100) : limit;
+    const filtered = this.database.searchFTSRelevant(query, fetchLimit).filter((result) => domain ? result.entity.domain === domain : true);
     return {
       query,
       limit,
@@ -4021,8 +4169,8 @@ import path6 from "path";
 
 // src/storage/slug.ts
 function toSlug(text) {
-  const slug = text.toLowerCase().trim().replace(/\.+/g, "-").replace(/[:\/\\?#\[\]@!$&'()*+,;=]/g, "-").replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (!slug || slug === "." || slug === "..") {
+  const slug = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!slug) {
     return "unnamed";
   }
   return slug;
@@ -4112,17 +4260,25 @@ function parseEntityMarkdown(content) {
   const getFrontmatterValue = (key) => {
     const fieldMatch = frontmatterStr.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
     if (!fieldMatch) return null;
-    let val = fieldMatch[1].trim();
-    if (val.startsWith('"') && val.endsWith('"') || val.startsWith("'") && val.endsWith("'")) {
-      val = val.slice(1, -1);
+    const rawVal = fieldMatch[1].trim();
+    if (rawVal.startsWith('"') && rawVal.endsWith('"')) {
+      try {
+        return JSON.parse(rawVal);
+      } catch {
+        return rawVal.slice(1, -1);
+      }
     }
-    return val;
+    if (rawVal.startsWith("'") && rawVal.endsWith("'")) {
+      return rawVal.slice(1, -1);
+    }
+    return rawVal;
   };
   const id = getFrontmatterValue("id") || "";
   const name = getFrontmatterValue("name") || "";
   const entityType = getFrontmatterValue("type") || "concept";
   const domain = getFrontmatterValue("domain") || "personal";
-  const visibility = getFrontmatterValue("visibility") || "public";
+  const rawVisibility = getFrontmatterValue("visibility");
+  const visibility = rawVisibility === "private" || rawVisibility === "restricted" ? rawVisibility : "public";
   const createdAt = getFrontmatterValue("created") || (/* @__PURE__ */ new Date()).toISOString();
   const updatedAt = getFrontmatterValue("updated") || (/* @__PURE__ */ new Date()).toISOString();
   let allowedAgents = [];
@@ -4169,14 +4325,17 @@ function parseEntityMarkdown(content) {
     for (const item of items) {
       const lines = item.split("\n").map((l) => l.trim()).filter(Boolean);
       if (lines.length === 0) continue;
-      let contentLine = lines[0];
-      const isStrikethrough = contentLine.startsWith("~~") && contentLine.endsWith("~~");
+      const lastLine = lines[lines.length - 1];
+      const hasMeta = lines.length > 1 && lastLine.startsWith("`") && lastLine.endsWith("`");
+      const contentLines = hasMeta ? lines.slice(0, -1) : lines;
+      let rawContent = contentLines.join("\n");
+      const isStrikethrough = rawContent.startsWith("~~") && rawContent.endsWith("~~");
       if (isStrikethrough) {
-        contentLine = contentLine.slice(2, -2);
+        rawContent = rawContent.slice(2, -2);
       }
       let authorityTier = "contextual";
-      const tierMatch = contentLine.match(/^\*\*\[(invariant|architectural|contextual|ephemeral)\]\*\*\s*(.*)$/);
-      let factContent = contentLine;
+      const tierMatch = rawContent.match(/^\*\*\[(invariant|architectural|contextual|ephemeral)\]\*\*\s*([\s\S]*)$/);
+      let factContent = rawContent;
       if (tierMatch) {
         authorityTier = tierMatch[1];
         factContent = tierMatch[2];
@@ -4186,8 +4345,8 @@ function parseEntityMarkdown(content) {
       let status = isStrikethrough ? "superseded" : "active";
       let derivedFrom = [];
       let supersedes = null;
-      if (lines.length > 1 && lines[1].startsWith("`") && lines[1].endsWith("`")) {
-        const metaStr = lines[1].slice(1, -1);
+      if (hasMeta) {
+        const metaStr = lastLine.slice(1, -1);
         const parts = metaStr.split("|").map((p) => p.trim());
         for (const part of parts) {
           const [k, ...vParts] = part.split(":").map((p) => p.trim());
@@ -4550,25 +4709,25 @@ async function cloudPull(knowledgeDir, db, branch = "main") {
     throw new Error('Cloud sync not initialized. Run "amneshia cloud setup <remote-url>" first.');
   }
   const gitignorePath = path7.join(knowledgeDir, ".gitignore");
-  let hadUntrackedGitignore = false;
+  let backupGitignore = null;
   if (fs8.existsSync(gitignorePath)) {
     try {
       const { stdout } = await git(knowledgeDir, ["status", "--porcelain", ".gitignore"]);
       if (stdout.includes("??")) {
+        backupGitignore = fs8.readFileSync(gitignorePath, "utf-8");
         fs8.unlinkSync(gitignorePath);
-        hadUntrackedGitignore = true;
       }
     } catch {
     }
   }
   const gitattributesPath = path7.join(knowledgeDir, ".gitattributes");
-  let hadUntrackedGitattributes = false;
+  let backupGitattributes = null;
   if (fs8.existsSync(gitattributesPath)) {
     try {
       const { stdout } = await git(knowledgeDir, ["status", "--porcelain", ".gitattributes"]);
       if (stdout.includes("??")) {
+        backupGitattributes = fs8.readFileSync(gitattributesPath, "utf-8");
         fs8.unlinkSync(gitattributesPath);
-        hadUntrackedGitattributes = true;
       }
     } catch {
     }
@@ -4581,24 +4740,37 @@ async function cloudPull(knowledgeDir, db, branch = "main") {
     const res = await git(knowledgeDir, ["pull", "--no-rebase", "origin", "--", branch]);
     rawOutput = res.stdout + res.stderr;
   } catch (err) {
-    if (err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
+    let isMissingRemoteBranch = false;
+    try {
+      const lsRemote = await git(knowledgeDir, ["ls-remote", "--heads", "origin", branch]);
+      if (!lsRemote.stdout.trim()) {
+        isMissingRemoteBranch = true;
+      }
+    } catch {
+    }
+    if (isMissingRemoteBranch || err.message.includes("couldn't find remote ref") || err.message.includes("no such ref")) {
       rawOutput = "Remote branch does not exist yet; continuing with local state.";
     } else {
-      if (hadUntrackedGitignore && !fs8.existsSync(gitignorePath)) {
-        fs8.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+      await git(knowledgeDir, ["merge", "--abort"]).catch(() => {
+      });
+      if (backupGitignore !== null && !fs8.existsSync(gitignorePath)) {
+        fs8.writeFileSync(gitignorePath, backupGitignore, "utf-8");
       }
-      if (hadUntrackedGitattributes && !fs8.existsSync(gitattributesPath)) {
-        fs8.writeFileSync(gitattributesPath, "*.md merge=amneshia\n", "utf-8");
+      if (backupGitattributes !== null && !fs8.existsSync(gitattributesPath)) {
+        fs8.writeFileSync(gitattributesPath, backupGitattributes, "utf-8");
       }
       throw err;
     }
   }
   if (!fs8.existsSync(gitignorePath)) {
-    fs8.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+    fs8.writeFileSync(gitignorePath, backupGitignore ?? "*.db*\n*.log*\n.DS_Store\n", "utf-8");
+  }
+  if (backupGitattributes !== null && !fs8.existsSync(gitattributesPath)) {
+    fs8.writeFileSync(gitattributesPath, backupGitattributes, "utf-8");
   }
   await setupMergeDriver(knowledgeDir);
   const statusRes = await git(knowledgeDir, ["status", "--porcelain"]);
-  if (statusRes.stdout.includes("UU") || statusRes.stdout.includes("AA")) {
+  if (/(?:^|\n)(UU|AA|DD|AU|UD|UA|DU)\s/.test(statusRes.stdout)) {
     await git(knowledgeDir, ["merge", "--abort"]).catch(() => {
     });
     throw new Error(`Git pull resulted in unmerged conflicts. Merge aborted.`);
@@ -4689,8 +4861,10 @@ function registerCoreTools(server, graph, db) {
         const derivedArr = derived_from ?? [];
         const observationIds = [];
         const warnings = [];
-        for (const fact of facts) {
-          const conflict = await checkContradiction(fact, ent.id, db);
+        const conflicts = await Promise.all(facts.map((fact) => checkContradiction(fact, ent.id, db)));
+        for (let i = 0; i < facts.length; i++) {
+          const fact = facts[i];
+          const conflict = conflicts[i];
           if (conflict.hasContradiction) {
             warnings.push({
               fact,
@@ -4754,7 +4928,8 @@ function registerCoreTools(server, graph, db) {
         for (const item of filtered) {
           db.recordAccess(item.entity.id);
           const facts = [];
-          for (const obs of item.observations) {
+          const sortedObservations = [...item.observations].sort((a, b) => a.status === "active" ? -1 : 1);
+          for (const obs of sortedObservations) {
             db.recordAccess(item.entity.id, obs.id);
             const factSummary = `${obs.content} (${obs.authorityTier})`;
             const est = estimateTokens(factSummary);
@@ -4819,17 +4994,26 @@ function registerCoreTools(server, graph, db) {
         const obs = db.getObservationById(target);
         if (obs) {
           let staleCount = 0;
+          const affectedEntityNames = /* @__PURE__ */ new Set();
+          const obsEntity = db.getEntityById(obs.entityId);
+          if (obsEntity) affectedEntityNames.add(obsEntity.name);
           if (cascade) {
             const cascadeRes = db.cascadeInvalidate(obs.id);
             staleCount = cascadeRes.staleIds.length;
+            for (const sId of cascadeRes.staleIds) {
+              const sObs = db.getObservationById(sId);
+              if (sObs) {
+                const sEnt = db.getEntityById(sObs.entityId);
+                if (sEnt) affectedEntityNames.add(sEnt.name);
+              }
+            }
           }
           if (hard) {
             db.deleteObservation(obs.id);
           } else {
             db.setObservationStatus(obs.id, "invalidated");
           }
-          const obsEntity = db.getEntityById(obs.entityId);
-          graph.triggerAutoExport(obsEntity?.name);
+          graph.triggerAutoExport(Array.from(affectedEntityNames));
           return textContent({
             ok: true,
             type: "observation",
@@ -4838,14 +5022,23 @@ function registerCoreTools(server, graph, db) {
             cascadedStaleCount: staleCount
           });
         }
-        const ent = db.getEntityByName(target);
+        const ent = db.getEntityByName(target) ?? db.getEntityById(target);
         if (ent) {
           const obsList = db.getObservationsByEntity(ent.id);
           let staleCount = 0;
+          const affectedEntityNames = /* @__PURE__ */ new Set();
+          affectedEntityNames.add(ent.name);
           for (const o of obsList) {
             if (cascade) {
               const cascadeRes = db.cascadeInvalidate(o.id);
               staleCount += cascadeRes.staleIds.length;
+              for (const sId of cascadeRes.staleIds) {
+                const sObs = db.getObservationById(sId);
+                if (sObs) {
+                  const sEnt = db.getEntityById(sObs.entityId);
+                  if (sEnt) affectedEntityNames.add(sEnt.name);
+                }
+              }
             }
             if (!hard) {
               db.setObservationStatus(o.id, "invalidated");
@@ -4854,7 +5047,7 @@ function registerCoreTools(server, graph, db) {
           if (hard) {
             graph.deleteEntities([ent.name]);
           } else {
-            graph.triggerAutoExport(ent.name);
+            graph.triggerAutoExport(Array.from(affectedEntityNames));
           }
           return textContent({
             ok: true,
@@ -4922,8 +5115,8 @@ function registerCoreTools(server, graph, db) {
     },
     async ({ filePath, entity, domain, facts, tier, relations }) => {
       try {
-        const resolvedPath = path8.isAbsolute(filePath) ? filePath : path8.resolve(process.cwd(), filePath);
-        const storageRoot = graph.getStorageRoot ? graph.getStorageRoot() : db.getDataDir();
+        const resolvedPath = path8.resolve(filePath);
+        const storageRoot = graph.getStorageRoot();
         const stored = await storeMediaAsset(resolvedPath, storageRoot);
         let ent = db.getEntityByName(entity);
         if (!ent) {
@@ -4957,8 +5150,10 @@ function registerCoreTools(server, graph, db) {
         const tierVal = tier ?? "contextual";
         const observationIds = [];
         const warnings = [];
-        for (const fact of facts) {
-          const conflict = await checkContradiction(fact, ent.id, db);
+        const conflicts = await Promise.all(facts.map((fact) => checkContradiction(fact, ent.id, db)));
+        for (let i = 0; i < facts.length; i++) {
+          const fact = facts[i];
+          const conflict = conflicts[i];
           if (conflict.hasContradiction) {
             warnings.push({
               fact,
@@ -5112,11 +5307,11 @@ import { z as z2 } from "zod";
 var entitySchema = {
   entities: z2.array(
     z2.object({
-      name: z2.string().min(1).describe("Unique human-readable entity name"),
-      entityType: z2.string().min(1).describe("Entity type such as person, tool, project, preference, concept, or skill"),
-      domain: z2.string().optional().describe("Domain scope such as personal or project:<name>"),
+      name: z2.string().trim().min(1).describe("Unique human-readable entity name"),
+      entityType: z2.string().trim().min(1).describe("Entity type such as person, tool, project, preference, concept, or skill"),
+      domain: z2.string().trim().min(1).optional().describe("Domain scope such as personal or project:<name>"),
       visibility: z2.enum(["public", "restricted", "private"]).optional().describe("Access level for the entity"),
-      allowedAgents: z2.array(z2.string().min(1)).optional().describe("Explicit agent whitelist; empty means all agents")
+      allowedAgents: z2.array(z2.string().trim().min(1)).optional().describe("Explicit agent whitelist; empty means all agents")
     })
   ).min(1).describe("Entities to create")
 };
@@ -5144,7 +5339,7 @@ function registerEntityTools(server, graph) {
     "delete_entities",
     "Delete entities by name. This removes the entity node and cascades to its attached observations and relations. Use with care when a memory branch is obsolete or incorrect.",
     {
-      names: z2.array(z2.string().min(1)).min(1).describe("Entity names to delete")
+      names: z2.array(z2.string().trim().min(1)).min(1).describe("Entity names to delete")
     },
     async ({ names }) => {
       try {
@@ -5165,9 +5360,9 @@ import { z as z3 } from "zod";
 var relationSchema = {
   relations: z3.array(
     z3.object({
-      from: z3.string().min(1).describe("Source entity name"),
-      to: z3.string().min(1).describe("Target entity name"),
-      relationType: z3.string().min(1).describe("Relation type such as uses, prefers, works_on, knows, or depends_on")
+      from: z3.string().trim().min(1).describe("Source entity name"),
+      to: z3.string().trim().min(1).describe("Target entity name"),
+      relationType: z3.string().trim().min(1).describe("Relation type such as uses, prefers, works_on, knows, or depends_on")
     })
   ).min(1).describe("Relations to create")
 };
@@ -5182,7 +5377,14 @@ function registerRelationTools(server, graph) {
     async ({ relations }) => {
       try {
         const created = graph.createRelations(relations);
-        return textContent3({ ok: true, created, count: created.length });
+        const skipped = relations.length - created.length;
+        return textContent3({
+          ok: true,
+          created,
+          count: created.length,
+          requested: relations.length,
+          ...skipped > 0 ? { warning: `${skipped} relation(s) skipped due to missing entities` } : {}
+        });
       } catch (error) {
         return {
           isError: true,
@@ -5304,13 +5506,13 @@ function registerSearchTools(server, graph) {
     "search_memory",
     "Search the memory graph using SQLite FTS5 with BM25 ranking. Use this when you know part of a name, fact, or observation text and want the most relevant entities and observations.",
     {
-      query: z5.string().min(1).describe("Search text to match against entity names, types, and observation content"),
+      query: z5.string().trim().min(1).describe("Search text to match against entity names, types, and observation content"),
       limit: z5.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
       domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, limit, domain }) => {
       try {
-        const result = graph.searchMemory(query, limit ?? 20, domain);
+        const result = graph.searchMemory(query.trim(), limit ?? 20, domain);
         return textContent5({ ok: true, ...result });
       } catch (error) {
         return {
@@ -5324,13 +5526,13 @@ function registerSearchTools(server, graph) {
     "search_relevant_memory",
     "Search the memory graph with stop words (e.g. yang, di, ke, the, of, in) filtered out to optimize token efficiency and retrieval precision. Use this when querying user profiles or project preferences using a natural language prompt.",
     {
-      query: z5.string().min(1).describe("Search text prompt to filter and match against memory"),
+      query: z5.string().trim().min(1).describe("Search text prompt to filter and match against memory"),
       limit: z5.number().int().positive().max(100).optional().describe("Maximum number of ranked results to return"),
       domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, limit, domain }) => {
       try {
-        const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
+        const result = graph.searchRelevantMemory(query.trim(), limit ?? 20, domain);
         return textContent5({ ok: true, ...result });
       } catch (error) {
         return {
@@ -5363,11 +5565,11 @@ function registerSearchTools(server, graph) {
     "open_nodes",
     "Open a set of entity names and return each matching node with its full observations and relations. Use this when you already know the entities you want to inspect.",
     {
-      names: z5.array(z5.string().min(1)).min(1).describe("Entity names to open")
+      names: z5.array(z5.string().trim().min(1)).min(1).describe("Entity names to open")
     },
     async ({ names }) => {
       try {
-        const snapshot = graph.openNodes(names);
+        const snapshot = graph.openNodes(names.map((n) => n.trim()));
         return textContent5({ ok: true, snapshot });
       } catch (error) {
         return {
@@ -5381,14 +5583,14 @@ function registerSearchTools(server, graph) {
     "get_context",
     "GraphRAG multi-hop context engine. Provide a query to find seeds via FTS5 BM25, then traverse the graph outwards (BFS) by N levels to collect full relational context into a compressed markdown string. Fast and eliminates round-trips.",
     {
-      query: z5.string().min(1).describe("Search query for starting seeds"),
+      query: z5.string().trim().min(1).describe("Search query for starting seeds"),
       depth: z5.number().int().min(0).max(5).optional().describe("Graph traversal depth (0 = seeds only, 1 = immediate neighbors)"),
       limit: z5.number().int().positive().max(50).optional().describe("Maximum number of starting seed entities to match"),
       domain: z5.string().optional().describe("Optional domain filter such as personal or project:<name>")
     },
     async ({ query, depth, limit, domain }) => {
       try {
-        const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
+        const context = graph.getContext(query.trim(), depth ?? 1, limit ?? 5, domain);
         return textContent5(context);
       } catch (error) {
         return {
@@ -5404,18 +5606,23 @@ function registerSearchTools(server, graph) {
 import { z as z6 } from "zod";
 
 // src/maintenance/dedup.ts
-function getJaccardSimilarity(s1, s2) {
-  const words1 = new Set(s1.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean));
-  const words2 = new Set(s2.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean));
+function tokenizeWords(s) {
+  return new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").split(/\s+/).filter(Boolean));
+}
+function getJaccardFromSets(words1, words2) {
   if (words1.size === 0 || words2.size === 0) return 0;
-  const intersection = new Set([...words1].filter((x) => words2.has(x)));
-  const union = /* @__PURE__ */ new Set([...words1, ...words2]);
-  return intersection.size / union.size;
+  let intersectionCount = 0;
+  for (const w of words1) {
+    if (words2.has(w)) intersectionCount++;
+  }
+  const unionSize = words1.size + words2.size - intersectionCount;
+  return unionSize > 0 ? intersectionCount / unionSize : 0;
 }
 function findDuplicates(observations, threshold) {
-  const envRaw = process.env.AMNESHIA_DEDUP_THRESHOLD;
+  const envRaw = process.env.AMNESHIA_DEDUP_THRESHOLD ?? process.env.AMNESIA_DEDUP_THRESHOLD;
   const envParsed = envRaw ? parseFloat(envRaw) : NaN;
-  const simThreshold = threshold ?? (!Number.isNaN(envParsed) ? envParsed : 0.8);
+  const validEnvThreshold = !Number.isNaN(envParsed) && envParsed >= 0 && envParsed <= 1 ? envParsed : 0.8;
+  const simThreshold = typeof threshold === "number" && !Number.isNaN(threshold) && threshold >= 0 && threshold <= 1 ? threshold : validEnvThreshold;
   const duplicates = [];
   const supersededIds = /* @__PURE__ */ new Set();
   const byTier = /* @__PURE__ */ new Map();
@@ -5427,29 +5634,33 @@ function findDuplicates(observations, threshold) {
     byTier.set(tier, list);
   }
   for (const [_tier, tierObs] of byTier.entries()) {
-    for (let i = 0; i < tierObs.length; i++) {
-      for (let j = i + 1; j < tierObs.length; j++) {
-        const obs1 = tierObs[i];
-        const obs2 = tierObs[j];
-        if (supersededIds.has(obs1.id) || supersededIds.has(obs2.id)) {
+    tierObs.sort((a, b) => {
+      const tA = new Date(a.createdAt).getTime();
+      const tB = new Date(b.createdAt).getTime();
+      return (Number.isNaN(tB) ? 0 : tB) - (Number.isNaN(tA) ? 0 : tA);
+    });
+    const tokenized = tierObs.map((obs) => ({
+      obs,
+      normalized: obs.content.toLowerCase().trim(),
+      words: tokenizeWords(obs.content)
+    }));
+    for (let i = 0; i < tokenized.length; i++) {
+      for (let j = i + 1; j < tokenized.length; j++) {
+        const item1 = tokenized[i];
+        const item2 = tokenized[j];
+        if (supersededIds.has(item1.obs.id) || supersededIds.has(item2.obs.id)) {
           continue;
         }
-        const isExact = obs1.content.toLowerCase().trim() === obs2.content.toLowerCase().trim();
-        const sim = isExact ? 1 : getJaccardSimilarity(obs1.content, obs2.content);
+        const isExact = item1.normalized === item2.normalized;
+        const sim = isExact ? 1 : getJaccardFromSets(item1.words, item2.words);
         if (isExact || sim >= simThreshold) {
-          const t1 = new Date(obs1.createdAt).getTime();
-          const t2 = new Date(obs2.createdAt).getTime();
-          const time1 = Number.isNaN(t1) ? 0 : t1;
-          const time2 = Number.isNaN(t2) ? 0 : t2;
-          const older = time1 <= time2 ? obs1 : obs2;
-          const newer = older === obs1 ? obs2 : obs1;
           duplicates.push({
-            older,
-            newer,
+            older: item2.obs,
+            newer: item1.obs,
             similarity: sim,
             reason: isExact ? "Exact match duplicate" : `Jaccard similarity ${(sim * 100).toFixed(0)}% >= ${(simThreshold * 100).toFixed(0)}%`
           });
-          supersededIds.add(older.id);
+          supersededIds.add(item2.obs.id);
         }
       }
     }
@@ -5476,7 +5687,7 @@ function computeDecayScore(obs, nowMs = Date.now()) {
   }
   if (obs.expiresAt) {
     const exp = new Date(obs.expiresAt).getTime();
-    if (!Number.isNaN(exp) && exp <= nowMs) {
+    if (Number.isNaN(exp) || exp <= nowMs) {
       return 0;
     }
   }
@@ -5484,20 +5695,23 @@ function computeDecayScore(obs, nowMs = Date.now()) {
   const maxDays = TIER_MAX_INACTIVE_DAYS[obs.authorityTier] ?? 90;
   const rawDate = obs.lastAccessedAt || obs.createdAt;
   const parsed = new Date(rawDate).getTime();
-  const lastActivity = Number.isNaN(parsed) ? nowMs : parsed;
+  const lastActivity = Number.isNaN(parsed) ? 0 : parsed;
   const daysInactive = Math.max(0, (nowMs - lastActivity) / (1e3 * 60 * 60 * 24));
   if (daysInactive >= maxDays) {
     return 0;
   }
   const recencyFactor = Math.max(0, 1 - daysInactive / maxDays);
-  const frequencyFactor = 1 + Math.log10((obs.accessCount || 0) + 1);
+  const safeAccessCount = Math.max(0, obs.accessCount || 0);
+  const frequencyFactor = 1 + Math.log10(safeAccessCount + 1);
   return tierWeight * frequencyFactor * recencyFactor;
 }
 function evaluateDecay(observations, threshold = 0.1, nowMs = Date.now()) {
   const decayed = [];
   const retained = [];
+  const inactive = [];
   for (const obs of observations) {
     if (obs.status !== "active") {
+      inactive.push(obs);
       continue;
     }
     if (obs.authorityTier === "invariant") {
@@ -5511,10 +5725,10 @@ function evaluateDecay(observations, threshold = 0.1, nowMs = Date.now()) {
       retained.push(obs);
     }
   }
-  return { decayed, retained };
+  return { decayed, retained, inactive };
 }
 function applyDecay(db, threshold = 0.1, nowMs = Date.now()) {
-  const snapshot = db.readGraph();
+  const snapshot = db.readGraph(void 0, void 0, "active");
   const decayedIds = [];
   for (const entity of snapshot.entities) {
     const { decayed } = evaluateDecay(entity.observations, threshold, nowMs);
@@ -5615,11 +5829,12 @@ function registerLifecycleTools(server, graph, db) {
     "consolidate_memory",
     "Execute deterministic memory maintenance: purges expired ephemeral items, recalculates authority-tier value decay, and deduplicates identical or near-duplicate facts.",
     {
-      domain: z6.string().optional().describe("Filter maintenance to a specific domain (e.g. personal, work)")
+      domain: z6.string().optional().describe("Filter maintenance to a specific domain (e.g. personal, work)"),
+      dryRun: z6.boolean().optional().describe("Simulate maintenance without mutating the database")
     },
-    async ({ domain }) => {
+    async ({ domain, dryRun }) => {
       try {
-        const result = runMaintenance(graph, db, domain);
+        const result = runMaintenance(graph, db, domain, dryRun === true);
         return textContent6({ ok: true, result });
       } catch (error) {
         return {
@@ -5643,7 +5858,7 @@ function registerUtilityTools(server, graph) {
     {},
     async () => {
       try {
-        const writes = exportToMarkdown(graph);
+        const writes = exportToMarkdown(graph, true);
         return textContent7({ ok: true, exported: writes.length, writes });
       } catch (error) {
         return {
@@ -5655,17 +5870,18 @@ function registerUtilityTools(server, graph) {
   );
   server.tool(
     "manage_export_targets",
-    "Manage export destinations for markdown snapshots. Use list to inspect targets, add to register a new destination, or remove to delete one by id.",
+    "Manage export destinations for markdown snapshots. Use list to inspect targets, add to register a new destination, toggle to flip auto-export, or remove to delete one by id.",
     {
-      action: z7.enum(["list", "add", "remove"]).describe("Action to perform on export targets"),
-      name: z7.string().optional().describe("Target name when adding a destination"),
-      path: z7.string().optional().describe("Filesystem path when adding a destination"),
+      action: z7.enum(["list", "add", "remove", "toggle"]).describe("Action to perform on export targets"),
+      name: z7.string().trim().min(1).optional().describe("Target name when adding a destination"),
+      path: z7.string().trim().min(1).optional().describe("Filesystem path when adding a destination"),
       format: z7.enum(["markdown", "json"]).optional().describe("Target format when adding a destination"),
-      id: z7.string().optional().describe("Export target id when removing a destination")
+      autoExport: z7.boolean().optional().describe("Whether to automatically export snapshots on mutation"),
+      id: z7.string().trim().min(1).optional().describe("Export target id when removing or toggling a destination")
     },
-    async ({ action, name, path: path16, format, id }) => {
+    async ({ action, name, path: path16, format, autoExport, id }) => {
       try {
-        const result = graph.manageExportTargets({ action, name, path: path16, format, id });
+        const result = graph.manageExportTargets({ action, name, path: path16, format, autoExport, id });
         return textContent7({ ok: true, result });
       } catch (error) {
         return {
@@ -5678,15 +5894,27 @@ function registerUtilityTools(server, graph) {
 }
 
 // src/tools/index.ts
+var registeredServers = /* @__PURE__ */ new WeakSet();
 function registerTools(server, graph, db, profile = "full") {
-  registerCoreTools(server, graph, db);
-  if (profile === "full") {
-    registerEntityTools(server, graph);
-    registerRelationTools(server, graph);
-    registerObservationTools(server, graph);
-    registerSearchTools(server, graph);
-    registerLifecycleTools(server, graph, db);
-    registerUtilityTools(server, graph);
+  if (registeredServers.has(server)) {
+    return;
+  }
+  if (profile !== "core" && profile !== "full") {
+    throw new Error(`Invalid tool profile: "${profile}". Expected "core" or "full".`);
+  }
+  try {
+    registerCoreTools(server, graph, db);
+    if (profile === "full") {
+      registerEntityTools(server, graph);
+      registerRelationTools(server, graph);
+      registerObservationTools(server, graph);
+      registerSearchTools(server, graph);
+      registerLifecycleTools(server, graph, db);
+      registerUtilityTools(server, graph);
+    }
+    registeredServers.add(server);
+  } catch (error) {
+    throw new Error(`Failed to register MCP tools (${profile} profile): ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -5862,10 +6090,19 @@ async function adoptMemory(options = {}) {
 }
 
 // src/storage/index.ts
-function resolveStorageConfig(forceLocal = false) {
+function resolveStorageConfig(forceLocalOrOptions = false) {
+  const options = typeof forceLocalOrOptions === "boolean" ? { forceLocal: forceLocalOrOptions } : forceLocalOrOptions;
+  if (options.dataDir) {
+    const resolved = path10.resolve(options.dataDir);
+    return {
+      mode: "local",
+      dataDir: resolved,
+      knowledgeDir: path10.join(resolved, "knowledge")
+    };
+  }
   const cwd = process.cwd();
   const localAmneshiaDir = path10.join(cwd, ".amneshia");
-  if (forceLocal || fs10.existsSync(localAmneshiaDir)) {
+  if (options.forceLocal || fs10.existsSync(localAmneshiaDir) && fs10.statSync(localAmneshiaDir).isDirectory()) {
     return {
       mode: "local",
       dataDir: localAmneshiaDir,
@@ -5930,9 +6167,11 @@ var DualWriteSync = class {
   }
   syncAll() {
     const snapshot = this.database.readGraph();
+    const mediaList = this.database.getAllMediaAssets();
+    const mediaByEntity = new Map(mediaList.map((m) => [m.entityId, m]));
     let count = 0;
     for (const entity of snapshot.entities) {
-      const media = this.database.getMediaByEntity(entity.id);
+      const media = mediaByEntity.get(entity.id) ?? null;
       saveEntityMarkdown(this.knowledgeDir, entity, entity.observations, entity.relations, media);
       count++;
     }
@@ -5953,13 +6192,25 @@ async function startServer(options = {}) {
   const db = new DatabaseLayer(dataDir);
   const dualWrite = new DualWriteSync(storageConfig.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, dualWrite);
-  const server = new McpServer({ name: "Amneshia", version: "3.2.2" });
+  const server = new McpServer({ name: "Amneshia", version: "3.3.0" });
   registerTools(server, graph, db, options.toolProfile);
+  let httpListener;
+  const sseTransports = /* @__PURE__ */ new Map();
   const cleanup = async () => {
+    console.error("[Amneshia] Shutting down gracefully...");
+    if (httpListener) {
+      await new Promise((resolve) => httpListener?.close(() => resolve()));
+    }
+    sseTransports.clear();
+    try {
+      await server.close();
+      db.close();
+    } catch {
+    }
     process.exit(0);
   };
-  process.on("SIGINT", cleanup);
-  process.on("SIGTERM", cleanup);
+  process.once("SIGINT", cleanup);
+  process.once("SIGTERM", cleanup);
   if (options.http) {
     const app = express();
     app.disable("x-powered-by");
@@ -5985,15 +6236,21 @@ async function startServer(options = {}) {
       }
       next();
     });
-    const sseTransports = /* @__PURE__ */ new Map();
     app.get("/sse", async (req, res) => {
-      const sessionId = req.query.sessionId || crypto.randomUUID();
-      const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
-      sseTransports.set(sessionId, transport);
-      res.on("close", () => {
-        sseTransports.delete(sessionId);
-      });
-      await server.connect(transport);
+      try {
+        const sessionId = req.query.sessionId || crypto.randomUUID();
+        const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+        sseTransports.set(sessionId, transport);
+        res.on("close", () => {
+          sseTransports.delete(sessionId);
+        });
+        await server.connect(transport);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: msg });
+        }
+      }
     });
     app.post("/messages", async (req, res) => {
       const sessionId = req.query.sessionId;
@@ -6006,25 +6263,62 @@ async function startServer(options = {}) {
         res.status(404).json({ error: "SSE session not found or inactive" });
         return;
       }
-      await transport.handlePostMessage(req, res);
+      try {
+        await transport.handlePostMessage(req, res);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: msg || "Internal server error" });
+      }
     });
     app.get("/health", (_req, res) => {
-      res.json({ status: "ok", name: "amneshia", version: "3.2.2" });
+      res.json({ status: "ok", name: "amneshia", version: "3.3.0" });
     });
     app.get("/api/graph", (req, res) => res.json(graph.readGraph(req.query.domain)));
     app.get("/api/search", (req, res) => res.json(graph.searchMemory(req.query.q)));
     app.get("/api/stats", (req, res) => res.json(graph.getStats()));
-    app.post("/api/entities", (req, res) => res.json(graph.createEntities(req.body.entities)));
+    app.post("/api/entities", (req, res) => {
+      try {
+        res.json(graph.createEntities(req.body.entities));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete("/api/entities", (req, res) => res.json(graph.deleteEntities(req.body.names)));
-    app.post("/api/observations", async (req, res) => res.json(await graph.addObservations(req.body.observations)));
+    app.post("/api/observations", async (req, res) => {
+      try {
+        res.json(await graph.addObservations(req.body.observations));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete("/api/observations", (req, res) => res.json(graph.deleteObservations(req.body.ids)));
     app.put("/api/observations", (req, res) => res.json(graph.updateObservation(req.body)));
-    app.post("/api/relations", (req, res) => res.json(graph.createRelations(req.body.relations)));
+    app.post("/api/relations", (req, res) => {
+      try {
+        res.json(graph.createRelations(req.body.relations));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
+    });
     app.delete("/api/relations", (req, res) => res.json(graph.deleteRelations(req.body.ids)));
     app.get("/api/exports", (req, res) => res.json(db.getExportTargets()));
     app.post("/api/exports", (req, res) => {
-      const autoExportVal = req.body.autoExport !== false ? 1 : 0;
-      res.json(db.addExportTarget(req.body.name, req.body.path, req.body.format, autoExportVal));
+      try {
+        const result = graph.manageExportTargets({
+          action: "add",
+          name: req.body.name,
+          path: req.body.path,
+          format: req.body.format,
+          autoExport: req.body.autoExport
+        });
+        res.json(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(400).json({ error: msg });
+      }
     });
     app.delete("/api/exports/:id", (req, res) => res.json(db.removeExportTarget(req.params.id)));
     app.post("/api/exports/:id/toggle", (req, res) => {
@@ -6083,7 +6377,7 @@ async function startServer(options = {}) {
       res.sendFile(path11.join(uiPath, "index.html"));
     });
     const port = options.port || 3457;
-    const httpListener = app.listen(port, "127.0.0.1", () => {
+    httpListener = app.listen(port, "127.0.0.1", () => {
       console.error(`[Amneshia] HTTP Dashboard running on http://127.0.0.1:${port}`);
     });
     httpListener.on("error", (err) => {
@@ -6093,18 +6387,6 @@ async function startServer(options = {}) {
         console.error(`[Amneshia] Express server error: ${err.message}`);
       }
     });
-    const cleanup2 = () => {
-      console.error("[Amneshia] Shutting down gracefully...");
-      httpListener.close();
-      sseTransports.clear();
-      try {
-        db.close();
-      } catch {
-      }
-      process.exit(0);
-    };
-    process.once("SIGINT", cleanup2);
-    process.once("SIGTERM", cleanup2);
   }
   if (options.stdio !== false && !process.argv.includes("--daemon")) {
     const transport = new StdioServerTransport();
@@ -6116,7 +6398,6 @@ async function startServer(options = {}) {
 // src/export/exporter.ts
 import fs11 from "fs";
 import path12 from "path";
-import os6 from "os";
 import Database2 from "better-sqlite3";
 function filterMemoryGraph(db, filters) {
   const snapshot = db.readGraph(filters.domain);
@@ -6125,12 +6406,17 @@ function filterMemoryGraph(db, filters) {
   const allowedStatuses = filters.statuses ? new Set(filters.statuses) : null;
   let matchingEntityIds = null;
   let matchingObsIds = null;
+  const matchedByNameIds = /* @__PURE__ */ new Set();
   if (filters.query && filters.query.trim().length > 0) {
     const ftsResults = db.searchFTSRelevant(filters.query, 1e3);
     matchingEntityIds = /* @__PURE__ */ new Set();
     matchingObsIds = /* @__PURE__ */ new Set();
+    const queryLower = filters.query.trim().toLowerCase();
     for (const res of ftsResults) {
       matchingEntityIds.add(res.entity.id);
+      if (res.entity.name.toLowerCase().includes(queryLower)) {
+        matchedByNameIds.add(res.entity.id);
+      }
       for (const obs of res.observations) {
         matchingObsIds.add(obs.id);
       }
@@ -6153,12 +6439,12 @@ function filterMemoryGraph(db, filters) {
       if (allowedStatuses && !allowedStatuses.has(obs.status)) {
         return false;
       }
-      if (matchingObsIds && !matchingObsIds.has(obs.id)) {
+      if (matchingObsIds && !matchedByNameIds.has(ent.id) && !matchingObsIds.has(obs.id)) {
         return false;
       }
       return true;
     });
-    if (filters.query && filteredObs.length === 0 && (!matchingEntityIds || !matchingEntityIds.has(ent.id))) {
+    if (filters.query && filteredObs.length === 0 && !matchedByNameIds.has(ent.id)) {
       continue;
     }
     const media = db.getMediaByEntity(ent.id);
@@ -6182,12 +6468,15 @@ var MemoryExporter = class {
   async export(format, outputPath, filters = {}) {
     const resolvedPath = path12.resolve(outputPath);
     const filteredData = filterMemoryGraph(this.db, filters);
+    const entityIds = new Set(filteredData.map((e) => e.id));
     let totalObs = 0;
     const uniqueRelIds = /* @__PURE__ */ new Set();
     for (const e of filteredData) {
       totalObs += e.observations.length;
       for (const r of e.relations) {
-        uniqueRelIds.add(r.id);
+        if (entityIds.has(r.fromEntity) && entityIds.has(r.toEntity)) {
+          uniqueRelIds.add(r.id);
+        }
       }
     }
     const totalRel = uniqueRelIds.size;
@@ -6222,16 +6511,13 @@ var MemoryExporter = class {
       entitiesCount: data.length,
       entities: data
     };
-    fs11.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+    const tempPath = `${outputPath}.tmp.${Date.now()}`;
+    fs11.writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf-8");
+    fs11.renameSync(tempPath, outputPath);
   }
   exportToMarkdown(outputDir, data) {
     fs11.mkdirSync(outputDir, { recursive: true });
-    const possibleKnowledgeDirs = [
-      path12.join(this.db.getDataDir(), "..", "knowledge"),
-      path12.join(this.db.getDataDir(), "knowledge"),
-      path12.join(process.cwd(), ".amneshia", "knowledge"),
-      path12.join(os6.homedir(), ".amneshia", "knowledge")
-    ];
+    const knowledgeDir = path12.resolve(this.db.getDataDir(), "knowledge");
     for (const ent of data) {
       saveEntityMarkdown(outputDir, ent, ent.observations, ent.relations, ent.media);
       if (ent.media) {
@@ -6239,17 +6525,17 @@ var MemoryExporter = class {
         if (path12.isAbsolute(relPath) || relPath.includes("..")) {
           continue;
         }
-        for (const kDir of possibleKnowledgeDirs) {
-          const srcBlob = path12.join(kDir, relPath);
-          const destBlob = path12.resolve(outputDir, relPath);
-          if (!destBlob.startsWith(path12.resolve(outputDir) + path12.sep)) {
-            continue;
-          }
-          if (fs11.existsSync(srcBlob) && !fs11.existsSync(destBlob)) {
-            fs11.mkdirSync(path12.dirname(destBlob), { recursive: true });
-            fs11.copyFileSync(srcBlob, destBlob);
-            break;
-          }
+        const srcBlob = path12.resolve(knowledgeDir, relPath);
+        const destBlob = path12.resolve(outputDir, relPath);
+        if (!srcBlob.startsWith(knowledgeDir + path12.sep)) {
+          continue;
+        }
+        if (!destBlob.startsWith(path12.resolve(outputDir) + path12.sep)) {
+          continue;
+        }
+        if (fs11.existsSync(srcBlob) && !fs11.existsSync(destBlob)) {
+          fs11.mkdirSync(path12.dirname(destBlob), { recursive: true });
+          fs11.copyFileSync(srcBlob, destBlob);
         }
       }
     }
@@ -6273,16 +6559,17 @@ var MemoryExporter = class {
   exportToSqlite(outputPath, data) {
     const parentDir = path12.dirname(outputPath);
     fs11.mkdirSync(parentDir, { recursive: true });
-    if (fs11.existsSync(outputPath)) {
-      fs11.unlinkSync(outputPath);
+    const tempPath = `${outputPath}.tmp.${Date.now()}`;
+    if (fs11.existsSync(tempPath)) {
+      fs11.unlinkSync(tempPath);
     }
-    const exportDb = new Database2(outputPath);
+    const exportDb = new Database2(tempPath);
     try {
       exportDb.pragma("journal_mode = WAL");
       exportDb.pragma("synchronous = NORMAL");
       exportDb.pragma("foreign_keys = ON");
       exportDb.exec(SCHEMA_SQL);
-      runMigrations(exportDb);
+      exportDb.pragma("user_version = 4");
       const insertEntity = exportDb.prepare(`
         INSERT INTO entities (id, name, entity_type, domain, visibility, allowed_agents, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -6348,26 +6635,40 @@ var MemoryExporter = class {
             );
           }
         }
+        const insertedRelationIds = /* @__PURE__ */ new Set();
         for (const ent of data) {
           for (const rel of ent.relations) {
-            if (entityIds.has(rel.fromEntity) && entityIds.has(rel.toEntity)) {
-              try {
-                insertRelation.run(
-                  rel.id,
-                  rel.fromEntity,
-                  rel.toEntity,
-                  rel.relationType,
-                  rel.createdAt
-                );
-              } catch {
-              }
+            if (entityIds.has(rel.fromEntity) && entityIds.has(rel.toEntity) && !insertedRelationIds.has(rel.id)) {
+              insertRelation.run(
+                rel.id,
+                rel.fromEntity,
+                rel.toEntity,
+                rel.relationType,
+                rel.createdAt
+              );
+              insertedRelationIds.add(rel.id);
             }
           }
         }
       });
       populateTransaction();
-    } finally {
       exportDb.close();
+      if (fs11.existsSync(outputPath)) {
+        fs11.unlinkSync(outputPath);
+      }
+      fs11.renameSync(tempPath, outputPath);
+    } catch (err) {
+      try {
+        exportDb.close();
+      } catch {
+      }
+      if (fs11.existsSync(tempPath)) {
+        try {
+          fs11.unlinkSync(tempPath);
+        } catch {
+        }
+      }
+      throw err;
     }
   }
 };
@@ -6377,6 +6678,21 @@ import fs12 from "fs";
 import path13 from "path";
 function normalizeContent(content) {
   return content.trim().replace(/\s+/g, " ").toLowerCase();
+}
+function areObservationsEqual(a, b) {
+  if (a.id !== b.id) return false;
+  if (normalizeContent(a.content) !== normalizeContent(b.content)) return false;
+  if (a.authorityTier !== b.authorityTier) return false;
+  if (a.confidence !== b.confidence) return false;
+  if (a.status !== b.status) return false;
+  if ((a.supersedes || null) !== (b.supersedes || null)) return false;
+  const aDerived = (a.derivedFrom ?? []).slice().sort();
+  const bDerived = (b.derivedFrom ?? []).slice().sort();
+  if (aDerived.length !== bDerived.length) return false;
+  for (let i = 0; i < aDerived.length; i++) {
+    if (aDerived[i] !== bDerived[i]) return false;
+  }
+  return true;
 }
 function extractDirectionalRelations(markdown) {
   const relations = [];
@@ -6396,7 +6712,7 @@ function extractDirectionalRelations(markdown) {
   return relations;
 }
 function serializeParsedEntity(entity) {
-  const frontmatter = [
+  const frontmatterLines = [
     "---",
     `id: ${JSON.stringify(entity.id || "")}`,
     `name: ${JSON.stringify(entity.name || "")}`,
@@ -6405,9 +6721,18 @@ function serializeParsedEntity(entity) {
     `visibility: ${JSON.stringify(entity.visibility || "public")}`,
     `allowed_agents: ${JSON.stringify(entity.allowedAgents ?? [])}`,
     `created: ${JSON.stringify(entity.createdAt || (/* @__PURE__ */ new Date()).toISOString())}`,
-    `updated: ${JSON.stringify(entity.updatedAt || (/* @__PURE__ */ new Date()).toISOString())}`,
-    "---"
-  ].join("\n");
+    `updated: ${JSON.stringify(entity.updatedAt || (/* @__PURE__ */ new Date()).toISOString())}`
+  ];
+  if (entity.media) {
+    frontmatterLines.push("media:");
+    frontmatterLines.push(`  sha256: ${JSON.stringify(entity.media.sha256)}`);
+    frontmatterLines.push(`  mime_type: ${JSON.stringify(entity.media.mimeType)}`);
+    frontmatterLines.push(`  file_name: ${JSON.stringify(entity.media.fileName)}`);
+    frontmatterLines.push(`  file_size: ${entity.media.fileSize}`);
+    frontmatterLines.push(`  relative_path: ${JSON.stringify(entity.media.relativePath)}`);
+  }
+  frontmatterLines.push("---");
+  const frontmatter = frontmatterLines.join("\n");
   const obsLines = [];
   for (const obs of entity.observations) {
     const isInactive = obs.status === "superseded" || obs.status === "invalidated" || obs.status === "decayed";
@@ -6433,6 +6758,17 @@ function serializeParsedEntity(entity) {
     relLines.push(`- \`${rel.relationType}\` ${dir} ${rel.targetName}`);
   }
   const sections = [frontmatter];
+  if (entity.media) {
+    if (entity.media.mimeType.startsWith("image/")) {
+      sections.push(`
+![${entity.media.fileName}](../${entity.media.relativePath})
+`);
+    } else {
+      sections.push(`
+[${entity.media.fileName}](../${entity.media.relativePath}) *(${entity.media.mimeType}, ${entity.media.fileSize} bytes)*
+`);
+    }
+  }
   sections.push("## Observations\n");
   if (obsLines.length > 0) {
     sections.push(obsLines.join("\n\n"));
@@ -6536,13 +6872,13 @@ function mergeParsedEntities(base, ours, theirs) {
         }
       } else {
         if (!tObs) {
-          const oursModified = JSON.stringify(oObs) !== JSON.stringify(bObs);
+          const oursModified = !areObservationsEqual(oObs, bObs);
           if (oursModified) {
             candidateObservations.push(oObs);
           }
         } else {
-          const oursChanged = JSON.stringify(oObs) !== JSON.stringify(bObs);
-          const theirsChanged = JSON.stringify(tObs) !== JSON.stringify(bObs);
+          const oursChanged = !areObservationsEqual(oObs, bObs);
+          const theirsChanged = !areObservationsEqual(tObs, bObs);
           if (!oursChanged && theirsChanged) {
             candidateObservations.push(tObs);
           } else if (oursChanged && !theirsChanged) {
@@ -6565,7 +6901,7 @@ function mergeParsedEntities(base, ours, theirs) {
       if (!bObs) {
         candidateObservations.push(tObs);
       } else {
-        const theirsModified = JSON.stringify(tObs) !== JSON.stringify(bObs);
+        const theirsModified = !areObservationsEqual(tObs, bObs);
         if (theirsModified) {
           candidateObservations.push(tObs);
         }
@@ -6615,6 +6951,7 @@ function mergeParsedEntities(base, ours, theirs) {
     }
     processedRelKeys.add(key);
   }
+  const media = base ? theirs.media && (!base.media || theirs.media.sha256 !== base.media.sha256) ? theirs.media : ours.media || base.media : ours.media || theirs.media;
   return {
     id,
     name,
@@ -6625,7 +6962,8 @@ function mergeParsedEntities(base, ours, theirs) {
     createdAt,
     updatedAt,
     observations: dedupedObservations,
-    relations: mergedRelations
+    relations: mergedRelations,
+    media
   };
 }
 function mergeMarkdownFiles(basePath, oursPath, theirsPath, targetPath) {
@@ -6706,7 +7044,7 @@ async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3)
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: {
-        "User-Agent": "Amneshia-Updater/3.2.2",
+        "User-Agent": "Amneshia-Updater/3.3.0",
         Accept: "application/vnd.github.v3+json"
       },
       signal: controller.signal
@@ -6734,14 +7072,17 @@ async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3)
   try {
     const jsrRes = await fetch("https://jsr.io/api/scopes/sabilmurti/packages/amneshia", {
       headers: {
-        "User-Agent": "Amneshia-Updater/3.2.2",
+        "User-Agent": "Amneshia-Updater/3.3.0",
         Accept: "application/json"
       },
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (jsrRes.ok) {
       const data = await jsrRes.json();
-      const latestVersion = data.latestVersion || "3.2.2";
+      if (!data.latestVersion) {
+        throw new Error("JSR registry response missing latestVersion property");
+      }
+      const latestVersion = data.latestVersion;
       clearTimeout(timer);
       return {
         version: latestVersion,
@@ -6753,7 +7094,8 @@ async function fetchLatestRelease(repo = "SabilMurti/Amneshia", timeoutMs = 8e3)
     }
   } catch (err) {
     clearTimeout(timer);
-    throw new Error(`Failed to check for Amneshia updates: Network error (${err.message})`);
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to check for Amneshia updates: Network error (${msg})`);
   } finally {
     clearTimeout(timer);
   }
@@ -6824,8 +7166,8 @@ async function performUpdate(options) {
   if (env.isGitClone && env.gitDir) {
     onProgress?.(`Updating Amneshia from git repository (${env.gitDir})...`);
     try {
-      onProgress?.("Fetching latest changes from origin/main...");
-      await execFileAsync2("git", ["pull", "--rebase", "origin", "main"], { cwd: env.gitDir });
+      onProgress?.("Fetching latest changes from tracking remote...");
+      await execFileAsync2("git", ["pull", "--rebase"], { cwd: env.gitDir });
       const execOptions = { cwd: env.gitDir, shell: process.platform === "win32" };
       onProgress?.("Installing updated dependencies...");
       await execFileAsync2(env.pkgManager, ["install"], execOptions);
@@ -6839,7 +7181,8 @@ async function performUpdate(options) {
         message: `Successfully updated Amneshia repository from v${currentVersion} to v${check.latestVersion}.`
       };
     } catch (err) {
-      throw new Error(`Git update failed: ${err.message}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Git update failed: ${msg}`);
     }
   }
   onProgress?.(`Installing Amneshia v${check.latestVersion} globally via ${env.pkgManager}...`);
@@ -6849,35 +7192,38 @@ async function performUpdate(options) {
   }
   let installSuccess = false;
   let method = "tarball";
+  const globalExecOpts = { shell: process.platform === "win32" };
   try {
     onProgress?.(`Downloading and installing release tarball: ${tarballUrl}`);
     if (env.pkgManager === "bun") {
-      await execFileAsync2("bun", ["install", "-g", tarballUrl]);
+      await execFileAsync2("bun", ["install", "-g", tarballUrl], globalExecOpts);
     } else if (env.pkgManager === "pnpm") {
-      await execFileAsync2("pnpm", ["add", "-g", tarballUrl]);
+      await execFileAsync2("pnpm", ["add", "-g", tarballUrl], globalExecOpts);
     } else {
-      await execFileAsync2("npm", ["install", "-g", tarballUrl]);
+      await execFileAsync2("npm", ["install", "-g", tarballUrl], globalExecOpts);
     }
     installSuccess = true;
     method = "tarball";
   } catch (tarballErr) {
-    onProgress?.(`Tarball installation failed (${tarballErr.message}). Falling back to package registry...`);
+    const msg = tarballErr instanceof Error ? tarballErr.message : String(tarballErr);
+    onProgress?.(`Tarball installation failed (${msg}). Falling back to package registry...`);
   }
   if (!installSuccess) {
     try {
       const pkgTarget = `@sabilmurti/amneshia@${check.latestVersion}`;
       onProgress?.(`Installing ${pkgTarget} via ${env.pkgManager}...`);
       if (env.pkgManager === "bun") {
-        await execFileAsync2("bun", ["install", "-g", pkgTarget]);
+        await execFileAsync2("bun", ["install", "-g", pkgTarget], globalExecOpts);
       } else if (env.pkgManager === "pnpm") {
-        await execFileAsync2("pnpm", ["add", "-g", pkgTarget]);
+        await execFileAsync2("pnpm", ["add", "-g", pkgTarget], globalExecOpts);
       } else {
-        await execFileAsync2("npm", ["install", "-g", pkgTarget]);
+        await execFileAsync2("npm", ["install", "-g", pkgTarget], globalExecOpts);
       }
       installSuccess = true;
       method = "registry";
     } catch (regErr) {
-      throw new Error(`Package registry installation failed: ${regErr.message}`);
+      const msg = regErr instanceof Error ? regErr.message : String(regErr);
+      throw new Error(`Package registry installation failed: ${msg}`);
     }
   }
   return {
@@ -6890,8 +7236,15 @@ async function performUpdate(options) {
 }
 
 // src/index.ts
+var APP_VERSION = "3.3.0";
 var program = new Command();
-program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version("3.2.2").option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
+function getConfigForCmd(cmdOpts, cmd) {
+  const commandObj = cmd instanceof Command ? cmd : void 0;
+  const globalOpts = commandObj?.optsWithGlobals ? commandObj.optsWithGlobals() : program.opts();
+  const isLocal = Boolean(cmdOpts?.local || globalOpts?.local || fs14.existsSync(path15.join(process.cwd(), ".amneshia")));
+  return resolveStorageConfig({ forceLocal: isLocal, dataDir: globalOpts?.dataDir });
+}
+program.name("amneshia").description("\u{1F9E0} Amneshia v3 \u2014 Git-native knowledge graph for AI agents with truth maintenance").version(APP_VERSION).option("--data-dir <path>", "Custom data directory").option("-l, --local", "Use local repository directory (.amneshia) instead of global ~/.amneshia").option("--tool-profile <profile>", 'MCP tool profile: "core" (4 tools) or "full" (all tools)', "core").option("--http", "Enable HTTP/SSE server mode", true).option("--no-dashboard", "Disable HTTP Web Dashboard server").option("-p, --port <number>", "Dashboard port number", (val) => parseInt(val, 10), 3457).option("-b, --background", "Run server in background daemon mode", false).option("-d, --daemon", "Alias for --background", false).action(async () => {
   await runDefault();
 });
 program.command("init [dir]").description("Initialize a local .amneshia/ knowledge graph repository").option("-d, --adopt-domain <domain>", "Automatically adopt global entities belonging to this domain").option("-a, --adopt-all", "Automatically adopt all global memory entities into this project").action(async (dir, cmdOpts) => {
@@ -6926,9 +7279,8 @@ program.command("init [dir]").description("Initialize a local .amneshia/ knowled
   console.log(`
 Ready! Track your markdown files with git, and commit knowledge directly.`);
 });
-program.command("reindex").description("Rebuild SQLite FTS5 cache index from markdown files").option("-l, --local", "Reindex local repository in current working directory").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("reindex").description("Rebuild SQLite FTS5 cache index from markdown files").option("-l, --local", "Reindex local repository in current working directory").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   console.log(`[Amneshia] Reindexing from: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
   const sync = new DualWriteSync(config.knowledgeDir, db);
@@ -6939,9 +7291,8 @@ program.command("reindex").description("Rebuild SQLite FTS5 cache index from mar
   console.log(`  - Relations:    ${result.relations}`);
   db.close();
 });
-program.command("sync").description("Export all SQLite entities and observations to Markdown-as-Truth files").option("-l, --local", "Sync local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("sync").description("Export all SQLite entities and observations to Markdown-as-Truth files").option("-l, --local", "Sync local repository").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   console.log(`[Amneshia] Exporting all knowledge to Markdown at: ${config.knowledgeDir}`);
   const db = new DatabaseLayer(config.dataDir);
   const sync = new DualWriteSync(config.knowledgeDir, db);
@@ -6949,9 +7300,8 @@ program.command("sync").description("Export all SQLite entities and observations
   console.log(`[Amneshia] Successfully synced ${count} entities to Markdown-as-Truth files!`);
   db.close();
 });
-program.command("gc").description("Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs").option("-l, --local", "Run GC on local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("gc").description("Garbage collect decayed, expired, and invalidated observations, and purge orphan CAS media blobs").option("-l, --local", "Run GC on local repository").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const expired = db.cleanupExpired();
   const decayed = db.gc();
@@ -6962,9 +7312,8 @@ program.command("gc").description("Garbage collect decayed, expired, and invalid
   console.log(`  - Pruned Orphan Media: ${orphanRes.prunedCount} (${(orphanRes.reclaimedBytes / 1024).toFixed(1)} KB reclaimed)`);
   db.close();
 });
-program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("stats").description("Display knowledge graph statistics and health breakdown").option("-l, --local", "Display stats for local repository").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const stats = db.getStats();
   console.log(`
@@ -7005,9 +7354,8 @@ program.command("serve").description("Start the HTTP Web Dashboard server").opti
   const port = cmdOpts.port ?? program.opts().port ?? 3457;
   await startServer({ local: isLocal, http: true, port, stdio: false });
 });
-program.command("export <output>").description("Export memory knowledge graph to SQLite (.db), Markdown bundle, or JSON").option("-f, --format <format>", "Export format: sqlite, markdown, json", "sqlite").option("-d, --domain <domain>", "Filter by domain name").option("-e, --entity <entities...>", "Filter by specific entity names").option("-t, --tier <tier>", "Filter by minimum authority tier (agent, user, system)").option("-q, --query <query>", "Filter observations using FTS5 search query").option("-l, --local", "Export from local project repository (.amneshia) instead of global").action(async (output, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("export <output>").description("Export memory knowledge graph to SQLite (.db), Markdown bundle, or JSON").option("-f, --format <format>", "Export format: sqlite, markdown, json", "sqlite").option("-d, --domain <domain>", "Filter by domain name").option("-e, --entity <entities...>", "Filter by specific entity names").option("-t, --tier <tier>", "Filter by minimum authority tier (agent, user, system)").option("-q, --query <query>", "Filter observations using FTS5 search query").option("-l, --local", "Export from local project repository (.amneshia) instead of global").action(async (output, cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const validFormats = ["sqlite", "markdown", "json"];
   const format = (cmdOpts.format || "sqlite").toLowerCase();
@@ -7034,7 +7382,8 @@ program.command("export <output>").description("Export memory knowledge graph to
     console.log(`  - Observations: ${result.observationsCount}`);
     console.log(`  - Relations:    ${result.relationsCount}`);
   } catch (err) {
-    console.error(`[Amneshia] Export failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Export failed: ${msg}`);
     db.close();
     process.exit(1);
   }
@@ -7072,9 +7421,8 @@ ${result.dryRun ? "\u{1F50D} [DRY RUN] " : "\u2705 "}Amneshia Adoption Summary:`
     process.exit(1);
   }
 });
-program.command("embed").description("Compute local ONNX vector embeddings for all observations for hybrid semantic search").option("-l, --local", "Use local repository (.amneshia)").option("-f, --force", "Force re-embedding of all observations").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("embed").description("Compute local ONNX vector embeddings for all observations for hybrid semantic search").option("-l, --local", "Use local repository (.amneshia)").option("-f, --force", "Force re-embedding of all observations").action(async (cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const embedder = new LocalOnnxEmbedder();
   try {
@@ -7110,16 +7458,16 @@ program.command("embed").description("Compute local ONNX vector embeddings for a
 
 \u2705 Embedding complete: ${completed} observations embedded in ${duration}s.`);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error(`
-[Amneshia] Embedding failed: ${err.message}`);
+[Amneshia] Embedding failed: ${msg}`);
     db.close();
     process.exit(1);
   }
   db.close();
 });
-program.command("search <query>").description("Search knowledge graph using Hybrid Semantic (FTS5 + ONNX Vector RRF)").option("-d, --domain <domain>", "Filter by domain").option("-l, --local", "Use local repository").option("-n, --limit <number>", "Result limit", (val) => parseInt(val, 10), 10).action(async (query, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+program.command("search <query>").description("Search knowledge graph using Hybrid Semantic (FTS5 + ONNX Vector RRF)").option("-d, --domain <domain>", "Filter by domain").option("-l, --local", "Use local repository").option("-n, --limit <number>", "Result limit", (val) => parseInt(val, 10), 10).action(async (query, cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   try {
     const results = await db.searchHybrid(query, {
@@ -7142,16 +7490,16 @@ program.command("search <query>").description("Search knowledge graph using Hybr
     }
     console.log("");
   } catch (err) {
-    console.error(`[Amneshia] Search error: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Search error: ${msg}`);
     db.close();
     process.exit(1);
   }
   db.close();
 });
 var mediaCmd = program.command("media").description("Manage Content-Addressable Storage (CAS) media memory assets");
-mediaCmd.command("list").description("List all registered media assets across the knowledge graph").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+mediaCmd.command("list").description("List all registered media assets across the knowledge graph").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const assets = db.getAllMediaAssets();
   console.log(`
@@ -7173,9 +7521,8 @@ mediaCmd.command("list").description("List all registered media assets across th
   }
   db.close();
 });
-mediaCmd.command("remember <filePath>").description("Ingest a local media asset with attached facts and relations into CAS").requiredOption("-e, --entity <name>", "Entity name representing this media asset").option("-d, --domain <domain>", "Domain namespace", "personal").option("-f, --fact <facts...>", "Factual observations describing the media").option("-t, --tier <tier>", "Authority tier (invariant, architectural, contextual, ephemeral)", "contextual").option("-r, --relation <relations...>", 'Relationship links in format "relationType:targetEntity"').option("-l, --local", "Use local repository (.amneshia)").action(async (filePath, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+mediaCmd.command("remember <filePath>").description("Ingest a local media asset with attached facts and relations into CAS").requiredOption("-e, --entity <name>", "Entity name representing this media asset").option("-d, --domain <domain>", "Domain namespace", "personal").option("-f, --fact <facts...>", "Factual observations describing the media").option("-t, --tier <tier>", "Authority tier (invariant, architectural, contextual, ephemeral)", "contextual").option("-r, --relation <relations...>", 'Relationship links in format "relationType:targetEntity"').option("-l, --local", "Use local repository (.amneshia)").action(async (filePath, cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   const sync = new DualWriteSync(config.knowledgeDir, db);
   const graph = new KnowledgeGraph(db, sync);
@@ -7217,15 +7564,15 @@ mediaCmd.command("remember <filePath>").description("Ingest a local media asset 
     console.log(`  - Observations: ${result.observationIds.length}`);
     console.log(`  - Relations:    ${result.relations.length}`);
   } catch (err) {
-    console.error(`[Amneshia] Media ingestion failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Media ingestion failed: ${msg}`);
     db.close();
     process.exit(1);
   }
   db.close();
 });
-mediaCmd.command("prune").description("Purge unreferenced orphan media blobs from CAS storage").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+mediaCmd.command("prune").description("Purge unreferenced orphan media blobs from CAS storage").option("-l, --local", "Use local repository (.amneshia)").action((cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   console.log(`[Amneshia] Scanning CAS storage for orphan blobs in ${config.knowledgeDir}...`);
   const pruneRes = db.pruneOrphanMedia(config.knowledgeDir);
@@ -7236,9 +7583,8 @@ mediaCmd.command("prune").description("Purge unreferenced orphan media blobs fro
   db.close();
 });
 var cloudCmd = program.command("cloud").description("Git-native cross-device synchronization for Amneshia knowledge");
-cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remote repository for cloud knowledge sync").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository (.amneshia) instead of global").action(async (remoteUrl, cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remote repository for cloud knowledge sync").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository (.amneshia) instead of global").action(async (remoteUrl, cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   try {
     console.log(`[Amneshia] Setting up Git-native cloud sync at: ${config.knowledgeDir}`);
     const res = await setupGitRemote(config.knowledgeDir, remoteUrl, cmdOpts.branch);
@@ -7250,13 +7596,13 @@ cloudCmd.command("setup <remoteUrl>").description("Initialize or link a Git remo
     console.log(`
 Next steps: Run "amneshia cloud push" or "amneshia cloud sync" to sync knowledge.`);
   } catch (err) {
-    console.error(`[Amneshia] Cloud setup failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Cloud setup failed: ${msg}`);
     process.exit(1);
   }
 });
-cloudCmd.command("status").description("Check cloud sync status, branch info, and uncommitted knowledge changes").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+cloudCmd.command("status").description("Check cloud sync status, branch info, and uncommitted knowledge changes").option("-l, --local", "Use local repository").action(async (cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   try {
     const status = await getCloudStatus(config.knowledgeDir);
     console.log(`
@@ -7277,13 +7623,13 @@ cloudCmd.command("status").description("Check cloud sync status, branch info, an
     }
     console.log("");
   } catch (err) {
-    console.error(`[Amneshia] Cloud status check failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Cloud status check failed: ${msg}`);
     process.exit(1);
   }
 });
-cloudCmd.command("pull").description("Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index").option("-b, --branch <branch>", "Branch to pull from", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+cloudCmd.command("pull").description("Pull latest knowledge updates from Git remote and rebuild SQLite FTS5 index").option("-b, --branch <branch>", "Branch to pull from", "main").option("-l, --local", "Use local repository").action(async (cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   try {
     console.log(`[Amneshia] Pulling from cloud remote into ${config.knowledgeDir}...`);
@@ -7294,15 +7640,15 @@ cloudCmd.command("pull").description("Pull latest knowledge updates from Git rem
     console.log(`  - Observations Reindexed: ${result.reindex.observations}`);
     console.log(`  - Relations Reindexed:    ${result.reindex.relations}`);
   } catch (err) {
-    console.error(`[Amneshia] Cloud pull failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Cloud pull failed: ${msg}`);
     db.close();
     process.exit(1);
   }
   db.close();
 });
-cloudCmd.command("push").description("Commit and push local knowledge markdown changes to Git remote").option("-m, --message <message>", "Custom commit message").option("-b, --branch <branch>", "Branch to push to", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+cloudCmd.command("push").description("Commit and push local knowledge markdown changes to Git remote").option("-m, --message <message>", "Custom commit message").option("-b, --branch <branch>", "Branch to push to", "main").option("-l, --local", "Use local repository").action(async (cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   try {
     console.log(`[Amneshia] Pushing knowledge to cloud remote...`);
     const result = await cloudPush(config.knowledgeDir, cmdOpts.message, cmdOpts.branch);
@@ -7313,13 +7659,13 @@ cloudCmd.command("push").description("Commit and push local knowledge markdown c
       console.log(`  - Commit:  ${result.commitHash}`);
     }
   } catch (err) {
-    console.error(`[Amneshia] Cloud push failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Cloud push failed: ${msg}`);
     process.exit(1);
   }
 });
-cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote changes, reindex, and push local changes").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote changes, reindex, and push local changes").option("-b, --branch <branch>", "Target git branch", "main").option("-l, --local", "Use local repository").action(async (cmdOpts, cmd) => {
+  const config = getConfigForCmd(cmdOpts, cmd);
   const db = new DatabaseLayer(config.dataDir);
   try {
     console.log(`[Amneshia] Running bidirectional cloud sync on ${config.knowledgeDir}...`);
@@ -7333,7 +7679,8 @@ cloudCmd.command("sync").description("Atomic bidirectional sync: pull remote cha
       console.log(`  - Commit Hash:            ${result.push.commitHash}`);
     }
   } catch (err) {
-    console.error(`[Amneshia] Cloud sync failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Cloud sync failed: ${msg}`);
     db.close();
     process.exit(1);
   }
@@ -7344,14 +7691,14 @@ cloudCmd.command("merge-driver <base> <ours> <theirs> [targetPath]").description
     mergeMarkdownFiles(base, ours, theirs, targetPath);
     process.exit(0);
   } catch (err) {
-    console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia Merge Driver] Conflict resolution failed: ${msg}`);
     process.exit(1);
   }
 });
-cloudCmd.command("setup-driver").description("Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)").option("-g, --global", "Configure globally across all Git repositories (~/.gitconfig)").option("-l, --local", "Use local repository").action(async (cmdOpts) => {
+cloudCmd.command("setup-driver").description("Configure and activate the 3-way git merge driver in knowledge directory or globally (~/.gitconfig)").option("-g, --global", "Configure globally across all Git repositories (~/.gitconfig)").option("-l, --local", "Use local repository").action(async (cmdOpts, cmd) => {
   const isGlobal = Boolean(cmdOpts.global);
-  const isLocal = cmdOpts.local || program.opts().local || fs14.existsSync(path15.join(process.cwd(), ".amneshia"));
-  const config = resolveStorageConfig(isLocal);
+  const config = getConfigForCmd(cmdOpts, cmd);
   try {
     const success = await setupMergeDriver(config.knowledgeDir, { isGlobal });
     if (success) {
@@ -7368,12 +7715,13 @@ cloudCmd.command("setup-driver").description("Configure and activate the 3-way g
       process.exit(1);
     }
   } catch (err) {
-    console.error(`[Amneshia] Setup merge driver failed: ${err.message}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Amneshia] Setup merge driver failed: ${msg}`);
     process.exit(1);
   }
 });
 program.command("update").description("Update Amneshia to the latest release (GitHub Releases / JSR)").option("-c, --check", "Check for available updates without installing").option("-f, --force", "Force re-installation even if already on the latest version").action(async (cmdOpts) => {
-  const currentVersion = "3.2.2";
+  const currentVersion = APP_VERSION;
   try {
     if (cmdOpts.check) {
       console.log(`[Amneshia] Checking for updates (current version: v${currentVersion})...`);
@@ -7401,8 +7749,9 @@ Run \x1B[1;36mamneshia update\x1B[0m to install the update.`);
     console.log(`
 ${result.message}`);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error(`
-\u274C Update failed: ${err.message}`);
+\u274C Update failed: ${msg}`);
     process.exit(1);
   }
 });
@@ -7416,13 +7765,13 @@ async function runDefault() {
       console.error("[Amneshia] Error: Background mode requires dashboard to be enabled.");
       process.exit(1);
     }
-    const logDir = path15.join(os7.homedir(), ".amneshia");
+    const logDir = path15.join(os6.homedir(), ".amneshia");
     fs14.mkdirSync(logDir, { recursive: true });
     const logFile = path15.join(logDir, "server.log");
     const out = fs14.openSync(logFile, "a");
     const err = fs14.openSync(logFile, "a");
     const args = process.argv.slice(2).filter((arg) => arg !== "--daemon" && arg !== "-d" && arg !== "--background" && arg !== "-b");
-    const child = spawn(process.argv[0], [process.argv[1], ...args], {
+    const child = spawn(process.argv[0], [process.argv[1], ...args, "--daemon"], {
       detached: true,
       stdio: ["ignore", out, err]
     });
@@ -7444,3 +7793,6 @@ await program.parseAsync(process.argv).catch((err) => {
   console.error("[Amneshia] Fatal error:", err);
   process.exit(1);
 });
+export {
+  APP_VERSION
+};

@@ -32,6 +32,7 @@ export const StorageView: React.FC<StorageViewProps> = ({
   const [name, setName] = useState('');
   const [pathStr, setPathStr] = useState('');
   const [autoExport, setAutoExport] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchTargets = async () => {
     setLoading(true);
@@ -40,6 +41,7 @@ export const StorageView: React.FC<StorageViewProps> = ({
       setTargets(data);
     } catch (err) {
       console.error('Failed to load export targets:', err);
+      showToast?.(err instanceof Error ? err.message : 'Failed to load export targets', 'error');
     } finally {
       setLoading(false);
     }
@@ -52,7 +54,6 @@ export const StorageView: React.FC<StorageViewProps> = ({
   const handleToggle = async (id: string) => {
     try {
       await api.toggleExportTarget(id);
-      await fetchTargets();
       triggerRefresh();
     } catch (err) {
       showToast?.(err instanceof Error ? err.message : String(err), 'error');
@@ -60,10 +61,10 @@ export const StorageView: React.FC<StorageViewProps> = ({
   };
 
   const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to remove this export target?')) return;
     try {
       await api.removeExportTarget(id);
       showToast?.('Target removed successfully', 'success');
-      await fetchTargets();
       triggerRefresh();
     } catch (err) {
       showToast?.(err instanceof Error ? err.message : String(err), 'error');
@@ -72,18 +73,20 @@ export const StorageView: React.FC<StorageViewProps> = ({
 
   const handleAddTarget = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !pathStr.trim()) return;
+    if (!name.trim() || !pathStr.trim() || isSubmitting) return;
 
+    setIsSubmitting(true);
     try {
       await api.addExportTarget(name.trim(), pathStr.trim(), 'markdown', autoExport);
       showToast?.('Export target added', 'success');
       setIsModalOpen(false);
       setName('');
       setPathStr('');
-      await fetchTargets();
       triggerRefresh();
     } catch (err) {
       showToast?.(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -104,6 +107,7 @@ export const StorageView: React.FC<StorageViewProps> = ({
   };
 
   const handleGC = async () => {
+    if (!window.confirm('Are you sure you want to run garbage collection? This will permanently purge decayed/stale facts.')) return;
     setGcing(true);
     try {
       const res = await api.gc();
@@ -214,11 +218,13 @@ export const StorageView: React.FC<StorageViewProps> = ({
           </div>
 
           <div className="space-y-2.5">
-            {loading && targets.length === 0 ? (
+            {loading && targets.length === 0 && (
               <div className="p-6 text-center text-xs font-mono text-zinc-500">Loading export targets…</div>
-            ) : targets.length === 0 ? (
+            )}
+            {!loading && targets.length === 0 && (
               <div className="p-6 text-center text-xs font-mono text-zinc-500">No export targets configured yet.</div>
-            ) : (
+            )}
+            {targets.length > 0 &&
               targets.map((t) => (
                 <div
                   key={t.id}
@@ -255,7 +261,7 @@ export const StorageView: React.FC<StorageViewProps> = ({
                   </button>
                 </div>
               </div>
-            )))}
+            ))}
           </div>
         </div>
       </div>
@@ -314,9 +320,10 @@ export const StorageView: React.FC<StorageViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold shadow-glow-purple"
+                    disabled={isSubmitting}
+                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold shadow-glow-purple"
                   >
-                    Save Target
+                    {isSubmitting ? 'Saving...' : 'Save Target'}
                   </button>
                 </div>
               </form>

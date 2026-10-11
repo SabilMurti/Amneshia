@@ -59,6 +59,10 @@ export class WordPieceTokenizer {
     if (this.vocab['[PAD]'] !== undefined) this.padId = this.vocab['[PAD]'];
   }
 
+  public getPadId(): number {
+    return this.padId;
+  }
+
   /**
    * Normalize text by lowercasing and normalizing whitespace.
    */
@@ -83,7 +87,15 @@ export class WordPieceTokenizer {
     const tokens: string[] = ['[CLS]'];
 
     for (const word of words) {
+      if (tokenIds.length >= this.maxSeqLength - 1) {
+        break;
+      }
+
       let start = 0;
+      const wordTokenIds: number[] = [];
+      const wordTokens: string[] = [];
+      let isBad = false;
+
       while (start < word.length) {
         let end = word.length;
         let matched = false;
@@ -92,9 +104,9 @@ export class WordPieceTokenizer {
           const substr = word.slice(start, end);
           const piece = start === 0 ? substr : `##${substr}`;
 
-          if (this.vocab[piece] !== undefined) {
-            tokenIds.push(this.vocab[piece]);
-            tokens.push(piece);
+          if (Object.prototype.hasOwnProperty.call(this.vocab, piece) && typeof this.vocab[piece] === 'number') {
+            wordTokenIds.push(this.vocab[piece]);
+            wordTokens.push(piece);
             start = end;
             matched = true;
             break;
@@ -103,18 +115,21 @@ export class WordPieceTokenizer {
         }
 
         if (!matched) {
-          tokenIds.push(this.unkId);
-          tokens.push('[UNK]');
+          isBad = true;
           break;
         }
 
-        if (tokenIds.length >= this.maxSeqLength - 1) {
+        if (tokenIds.length + wordTokenIds.length >= this.maxSeqLength - 1) {
           break;
         }
       }
 
-      if (tokenIds.length >= this.maxSeqLength - 1) {
-        break;
+      if (isBad) {
+        tokenIds.push(this.unkId);
+        tokens.push('[UNK]');
+      } else {
+        tokenIds.push(...wordTokenIds);
+        tokens.push(...wordTokens);
       }
     }
 

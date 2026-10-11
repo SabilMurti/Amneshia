@@ -8,5 +8,6 @@ startCommand:
     args:
       - -y
       - github:SabilMurti/Amneshia
+      - --no-dashboard
       - --tool-profile
       - core

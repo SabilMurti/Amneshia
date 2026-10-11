@@ -5,11 +5,11 @@ import type { KnowledgeGraph } from '../graph.js';
 const entitySchema = {
   entities: z.array(
     z.object({
-      name: z.string().min(1).describe('Unique human-readable entity name'),
-      entityType: z.string().min(1).describe('Entity type such as person, tool, project, preference, concept, or skill'),
-      domain: z.string().optional().describe('Domain scope such as personal or project:<name>'),
+      name: z.string().trim().min(1).describe('Unique human-readable entity name'),
+      entityType: z.string().trim().min(1).describe('Entity type such as person, tool, project, preference, concept, or skill'),
+      domain: z.string().trim().min(1).optional().describe('Domain scope such as personal or project:<name>'),
       visibility: z.enum(['public', 'restricted', 'private']).optional().describe('Access level for the entity'),
-      allowedAgents: z.array(z.string().min(1)).optional().describe('Explicit agent whitelist; empty means all agents'),
+      allowedAgents: z.array(z.string().trim().min(1)).optional().describe('Explicit agent whitelist; empty means all agents'),
     })
   ).min(1).describe('Entities to create'),
 };
@@ -40,7 +40,7 @@ export function registerEntityTools(server: McpServer, graph: KnowledgeGraph): v
     'delete_entities',
     'Delete entities by name. This removes the entity node and cascades to its attached observations and relations. Use with care when a memory branch is obsolete or incorrect.',
     {
-      names: z.array(z.string().min(1)).min(1).describe('Entity names to delete'),
+      names: z.array(z.string().trim().min(1)).min(1).describe('Entity names to delete'),
     },
     async ({ names }) => {
       try {

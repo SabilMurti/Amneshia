@@ -31,7 +31,7 @@
   border-radius: 1.5rem;
   padding: 0.375rem;
   box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.02);
-  transition: all 400ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: border-color 400ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 400ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .double-bezel-shell:hover {
@@ -48,13 +48,14 @@
   box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* Glassmorphism surfaces */
+/* Glassmorphism surfaces with GPU compositor promotion */
 .glass-panel {
   background: rgba(12, 10, 26, 0.72);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid rgba(168, 85, 247, 0.12);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  transform: translateZ(0);
 }
 
 .glass-panel-elevated {
@@ -63,19 +64,25 @@
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(168, 85, 247, 0.2);
   box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  transform: translateZ(0);
 }
 
 /* Button Island Architecture */
 .button-island {
   border-radius: 9999px;
-  transition: all 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .button-island:active {
   transform: scale(0.98);
 }
 
-/* Custom scrollbars */
+/* Standard & WebKit Custom scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 85, 247, 0.2) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -98,4 +105,46 @@
 .force-graph-container canvas {
   display: block;
   outline: none;
+}
+
+/* Entry Animation Utilities */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInFromTop {
+  from { transform: translateY(-0.5rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideInFromBottom {
+  from { transform: translateY(1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideInFromRight {
+  from { transform: translateX(1rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-in {
+  animation-duration: 250ms;
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fadeIn;
+}
+
+.slide-in-from-top-2 {
+  animation-name: slideInFromTop;
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: slideInFromBottom;
+}
+
+.slide-in-from-right-4 {
+  animation-name: slideInFromRight;
 }
