@@ -53,15 +53,33 @@ export interface CloudSyncResult {
  */
 async function git(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   try {
-    return await execFileAsync('git', args, { cwd });
+    return await execFileAsync('git', args, {
+      cwd,
+      env: {
+        ...process.env,
+        LC_ALL: 'C',
+        GIT_TERMINAL_PROMPT: '0',
+      },
+    });
   } catch (error: any) {
     const errorMsg = error.stderr || error.stdout || error.message;
     throw new Error(`Git error (${args[0]}): ${errorMsg.trim()}`);
   }
 }
+
 function validateBranchName(branch: string): void {
   if (!branch || typeof branch !== 'string' || branch.startsWith('-') || !/^[a-zA-Z0-9_\-\./]+$/.test(branch)) {
     throw new Error(`Invalid or unsafe branch name: ${branch}`);
+  }
+}
+
+function validateRemoteUrl(url: string): void {
+  if (!url || typeof url !== 'string' || url.startsWith('-')) {
+    throw new Error(`Invalid or unsafe remote URL: ${url}`);
+  }
+  const safeProtocol = /^(https?|ssh|git|file):\/\//i.test(url) || /^[\w.-]+@[\w.-]+:/.test(url) || path.isAbsolute(url);
+  if (!safeProtocol || /^ext::/i.test(url) || /^fd::/i.test(url)) {
+    throw new Error(`Unsupported or dangerous remote protocol in URL: ${url}`);
   }
 }
 
@@ -95,6 +113,7 @@ export async function setupGitRemote(
   branch = 'main'
 ): Promise<{ success: boolean; remoteUrl: string; branch: string }> {
   validateBranchName(branch);
+  validateRemoteUrl(remoteUrl);
   fs.mkdirSync(knowledgeDir, { recursive: true });
 
   const gitDir = path.join(knowledgeDir, '.git');
@@ -293,6 +312,13 @@ export async function cloudPull(
     fs.writeFileSync(gitignorePath, "*.db*\n*.log*\n.DS_Store\n", 'utf-8');
   }
   await setupMergeDriver(knowledgeDir);
+
+  // Verify merge status before reindexing to avoid indexing conflict markers
+  const statusRes = await git(knowledgeDir, ['status', '--porcelain']);
+  if (statusRes.stdout.includes('UU') || statusRes.stdout.includes('AA')) {
+    await git(knowledgeDir, ['merge', '--abort']).catch(() => {});
+    throw new Error(`Git pull resulted in unmerged conflicts. Merge aborted.`);
+  }
 
   // Rebuild SQLite FTS5 index from updated markdown files
   const reindex = reindexFromMarkdown(knowledgeDir, db);

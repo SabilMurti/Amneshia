@@ -42,7 +42,7 @@ function renderMarkdown(snapshot: GraphSnapshot): string {
     for (const entity of entities) {
       lines.push(`### ${entity.name}`);
       const activeObs = entity.observations.filter(
-        (o) => !o.supersedes && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
+        (o) => o.status === 'active' && (o.expiresAt === null || new Date(o.expiresAt).getTime() > Date.now())
       );
       if (activeObs.length === 0) {
         lines.push('- No observations yet');

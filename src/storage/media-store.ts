@@ -104,7 +104,11 @@ export async function storeMediaAsset(
   sourceFilePath: string,
   storageRoot: string
 ): Promise<StoredMediaResult> {
-  const resolvedSource = path.resolve(sourceFilePath);
+  const normalizedPath = path.resolve(sourceFilePath);
+  if (!fs.existsSync(normalizedPath)) {
+    throw new Error(`Media file not found: "${sourceFilePath}"`);
+  }
+  const resolvedSource = fs.realpathSync(normalizedPath);
 
   const sensitivePatterns = [
     /(?:^|[/\\])\.ssh(?:[/\\]|$)/i,
@@ -119,10 +123,6 @@ export async function storeMediaAsset(
     if (pattern.test(resolvedSource)) {
       throw new Error(`Security violation: reading sensitive file "${sourceFilePath}" is prohibited.`);
     }
-  }
-
-  if (!fs.existsSync(resolvedSource)) {
-    throw new Error(`Media file not found: "${sourceFilePath}"`);
   }
 
   const stat = fs.statSync(resolvedSource);

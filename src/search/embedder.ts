@@ -35,7 +35,11 @@ export class LocalOnnxEmbedder {
   private readonly maxSeqLength: number;
 
   constructor(config?: EmbedderConfig) {
-    this.modelName = config?.modelName || LocalOnnxEmbedder.DEFAULT_MODEL;
+    const rawModelName = config?.modelName || LocalOnnxEmbedder.DEFAULT_MODEL;
+    if (!/^[a-zA-Z0-9_.-]+$/.test(rawModelName)) {
+      throw new Error(`Invalid modelName: "${rawModelName}". Only alphanumeric characters, hyphens, underscores, and dots are permitted.`);
+    }
+    this.modelName = rawModelName;
     this.maxSeqLength = config?.maxSeqLength || 128;
     this.modelDir = config?.modelDir || path.join(os.homedir(), '.amneshia', 'models', this.modelName);
   }
@@ -88,7 +92,15 @@ export class LocalOnnxEmbedder {
       const resp = await fetch(tokenizerUrl);
       if (!resp.ok) throw new Error(`Failed to download tokenizer.json: ${resp.statusText}`);
       const buf = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(tokenizerPath, buf);
+      const tempPath = `${tokenizerPath}.${Date.now()}.tmp`;
+      try {
+        fs.writeFileSync(tempPath, buf);
+        fs.renameSync(tempPath, tokenizerPath);
+      } finally {
+        if (fs.existsSync(tempPath)) {
+          try { fs.unlinkSync(tempPath); } catch {}
+        }
+      }
     }
 
     if (!hasModel) {
@@ -98,8 +110,16 @@ export class LocalOnnxEmbedder {
       const resp = await fetch(modelUrl);
       if (!resp.ok) throw new Error(`Failed to download model_quantized.onnx: ${resp.statusText}`);
       const buf = Buffer.from(await resp.arrayBuffer());
-      fs.writeFileSync(targetModelPath, buf);
-      modelPath = targetModelPath;
+      const tempPath = `${targetModelPath}.${Date.now()}.tmp`;
+      try {
+        fs.writeFileSync(tempPath, buf);
+        fs.renameSync(tempPath, targetModelPath);
+        modelPath = targetModelPath;
+      } finally {
+        if (fs.existsSync(tempPath)) {
+          try { fs.unlinkSync(tempPath); } catch {}
+        }
+      }
     }
 
     console.log(`[Amneshia Embedder] Model files verified at ${this.modelDir}`);
@@ -242,7 +262,7 @@ export class LocalOnnxEmbedder {
     const results: Float32Array[] = new Array(texts.length);
 
     const isMobile = process.platform === 'android' || Boolean(process.env.TERMUX_VERSION);
-    const limit = isMobile ? 1 : Math.max(1, concurrency);
+    const limit = isMobile || this.backend === 'wasm' ? 1 : Math.max(1, concurrency);
 
     if (limit === 1) {
       for (let i = 0; i < texts.length; i++) {

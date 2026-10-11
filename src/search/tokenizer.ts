@@ -36,14 +36,20 @@ export class WordPieceTokenizer {
   }
 
   public loadFromJsonFile(filePath: string): void {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed.model && parsed.model.vocab) {
-      this.vocab = parsed.model.vocab;
-    } else if (typeof parsed === 'object') {
-      this.vocab = parsed;
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.model && parsed.model.vocab) {
+        this.vocab = parsed.model.vocab;
+      } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        this.vocab = parsed;
+      } else {
+        throw new Error('Invalid tokenizer JSON structure');
+      }
+      this.initSpecialTokens();
+    } catch (err) {
+      throw new Error(`Failed to load tokenizer vocab from ${filePath}: ${(err as Error).message}`);
     }
-    this.initSpecialTokens();
   }
 
   private initSpecialTokens(): void {
@@ -71,7 +77,7 @@ export class WordPieceTokenizer {
   public tokenize(text: string): EncodedTokens {
     const normalized = this.normalize(text);
     // Split into words and punctuation
-    const words = normalized.match(/[\w]+|[^\s\w]/g) || [];
+    const words = normalized.match(/[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu) || [];
 
     const tokenIds: number[] = [this.clsId];
     const tokens: string[] = ['[CLS]'];

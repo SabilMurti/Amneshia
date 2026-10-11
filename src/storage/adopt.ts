@@ -51,6 +51,10 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
   const dryRun = options.dryRun ?? false;
   const isMove = options.move ?? false;
 
+  if (sourceDir === targetDir) {
+    throw new Error(`Source and target Amneshia directories cannot be identical: ${sourceDir}`);
+  }
+
   if (!fs.existsSync(sourceDir)) {
     throw new Error(`Source Amneshia directory not found: ${sourceDir}`);
   }
@@ -61,7 +65,8 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
   }
 
   const sourceDb = new DatabaseLayer(sourceDir);
-  const targetDb = dryRun ? null : new DatabaseLayer(targetDir);
+  const targetDbExists = fs.existsSync(path.join(targetDir, 'memory.db'));
+  const targetDb = dryRun ? (targetDbExists ? new DatabaseLayer(targetDir) : null) : new DatabaseLayer(targetDir);
   const targetDualWrite = dryRun ? null : new DualWriteSync(path.join(targetDir, 'knowledge'), targetDb!);
 
   try {
@@ -115,6 +120,9 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
         }
         entityIdMap.set(sourceEntity.id, targetEntity.id);
       } else {
+        if (targetDb) {
+          targetEntity = targetDb.getEntityByName(sourceEntity.name);
+        }
         entityIdMap.set(sourceEntity.id, sourceEntity.id);
       }
 
@@ -123,8 +131,8 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
 
       // Existing observation contents in target entity to prevent duplicate insertions
       const existingContents = new Set<string>();
-      if (!dryRun && targetEntity) {
-        const existingObs = targetDb!.getObservationsByEntity(targetEntity.id);
+      if (targetDb && targetEntity) {
+        const existingObs = targetDb.getObservationsByEntity(targetEntity.id);
         for (const obs of existingObs) {
           existingContents.add(obs.content.trim().toLowerCase());
         }
@@ -138,9 +146,9 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
           continue;
         }
 
-        if (!dryRun && targetEntity) {
+        if (targetDb && targetEntity) {
           // Check for pre-insertion contradictions with active target observations
-          const contradiction = await checkContradiction(obs.content, targetEntity.id, targetDb!);
+          const contradiction = await checkContradiction(obs.content, targetEntity.id, targetDb);
           if (contradiction.hasContradiction) {
             result.contradictionWarnings.push({
               entity: sourceEntity.name,
@@ -149,25 +157,31 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
             });
           }
 
-          // Insert observation into target with preserved metadata and authority tier
-          targetDb!.addObservation(
-            targetEntity.id,
-            obs.content,
-            obs.source ?? 'adopted',
-            obs.importance,
-            obs.confidence,
-            obs.expiresAt ?? undefined,
-            obs.authorityTier as AuthorityTier,
-            obs.derivedFrom ?? []
-          );
+          if (!dryRun) {
+            // Insert observation into target with preserved metadata and authority tier
+            const newObs = targetDb.addObservation(
+              targetEntity.id,
+              obs.content,
+              obs.source ?? 'adopted',
+              obs.importance,
+              obs.confidence,
+              obs.expiresAt ?? undefined,
+              obs.authorityTier as AuthorityTier,
+              obs.derivedFrom ?? []
+            );
+
+            if (contradiction.hasContradiction && contradiction.conflictingObservation) {
+              targetDb.recordContradiction(
+                newObs.id,
+                contradiction.conflictingObservation.id,
+                targetEntity.id,
+                contradiction.reason ?? 'Contradiction detected against existing fact'
+              );
+            }
+          }
         }
 
         result.observationsAdopted++;
-      }
-
-      // Sync to target Markdown if not dry run
-      if (!dryRun && targetEntity) {
-        targetDualWrite!.syncEntity(targetEntity);
       }
     }
 
@@ -190,6 +204,16 @@ export async function adoptMemory(options: AdoptOptions = {}): Promise<AdoptResu
               }
             }
           }
+        }
+      }
+    }
+
+    // Sync all adopted entities to target Markdown AFTER relations have been created
+    if (!dryRun && targetDualWrite && targetDb) {
+      for (const entityName of result.entitiesAdopted) {
+        const ent = targetDb.getEntityByName(entityName);
+        if (ent) {
+          targetDualWrite.syncEntity(ent);
         }
       }
     }

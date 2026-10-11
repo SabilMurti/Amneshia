@@ -47,10 +47,10 @@ export function runMigrations(db: Database.Database): void {
       }
 
       // Auto-update superseded status if superseded is set
-      try {
-        db.exec("UPDATE observations SET status = 'superseded' WHERE supersedes IS NOT NULL AND status = 'active'");
-      } catch {
-        // Ignore if column doesn't match yet
+      if (columnNames.has('supersedes')) {
+        db.exec(
+          "UPDATE observations SET status = 'superseded' WHERE id IN (SELECT supersedes FROM observations WHERE supersedes IS NOT NULL) AND status = 'active'"
+        );
       }
     }
 
@@ -74,7 +74,6 @@ export function runMigrations(db: Database.Database): void {
       );
       CREATE INDEX IF NOT EXISTS idx_obs_emb_model ON observation_embeddings(model);
     `);
+    db.pragma('user_version = 4');
   }
-
-  db.pragma('user_version = 4');
 }

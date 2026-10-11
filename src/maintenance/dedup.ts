@@ -8,8 +8,8 @@ export interface DuplicatePair {
 }
 
 export function getJaccardSimilarity(s1: string, s2: string): number {
-  const words1 = new Set(s1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
-  const words2 = new Set(s2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean));
+  const words1 = new Set(s1.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean));
+  const words2 = new Set(s2.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean));
   if (words1.size === 0 || words2.size === 0) return 0;
   const intersection = new Set([...words1].filter((x) => words2.has(x)));
   const union = new Set([...words1, ...words2]);
@@ -20,9 +20,9 @@ export function findDuplicates(
   observations: Observation[],
   threshold?: number
 ): DuplicatePair[] {
-  const simThreshold =
-    threshold ??
-    (process.env.AMNESHIA_DEDUP_THRESHOLD ? parseFloat(process.env.AMNESHIA_DEDUP_THRESHOLD) : 0.8);
+  const envRaw = process.env.AMNESHIA_DEDUP_THRESHOLD;
+  const envParsed = envRaw ? parseFloat(envRaw) : NaN;
+  const simThreshold = threshold ?? (!Number.isNaN(envParsed) ? envParsed : 0.8);
 
   const duplicates: DuplicatePair[] = [];
   const supersededIds = new Set<string>();
@@ -52,7 +52,11 @@ export function findDuplicates(
         const sim = isExact ? 1.0 : getJaccardSimilarity(obs1.content, obs2.content);
 
         if (isExact || sim >= simThreshold) {
-          const older = new Date(obs1.createdAt).getTime() <= new Date(obs2.createdAt).getTime() ? obs1 : obs2;
+          const t1 = new Date(obs1.createdAt).getTime();
+          const t2 = new Date(obs2.createdAt).getTime();
+          const time1 = Number.isNaN(t1) ? 0 : t1;
+          const time2 = Number.isNaN(t2) ? 0 : t2;
+          const older = time1 <= time2 ? obs1 : obs2;
           const newer = older === obs1 ? obs2 : obs1;
 
           duplicates.push({

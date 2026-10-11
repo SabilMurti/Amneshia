@@ -4,6 +4,7 @@
  * Coordinates entity management, observations, relational traversal, and dual-write markdown sync.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import type { AddObservationInput, CreateEntityInput, CreateRelationInput, Entity, GraphSnapshot, MemoryStats, SearchResult, UpdateObservationInput, ExportTarget, RelationWithNames, Observation, MediaAsset, RememberMediaInput } from './types.js';
 import { DatabaseLayer } from './database.js';
@@ -370,6 +371,7 @@ export class KnowledgeGraph {
    */
   exportMemory(): ExportMemoryResult {
     const targets = this.database.getExportTargets();
+    exportToMarkdown(this, true);
     return { exported: targets.length, targets };
   }
 
@@ -393,7 +395,7 @@ export class KnowledgeGraph {
         /(?:^|[/\\])\.bashrc$/i,
         /(?:^|[/\\])\.zshrc$/i,
         /(?:^|[/\\])\.profile$/i,
-        /(?:^|[/\\])etc[/\\]/i,
+        /(?:^|[/\\])etc(?:[/\\]|$)/i,
       ];
       for (const pattern of sensitivePatterns) {
         if (pattern.test(resolvedTarget)) {
@@ -401,7 +403,7 @@ export class KnowledgeGraph {
         }
       }
       const autoExport = input.autoExport !== false ? 1 : 0;
-      return this.database.addExportTarget(input.name, input.path, input.format ?? 'markdown', autoExport);
+      return this.database.addExportTarget(input.name, resolvedTarget, input.format ?? 'markdown', autoExport);
     }
     if (input.action === 'remove') {
       if (!input.id) {
@@ -451,73 +453,90 @@ export class KnowledgeGraph {
     const storageRoot = this.getStorageRoot();
     const stored = await storeMediaAsset(input.filePath, storageRoot);
 
-    let entity = this.database.getEntityByName(input.entity);
-    if (!entity) {
-      entity = this.database.createEntity({
-        name: input.entity,
-        entityType: 'media',
-        domain: input.domain ?? 'personal',
-      });
-    }
+    try {
+      let entity: Entity;
+      let media: MediaAsset;
+      const observationIds: string[] = [];
+      const relationsCreated: string[] = [];
 
-    let media = this.database.getMediaByEntity(entity.id);
-    if (!media) {
-      media = this.database.createMediaAsset({
-        entityId: entity.id,
-        sha256: stored.sha256,
-        mimeType: stored.mimeType,
-        fileName: stored.fileName,
-        fileSize: stored.fileSize,
-        relativePath: stored.relativePath,
-      });
-    } else if (media.sha256 !== stored.sha256) {
-      this.database.deleteMediaByEntity(entity.id);
-      media = this.database.createMediaAsset({
-        entityId: entity.id,
-        sha256: stored.sha256,
-        mimeType: stored.mimeType,
-        fileName: stored.fileName,
-        fileSize: stored.fileSize,
-        relativePath: stored.relativePath,
-      });
-    }
-
-    const observationIds: string[] = [];
-    const tier = input.tier ?? 'contextual';
-    for (const fact of input.facts) {
-      const obs = this.database.addObservation(
-        entity.id,
-        fact,
-        'media-ingest',
-        'normal',
-        1.0,
-        undefined,
-        tier
-      );
-      observationIds.push(obs.id);
-    }
-
-    const relationsCreated: string[] = [];
-    if (input.relations && input.relations.length > 0) {
-      for (const rel of input.relations) {
-        const targetEntity = this.database.getEntityByName(rel.to);
-        if (targetEntity) {
-          const createdRel = this.database.createRelation(entity.id, targetEntity.id, rel.relationType);
-          relationsCreated.push(createdRel.id);
+      this.database.transaction(() => {
+        let ent = this.database.getEntityByName(input.entity);
+        if (!ent) {
+          ent = this.database.createEntity({
+            name: input.entity,
+            entityType: 'media',
+            domain: input.domain ?? 'personal',
+          });
         }
+        entity = ent;
+
+        let med = this.database.getMediaByEntity(entity.id);
+        if (!med) {
+          med = this.database.createMediaAsset({
+            entityId: entity.id,
+            sha256: stored.sha256,
+            mimeType: stored.mimeType,
+            fileName: stored.fileName,
+            fileSize: stored.fileSize,
+            relativePath: stored.relativePath,
+          });
+        } else if (med.sha256 !== stored.sha256) {
+          this.database.deleteMediaByEntity(entity.id);
+          med = this.database.createMediaAsset({
+            entityId: entity.id,
+            sha256: stored.sha256,
+            mimeType: stored.mimeType,
+            fileName: stored.fileName,
+            fileSize: stored.fileSize,
+            relativePath: stored.relativePath,
+          });
+        }
+        media = med;
+
+        const tier = input.tier ?? 'contextual';
+        for (const fact of input.facts) {
+          const obs = this.database.addObservation(
+            entity.id,
+            fact,
+            'media-ingest',
+            'normal',
+            1.0,
+            undefined,
+            tier
+          );
+          observationIds.push(obs.id);
+        }
+
+        if (input.relations && input.relations.length > 0) {
+          for (const rel of input.relations) {
+            const targetEntity = this.database.getEntityByName(rel.to);
+            if (targetEntity) {
+              const createdRel = this.database.createRelation(entity.id, targetEntity.id, rel.relationType);
+              relationsCreated.push(createdRel.id);
+            }
+          }
+        }
+      });
+
+      this.triggerAutoExport();
+
+      return {
+        ok: true,
+        entity: entity!,
+        media: media!,
+        observationIds,
+        relations: relationsCreated,
+        deduplicated: stored.deduplicated,
+      };
+    } catch (error) {
+      if (!stored.deduplicated) {
+        try {
+          const absPath = path.join(storageRoot, stored.relativePath);
+          if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
+        } catch {}
       }
+      throw error;
     }
-
-    this.triggerAutoExport();
-
-    return {
-      ok: true,
-      entity,
-      media,
-      observationIds,
-      relations: relationsCreated,
-      deduplicated: stored.deduplicated,
-    };
   }
 
   /**
@@ -556,7 +575,11 @@ export class KnowledgeGraph {
   }
 
   triggerAutoExport(targetEntityNames?: string | string[]) {
-    exportToMarkdown(this);
+    try {
+      exportToMarkdown(this);
+    } catch (err) {
+      console.warn('Failed to export to markdown:', err);
+    }
     if (this.dualWriteSync) {
       try {
         if (targetEntityNames) {

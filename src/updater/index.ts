@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 
@@ -118,7 +119,7 @@ export async function fetchLatestRelease(
         'User-Agent': 'Amneshia-Updater/3.2.2',
         Accept: 'application/json',
       },
-      signal: controller.signal,
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (jsrRes.ok) {
@@ -173,14 +174,29 @@ export function detectInstallEnvironment(): {
   let gitDir: string | undefined;
 
   try {
-    const cwdGit = path.join(process.cwd(), '.git');
-    if (fs.existsSync(cwdGit)) {
-      const pkgPath = path.join(process.cwd(), 'package.json');
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const repoCandidate = path.resolve(moduleDir, '../..');
+    const rootGit = path.join(repoCandidate, '.git');
+    if (fs.existsSync(rootGit)) {
+      const pkgPath = path.join(repoCandidate, 'package.json');
       if (fs.existsSync(pkgPath)) {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
         if (pkg.name === '@sabilmurti/amneshia' || pkg.name === 'amneshia') {
           isGitClone = true;
-          gitDir = process.cwd();
+          gitDir = repoCandidate;
+        }
+      }
+    }
+    if (!isGitClone) {
+      const cwdGit = path.join(process.cwd(), '.git');
+      if (fs.existsSync(cwdGit)) {
+        const pkgPath = path.join(process.cwd(), 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+          if (pkg.name === '@sabilmurti/amneshia' || pkg.name === 'amneshia') {
+            isGitClone = true;
+            gitDir = process.cwd();
+          }
         }
       }
     }
@@ -230,11 +246,12 @@ export async function performUpdate(options: {
       onProgress?.('Fetching latest changes from origin/main...');
       await execFileAsync('git', ['pull', '--rebase', 'origin', 'main'], { cwd: env.gitDir });
 
+      const execOptions = { cwd: env.gitDir, shell: process.platform === 'win32' };
       onProgress?.('Installing updated dependencies...');
-      await execFileAsync(env.pkgManager, ['install'], { cwd: env.gitDir });
+      await execFileAsync(env.pkgManager, ['install'], execOptions);
 
       onProgress?.('Rebuilding production bundles...');
-      await execFileAsync(env.pkgManager, ['run', 'build'], { cwd: env.gitDir });
+      await execFileAsync(env.pkgManager, ['run', 'build'], execOptions);
 
       return {
         success: true,

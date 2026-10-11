@@ -76,9 +76,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
 
     app.post('/messages', async (req, res) => {
       const sessionId = req.query.sessionId as string;
-      const transport = sessionId
-        ? sseTransports.get(sessionId)
-        : (sseTransports.values().next().value as SSEServerTransport | undefined);
+      if (!sessionId) {
+        res.status(400).json({ error: 'Missing required sessionId query parameter' });
+        return;
+      }
+      const transport = sseTransports.get(sessionId);
       if (!transport) {
         res.status(404).json({ error: 'SSE session not found or inactive' });
         return;
@@ -177,6 +179,19 @@ export async function startServer(options: StartServerOptions = {}): Promise<voi
         console.error(`[Amneshia] Express server error: ${err.message}`);
       }
     });
+
+    const cleanup = () => {
+      console.error('[Amneshia] Shutting down gracefully...');
+      httpListener.close();
+      sseTransports.clear();
+      try {
+        db.close();
+      } catch {}
+      process.exit(0);
+    };
+
+    process.once('SIGINT', cleanup);
+    process.once('SIGTERM', cleanup);
   }
 
   if (options.stdio !== false && !process.argv.includes('--daemon')) {

@@ -647,7 +647,8 @@ export class DatabaseLayer {
     authorityTier: AuthorityTier = 'contextual',
     derivedFrom: string[] = [],
     id?: string,
-    createdAt?: string
+    createdAt?: string,
+    supersedes?: string | null
   ): Observation {
     const now = nowIso();
     const observation: Observation = {
@@ -663,7 +664,7 @@ export class DatabaseLayer {
       lastAccessedAt: null,
       status: 'active',
       expiresAt: expiresAt ?? null,
-      supersedes: null,
+      supersedes: supersedes ?? null,
       createdAt: createdAt ?? now,
       updatedAt: now,
     };
@@ -849,28 +850,30 @@ export class DatabaseLayer {
     const queue: string[] = [observationId];
     const visited = new Set<string>();
 
-    // Mark the root observation as invalidated
-    this.setObservationStatus(observationId, 'invalidated');
+    return this.db.transaction(() => {
+      // Mark the root observation as invalidated
+      this.setObservationStatus(observationId, 'invalidated');
 
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
-      if (visited.has(currentId)) continue;
-      visited.add(currentId);
+      while (queue.length > 0) {
+        const currentId = queue.shift()!;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
 
-      // Traverse all descendants through intermediate nodes
-      const dependents = this.getDependentObservations(currentId, false);
-      for (const dep of dependents) {
-        if (!visited.has(dep.id)) {
-          if (dep.status === 'active') {
-            this.setObservationStatus(dep.id, 'stale');
-            staleIds.push(dep.id);
+        // Traverse all descendants through intermediate nodes
+        const dependents = this.getDependentObservations(currentId, false);
+        for (const dep of dependents) {
+          if (!visited.has(dep.id)) {
+            if (dep.status === 'active') {
+              this.setObservationStatus(dep.id, 'stale');
+              staleIds.push(dep.id);
+            }
+            queue.push(dep.id);
           }
-          queue.push(dep.id);
         }
       }
-    }
 
-    return { invalidatedIds: [observationId], staleIds };
+      return { invalidatedIds: [observationId], staleIds };
+    })();
   }
 
   // --- Contradiction Log Helpers ---
@@ -1002,7 +1005,12 @@ export class DatabaseLayer {
   getObservationEmbedding(observationId: string): Float32Array | null {
     const row = this.statements.getEmbedding.get(observationId) as { vector: Buffer; dimensions: number } | undefined;
     if (!row) return null;
-    return new Float32Array(row.vector.buffer, row.vector.byteOffset, row.dimensions);
+    const buf = row.vector;
+    if (buf.byteOffset % 4 === 0) {
+      return new Float32Array(buf.buffer, buf.byteOffset, row.dimensions);
+    }
+    const slice = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return new Float32Array(slice, 0, row.dimensions);
   }
 
   getUnembeddedObservations(model = LocalOnnxEmbedder.DEFAULT_MODEL): { id: string; entity_id: string; content: string }[] {
@@ -1038,7 +1046,10 @@ export class DatabaseLayer {
     const dim = queryVector.length;
     for (const r of rows) {
       if (r.status === 'invalidated' || r.status === 'decayed') continue;
-      const v = new Float32Array(r.vector.buffer, r.vector.byteOffset, dim);
+      const buf = r.vector;
+      const v = buf.byteOffset % 4 === 0
+        ? new Float32Array(buf.buffer, buf.byteOffset, dim)
+        : new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), 0, dim);
       let dot = 0;
       for (let i = 0; i < dim; i++) {
         dot += queryVector[i] * v[i];
@@ -1209,6 +1220,10 @@ export class DatabaseLayer {
       changedBy: row.changed_by,
       changedAt: row.changed_at,
     }));
+  }
+
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   close(): void {

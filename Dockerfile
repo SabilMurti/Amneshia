@@ -37,8 +37,12 @@ RUN apt-get purge -y --auto-remove python3 make g++ && rm -rf /var/lib/apt/lists
 
 COPY --from=builder /app/dist ./dist
 
-# Create knowledge directory
-RUN mkdir -p /app/.amneshia/knowledge
+# Create knowledge directory and set permissions for non-root node user
+RUN mkdir -p /app/.amneshia/knowledge && chown -R node:node /app
+
+VOLUME ["/app/.amneshia"]
+
+USER node
 
 EXPOSE 3457
 

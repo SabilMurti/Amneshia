@@ -20,14 +20,19 @@ export function computeDecayScore(obs: Observation, nowMs: number = Date.now()):
     return 1.0;
   }
 
-  if (obs.expiresAt && new Date(obs.expiresAt).getTime() <= nowMs) {
-    return 0.0;
+  if (obs.expiresAt) {
+    const exp = new Date(obs.expiresAt).getTime();
+    if (!Number.isNaN(exp) && exp <= nowMs) {
+      return 0.0;
+    }
   }
 
   const tierWeight = TIER_WEIGHTS[obs.authorityTier] ?? 0.5;
   const maxDays = TIER_MAX_INACTIVE_DAYS[obs.authorityTier] ?? 90;
 
-  const lastActivity = obs.lastAccessedAt ? new Date(obs.lastAccessedAt).getTime() : new Date(obs.createdAt).getTime();
+  const rawDate = obs.lastAccessedAt || obs.createdAt;
+  const parsed = new Date(rawDate).getTime();
+  const lastActivity = Number.isNaN(parsed) ? nowMs : parsed;
   const daysInactive = Math.max(0, (nowMs - lastActivity) / (1000 * 60 * 60 * 24));
 
   if (daysInactive >= maxDays) {
@@ -85,9 +90,16 @@ export function applyDecay(
   for (const entity of snapshot.entities) {
     const { decayed } = evaluateDecay(entity.observations, threshold, nowMs);
     for (const obs of decayed) {
-      db.setObservationStatus(obs.id, 'decayed');
       decayedIds.push(obs.id);
     }
+  }
+
+  if (decayedIds.length > 0) {
+    db.transaction(() => {
+      for (const id of decayedIds) {
+        db.setObservationStatus(id, 'decayed');
+      }
+    });
   }
 
   return {
