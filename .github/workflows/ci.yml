@@ -36,24 +36,17 @@ jobs:
             package-lock.json
             dashboard/package-lock.json
 
-      - name: Install Root Dependencies
-        run: npm ci
+      - name: Install Dependencies
+        run: |
+          npm ci
+          cd dashboard && npm ci
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build Backend Engine (TSUP)
+      - name: Build Dashboard & Engine
         run: npm run build
 
       - name: Run Vitest Test Suite
         run: npm test
 
-      - name: Install Dashboard Dependencies
-        run: |
-          cd dashboard
-          npm ci
-
-      - name: Build React Dashboard (Vite)
-        run: |
-          cd dashboard
-          npm run build

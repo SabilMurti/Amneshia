@@ -17,8 +17,9 @@
     "README.md"
   ],
   "scripts": {
+    "build:engine": "tsup src/index.ts --format esm --dts --clean --no-splitting",
     "build:dashboard": "cd dashboard && npm run build",
-    "build": "npm run build:dashboard && tsup src/index.ts --format esm --dts --clean --no-splitting",
+    "build": "npm run build:dashboard && npm run build:engine",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",

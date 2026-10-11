@@ -38,22 +38,18 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          npm ci
+          cd dashboard && npm ci
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build Engine (TSUP)
+      - name: Build Dashboard & Engine
         run: npm run build
 
       - name: Run Test Suite
         run: npm test
-
-      - name: Build Dashboard (Vite)
-        run: |
-          cd dashboard
-          npm ci
-          npm run build
 
       - name: Package Release Tarball
         run: |
@@ -157,7 +153,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c062e49cdd09d17208d1f2e8251e604f76239169 # v2.0.8
         with:
-          tag_name: ${{ github.event.inputs.tag_name || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
             *.tgz
             SHA256SUMS
