@@ -140,6 +140,34 @@ const createSpriteLabel = (text: string, subtext?: string, color: string = '#c08
   return sprite;
 };
 
+const disposeThreeObject = (obj: THREE.Object3D) => {
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh || (child as THREE.LineSegments).isLineSegments) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) {
+        mesh.geometry.dispose();
+      }
+      if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((mat) => mat.dispose());
+        } else {
+          mesh.material.dispose();
+        }
+      }
+    } else if ((child as THREE.Sprite).isSprite) {
+      const sprite = child as THREE.Sprite;
+      if (sprite.geometry) {
+        sprite.geometry.dispose();
+      }
+      if (sprite.material) {
+        if (sprite.material.map) {
+          sprite.material.map.dispose();
+        }
+        sprite.material.dispose();
+      }
+    }
+  });
+};
 export const GraphView: React.FC<GraphViewProps> = ({
   selectedDomain,
   searchQuery,
@@ -167,6 +195,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 1000, height: 700 });
   const fgRef = useRef<any>(null);
+
+  const nodeObjectsRef = useRef<Map<string | number, THREE.Object3D>>(new Map());
+
+  // Cleanup Three.js resources on unmount or 3D view toggle
+  useEffect(() => {
+    return () => {
+      nodeObjectsRef.current.forEach((obj) => {
+        disposeThreeObject(obj);
+      });
+      nodeObjectsRef.current.clear();
+    };
+  }, [is3D]);
 
   // ResizeObserver for reliable dimensions
   useEffect(() => {
@@ -453,9 +493,15 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const baseVal = n.val || (isObs ? 4 : 8);
     const radius = Math.sqrt(baseVal) * (isObs ? 1.2 : 1.8);
 
+    if (nodeObjectsRef.current.has(n.id)) {
+      const prevObj = nodeObjectsRef.current.get(n.id);
+      if (prevObj) {
+        disposeThreeObject(prevObj);
+      }
+    }
+
     const group = new THREE.Group();
     (group as any).__data = n;
-
     if (isObs) {
       // Glowing electric violet sphere for facts/observations
       const geometry = new THREE.SphereGeometry(radius, 16, 16);
@@ -508,6 +554,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       }
     }
 
+    nodeObjectsRef.current.set(n.id, group);
     return group;
   }, [hoveredNode, highlightNodes, selectedNode, showLabels]);
 

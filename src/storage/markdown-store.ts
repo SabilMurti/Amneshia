@@ -15,6 +15,7 @@ export interface ParsedObservation {
 
 export interface ParsedRelation {
   relationType: string;
+  direction?: '->' | '<-';
   targetName: string;
 }
 
@@ -88,7 +89,7 @@ export function serializeEntity(
     metaParts.push(`status: ${obs.status}`);
 
     if (obs.supersedes) {
-      metaParts.push(`superseded_by: ${obs.supersedes}`);
+      metaParts.push(`supersedes: ${obs.supersedes}`);
     }
 
     obsLines.push(`- ${formattedText}\n  \`${metaParts.join(' | ')}\``);
@@ -235,7 +236,7 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
           if (k === 'id') obsId = v;
           else if (k === 'confidence') confidence = parseFloat(v) || 1.0;
           else if (k === 'status') status = v as ObservationStatus;
-          else if (k === 'superseded_by') supersedes = v;
+          else if (k === 'supersedes' || k === 'superseded_by') supersedes = v;
           else if (k === 'derived_from') {
             const arrMatch = v.match(/\[(.*)\]/);
             if (arrMatch && arrMatch[1]) {
@@ -264,11 +265,12 @@ export function parseEntityMarkdown(content: string): ParsedMarkdownEntity {
     const relBlock = relSectionMatch[1];
     const lines = relBlock.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- `'));
     for (const line of lines) {
-      const relMatch = line.match(/^- `(.*?)`\s*(?:->|<-)\s*(.*)$/);
+      const relMatch = line.match(/^- `(.*?)`\s*(->|<-)\s*(.*)$/);
       if (relMatch) {
         relations.push({
           relationType: relMatch[1],
-          targetName: relMatch[2].trim(),
+          direction: relMatch[2] as '->' | '<-',
+          targetName: relMatch[3].trim(),
         });
       }
     }
@@ -311,7 +313,9 @@ export function saveEntityMarkdown(
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const content = serializeEntity(entity, observations, relations, media);
-  fs.writeFileSync(filePath, content, 'utf-8');
+  const tempPath = path.join(dir, `.tmp.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`);
+  fs.writeFileSync(tempPath, content, 'utf-8');
+  fs.renameSync(tempPath, filePath);
   return filePath;
 }
 

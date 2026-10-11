@@ -39,7 +39,14 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   const [selectedEntityObs, setSelectedEntityObs] = useState<Observation[]>([]);
   const [selectedEntityRels, setSelectedEntityRels] = useState<RelationWithNames[]>([]);
   const [entityFilter, setEntityFilter] = useState<string>('');
+  const [debouncedFilter, setDebouncedFilter] = useState<string>('');
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFilter(entityFilter);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [entityFilter]);
   // Modals state
   const [showAddEntity, setShowAddEntity] = useState(false);
   const [showAddObservation, setShowAddObservation] = useState(false);
@@ -87,7 +94,10 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   };
 
   useEffect(() => {
-    loadData();
+    const timer = setTimeout(() => {
+      loadData();
+    }, 250);
+    return () => clearTimeout(timer);
   }, [selectedDomain, searchQuery, refreshTrigger]);
 
   useEffect(() => {
@@ -313,7 +323,7 @@ export const MemoryTable: React.FC<MemoryTableProps> = ({
   };
 
   const entitiesList = (snapshot?.entities || []).filter((e) =>
-    entityFilter ? e.name.toLowerCase().includes(entityFilter.toLowerCase()) || e.domain.toLowerCase().includes(entityFilter.toLowerCase()) : true
+    debouncedFilter ? e.name.toLowerCase().includes(debouncedFilter.toLowerCase()) || e.domain.toLowerCase().includes(debouncedFilter.toLowerCase()) : true
   );
 
   return (

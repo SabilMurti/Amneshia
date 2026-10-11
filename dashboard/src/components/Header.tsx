@@ -34,11 +34,17 @@ export const Header: React.FC<HeaderProps> = ({
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onSearch(query);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query, onSearch]);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSearch(query);
   };
-
   // Keyboard shortcut '/' to focus search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -70,7 +76,6 @@ export const Header: React.FC<HeaderProps> = ({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              onSearch(e.target.value);
             }}
             className="w-full bg-[#0e0c1f]/80 border border-purple-500/20 rounded-xl px-3.5 py-2 pl-10 pr-9 text-xs font-mono text-purple-100 placeholder-purple-300/40 focus:outline-none focus:border-purple-400/60 focus:ring-2 focus:ring-purple-500/25 transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)]"
           />

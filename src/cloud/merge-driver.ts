@@ -98,7 +98,7 @@ export function serializeParsedEntity(entity: MergedMarkdownEntity): string {
     metaParts.push(`status: ${obs.status}`);
 
     if (obs.supersedes) {
-      metaParts.push(`superseded_by: ${obs.supersedes}`);
+      metaParts.push(`supersedes: ${obs.supersedes}`);
     }
 
     obsLines.push(`- ${formattedText}\n  \`${metaParts.join(' | ')}\``);
@@ -441,9 +441,11 @@ export function mergeMarkdownFiles(
 
   const merged = mergeParsedEntities(baseEntity, oursEntity, theirsEntity);
   const serialized = serializeParsedEntity(merged);
-
-  fs.writeFileSync(destination, serialized, 'utf-8');
-
+  const destDir = path.dirname(path.resolve(destination));
+  fs.mkdirSync(destDir, { recursive: true });
+  const tempPath = path.join(destDir, `.tmp.${path.basename(destination)}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`);
+  fs.writeFileSync(tempPath, serialized, 'utf-8');
+  fs.renameSync(tempPath, destination);
   return {
     success: true,
     outputPath: destination,

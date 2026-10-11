@@ -101,10 +101,10 @@ export function registerCoreTools(
           contradictionWarnings: warnings.length > 0 ? warnings : undefined,
         });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to remember facts',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -196,10 +196,10 @@ export function registerCoreTools(
           relationalContext,
         });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to recall memory',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -272,15 +272,21 @@ export function registerCoreTools(
           });
         }
 
-        return textContent({
-          ok: false,
-          error: `Target not found: "${target}" is neither an existing entity name nor a known observation ID.`,
-        });
+        return {
+          isError: true,
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              ok: false,
+              error: `Target not found: "${target}" is neither an existing entity name nor a known observation ID.`,
+            }),
+          }],
+        };
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to forget target',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -300,10 +306,10 @@ export function registerCoreTools(
         const text = graph.getContext(query, depth, limit, domain);
         return textContent(text);
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to retrieve context',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -434,10 +440,10 @@ export function registerCoreTools(
           contradictionWarnings: warnings.length > 0 ? warnings : undefined,
         });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to remember media',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -458,10 +464,10 @@ export function registerCoreTools(
           cloudStatus: cloud,
         });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to retrieve graph status',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -475,15 +481,18 @@ export function registerCoreTools(
       try {
         const dualWrite = graph.getDualWriteSync();
         if (!dualWrite) {
-          return textContent({ ok: false, error: 'Dual-write markdown storage is not active in this session.' });
+          return {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'Dual-write markdown storage is not active in this session.' }) }],
+          };
         }
         const result = dualWrite.reindex();
         return textContent({ ok: true, result });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Failed to reindex from markdown',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -503,7 +512,10 @@ export function registerCoreTools(
       try {
         const dualWrite = graph.getDualWriteSync();
         if (!dualWrite) {
-          return textContent({ ok: false, error: 'Dual-write storage is not initialized.' });
+          return {
+            isError: true,
+            content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'Dual-write storage is not initialized.' }) }],
+          };
         }
         const knowledgeDir = dualWrite.getKnowledgeDir();
 
@@ -523,10 +535,10 @@ export function registerCoreTools(
         const syncRes = await cloudSync(knowledgeDir, db, message);
         return textContent({ ok: true, sync: syncRes });
       } catch (error) {
-        return textContent({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Sync operation failed',
-        });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

@@ -28,7 +28,10 @@ export function registerEntityTools(server: McpServer, graph: KnowledgeGraph): v
         const created = graph.createEntities(entities);
         return textContent({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to create entities' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -44,7 +47,10 @@ export function registerEntityTools(server: McpServer, graph: KnowledgeGraph): v
         const deleted = graph.deleteEntities(names);
         return textContent({ ok: true, deleted, requested: names.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to delete entities' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

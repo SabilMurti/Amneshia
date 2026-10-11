@@ -17,7 +17,10 @@ export function registerUtilityTools(server: McpServer, graph: KnowledgeGraph): 
         const writes = exportToMarkdown(graph);
         return textContent({ ok: true, exported: writes.length, writes });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to export memory' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -37,7 +40,10 @@ export function registerUtilityTools(server: McpServer, graph: KnowledgeGraph): 
         const result = graph.manageExportTargets({ action, name, path, format, id });
         return textContent({ ok: true, result });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to manage export targets' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

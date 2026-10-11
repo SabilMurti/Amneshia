@@ -30,8 +30,8 @@ export function fuseRRF(
   semanticResults: { entity: Entity; observations: Observation[]; matchedContent: string; similarity: number }[],
   options?: HybridFusionOptions
 ): SearchResult[] {
-  const k = options?.k || 60;
-  const limit = options?.limit || 20;
+  const k = options?.k ?? 60;
+  const limit = options?.limit ?? 20;
 
   const entityMap = new Map<string, ScoredMatch>();
 

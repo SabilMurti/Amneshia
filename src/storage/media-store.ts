@@ -152,7 +152,9 @@ export async function storeMediaAsset(
   if (fs.existsSync(absoluteDestPath)) {
     deduplicated = true;
   } else {
-    fs.copyFileSync(resolvedSource, absoluteDestPath);
+    const tempPath = path.join(destDir, `.tmp.${path.basename(absoluteDestPath)}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}`);
+    fs.copyFileSync(resolvedSource, tempPath);
+    fs.renameSync(tempPath, absoluteDestPath);
   }
 
   return {
@@ -183,6 +185,7 @@ export function findOrphanMediaBlobs(storageRoot: string, activeHashes: Set<stri
         scan(fullPath);
       } else if (entry.isFile()) {
         const base = path.basename(entry.name);
+        if (base.startsWith('.')) continue;
         const dotIdx = base.indexOf('.');
         const fileHash = dotIdx > 0 ? base.slice(0, dotIdx) : base;
         if (!activeHashes.has(fileHash)) {

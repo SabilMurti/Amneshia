@@ -72,21 +72,33 @@ export function reindexFromMarkdown(knowledgeDir: string, db: DatabaseLayer): Re
         obs.authorityTier,
         obs.derivedFrom,
         obs.id,
-        item.createdAt
+        item.createdAt,
+        obs.supersedes
       );
 
       if (obs.status && obs.status !== 'active') {
         db.setObservationStatus(created.id, obs.status);
       }
 
+      existingObsIds.add(created.id);
+      existingObsContents.add(created.content);
       observationCount++;
     }
 
+    const seenRelations = new Set<string>();
     for (const rel of item.relations) {
       const targetEntity = db.getEntityByName(rel.targetName);
       if (targetEntity) {
-        db.createRelation(entity.id, targetEntity.id, rel.relationType);
-        relationCount++;
+        const fromId = rel.direction === '<-' ? targetEntity.id : entity.id;
+        const toId = rel.direction === '<-' ? entity.id : targetEntity.id;
+        const relKey = `${fromId}:${toId}:${rel.relationType}`;
+        const existingRels = db.getRelationsByEntity(fromId);
+        const alreadyExists = existingRels.some((r) => r.toEntity === toId && r.relationType === rel.relationType);
+        if (!alreadyExists && !seenRelations.has(relKey)) {
+          seenRelations.add(relKey);
+          db.createRelation(fromId, toId, rel.relationType);
+          relationCount++;
+        }
       }
     }
   }

@@ -26,7 +26,10 @@ export function registerRelationTools(server: McpServer, graph: KnowledgeGraph):
         const created = graph.createRelations(relations);
         return textContent({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to create relations' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -42,7 +45,10 @@ export function registerRelationTools(server: McpServer, graph: KnowledgeGraph):
         const deleted = graph.deleteRelations(ids);
         return textContent({ ok: true, deleted, requested: ids.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to delete relations' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

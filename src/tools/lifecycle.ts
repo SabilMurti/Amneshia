@@ -18,7 +18,10 @@ export function registerLifecycleTools(server: McpServer, graph: KnowledgeGraph,
         const removed = graph.cleanupExpired();
         return textContent({ ok: true, removed });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to cleanup expired observations' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -32,7 +35,10 @@ export function registerLifecycleTools(server: McpServer, graph: KnowledgeGraph,
         const stats = graph.getStats();
         return textContent({ ok: true, stats });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to get stats' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -48,7 +54,10 @@ export function registerLifecycleTools(server: McpServer, graph: KnowledgeGraph,
         const result = runMaintenance(graph, db, domain);
         return textContent({ ok: true, result });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to run memory maintenance' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

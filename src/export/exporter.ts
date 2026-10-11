@@ -255,8 +255,8 @@ export class MemoryExporter {
         INSERT INTO observations (
           id, entity_id, content, source, importance, status,
           confidence, access_count, authority_tier, derived_from,
-          created_at, updated_at, expires_at, last_accessed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, updated_at, expires_at, last_accessed_at, supersedes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const insertRelation = exportDb.prepare(`
@@ -313,7 +313,8 @@ export class MemoryExporter {
               obs.createdAt,
               obs.updatedAt,
               obs.expiresAt ?? null,
-              obs.lastAccessedAt ?? null
+              obs.lastAccessedAt ?? null,
+              obs.supersedes ?? null
             );
           }
         }

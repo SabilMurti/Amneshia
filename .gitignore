@@ -3,8 +3,7 @@ node_modules/
 dashboard/node_modules/
 
 # Environment & OS
-.env
-.env.local
+.env*
 .DS_Store
 *.log
 

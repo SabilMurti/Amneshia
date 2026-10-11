@@ -37,7 +37,10 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
         const created = await graph.addObservations(observations as any);
         return textContent({ ok: true, created, count: created.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to add observations' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -53,7 +56,10 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
         const deleted = graph.deleteObservations(ids);
         return textContent({ ok: true, deleted, requested: ids.length });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to delete observations' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -79,7 +85,10 @@ export function registerObservationTools(server: McpServer, graph: KnowledgeGrap
         });
         return textContent({ ok: true, updated });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to update observation' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );

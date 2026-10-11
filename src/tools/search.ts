@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { KnowledgeGraph } from '../graph.js';
 
 function textContent(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
 }
 
 export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): void {
@@ -20,7 +20,10 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
         const result = graph.searchMemory(query, limit ?? 20, domain);
         return textContent({ ok: true, ...result });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to search memory' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -38,7 +41,10 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
         const result = graph.searchRelevantMemory(query, limit ?? 20, domain);
         return textContent({ ok: true, ...result });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to search memory' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -55,7 +61,10 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
         const snapshot = graph.readGraph(domain, entityType);
         return textContent({ ok: true, snapshot });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to read graph' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -71,7 +80,10 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
         const snapshot = graph.openNodes(names);
         return textContent({ ok: true, snapshot });
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to open nodes' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
@@ -90,7 +102,10 @@ export function registerSearchTools(server: McpServer, graph: KnowledgeGraph): v
         const context = graph.getContext(query, depth ?? 1, limit ?? 5, domain);
         return textContent(context);
       } catch (error) {
-        return textContent({ ok: false, error: error instanceof Error ? error.message : 'Failed to get context' });
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }],
+        };
       }
     }
   );
