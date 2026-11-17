@@ -4503,12 +4503,13 @@ function reindexFromMarkdown(knowledgeDir, db) {
     const existingObsContents = new Set(existingObs.map((o) => o.content));
     const existingObsIds = new Set(existingObs.map((o) => o.id));
     for (const obs of item.observations) {
-      if (obs.id && existingObsIds.has(obs.id)) {
+      if (obs.id && (existingObsIds.has(obs.id) || db.getObservationById(obs.id))) {
         continue;
       }
       if (existingObsContents.has(obs.content)) {
         continue;
       }
+      const validSupersedes = obs.supersedes && db.getObservationById(obs.supersedes) ? obs.supersedes : void 0;
       const created = db.addObservation(
         entity.id,
         obs.content,
@@ -4520,7 +4521,7 @@ function reindexFromMarkdown(knowledgeDir, db) {
         obs.derivedFrom,
         obs.id,
         item.createdAt,
-        obs.supersedes
+        validSupersedes
       );
       if (obs.status && obs.status !== "active") {
         db.setObservationStatus(created.id, obs.status);
